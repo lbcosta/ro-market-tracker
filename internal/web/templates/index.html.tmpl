@@ -7,9 +7,10 @@
   <link rel="stylesheet" href="/static/style.css">
   <script src="/static/htmx.min.js"></script>
   <script src="/static/app.js" defer></script>
+  <script src="/static/watchlist.js" defer></script>
 </head>
 <body>
-  <main class="container">
+  <main class="page">
     <h1>RO Market Tracker</h1>
     <p class="subtitle">Preços do mercado de comércio do Ragnarok Online LATAM</p>
 
@@ -25,7 +26,15 @@
       </button>
     </form>
 
-    <div id="results"></div>
+    <div class="results-column">
+      <div id="results"></div>
+    </div>
+
+    <aside class="watchlist-panel" aria-label="Watchlist">
+      <h2>Watchlist</h2>
+      <ul id="watchlist-list" class="watchlist-list"></ul>
+      <p id="watchlist-empty" class="empty">Nenhum item na watchlist.</p>
+    </aside>
   </main>
 </body>
 </html>

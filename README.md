@@ -55,6 +55,37 @@ clicar uma terceira vez reexpande mostrando os mesmos dados instantaneamente,
 sem refazer a consulta — só um `toggleRow` em `internal/web/static/app.js`
 alternando a visibilidade, nenhuma requisição nova ao upstream.
 
+### Watchlist
+
+Painel fixo do lado direito da página. O botão "+ Watchlist", ao lado do
+cabeçalho "Resultados de \<item\>", adiciona o item buscado (identificado
+por servidor + itemId, para não duplicar) a uma lista mantida inteiramente
+no navegador via `localStorage` (`internal/web/static/watchlist.js`) — não
+há conta de usuário nem persistência no servidor; a lista é local a cada
+navegador.
+
+Cada linha da watchlist mostra:
+
+- Uma luz verde (monitorando) ou vermelha (não monitorando), que alterna de
+  estado ao clicar — por enquanto é só um estado local, sem efeito além do
+  indicador visual (o que a ativação/desativação vai implicar ainda será
+  definido).
+- Nome do item e, se a loja de menor preço for uma arma ou armadura
+  (`databaseType` "weapon"/"armor"), o refino dessa unidade específica.
+- Preço alvo (ainda sem forma de editar — fica em "—") e o menor preço
+  anunciado agora.
+- Um "×" para remover da lista.
+
+O preço atual (e o refino, quando aplicável) é a única parte que depende do
+servidor: `GET /web/watchlist/price?server=...&itemId=...&item=...` refaz a
+mesma busca por nome usada na página principal, filtra pelo `itemId` exato
+(uma busca por nome pode casar itens diferentes — ver teste com "Espada",
+que retorna itens com itemId 7110, 24246 e 600009), pega o menor preço
+entre eles e, se a loja mais barata for equipamento, busca o refino dela
+via `GetStoreDetail`. Ligar/desligar e remover um item são só atualizações
+de `localStorage` + DOM, sem chamada ao servidor; adicionar um item novo
+busca o preço só dele (os demais já carregados não são recarregados).
+
 O HTMX é vendorizado localmente em `internal/web/static/htmx.min.js`
 (embutido no binário via `go:embed`) — não depende de CDN em runtime.
 

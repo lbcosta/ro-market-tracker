@@ -5,7 +5,9 @@
 {{else}}
 <div class="results-header">
   <h2 class="results-title">Resultados de {{.ItemName}}</h2>
-  <button type="button" class="watchlist-button">+ Watchlist</button>
+  <button type="button" class="watchlist-button"
+      data-server="{{.Server}}" data-item-id="{{.ItemID}}" data-item-name="{{.ItemName}}"
+      onclick="addToWatchlist(this)">+ Watchlist</button>
 </div>
 <table class="results-table">
   <thead>

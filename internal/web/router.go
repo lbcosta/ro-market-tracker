@@ -14,5 +14,6 @@ func RegisterRoutes(mux *http.ServeMux, client *gnjoy.Client) {
 	mux.HandleFunc("GET /{$}", h.Index)
 	mux.HandleFunc("GET /web/search", h.Search)
 	mux.HandleFunc("GET /web/shops/{svrId}/{mapId}/{ssi}/expand", h.Expand)
+	mux.HandleFunc("GET /web/watchlist/price", h.WatchlistPrice)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", staticHandler()))
 }
