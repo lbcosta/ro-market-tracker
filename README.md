@@ -78,6 +78,15 @@ Detalhes de uma loja específica (posição no mapa, nome da loja, personagem
 vendedor, preço e quantidade). `svrId`, `mapId` e `ssi` vêm do resultado da
 busca acima.
 
+Inclui o campo `refine`: o nível de refino do equipamento (ex.: `7` para
+"+7"). **A busca (`/api/v1/shops`) não traz o refino** — o site só expõe
+essa informação embutida como um prefixo `+N` no nome completo do item
+retornado por esta rota de detalhe (`itemFullName`, ex.:
+`"+7Laço da Celine[1]"`), o que faz anúncios do "mesmo" item aparecerem na
+busca com preços muito diferentes sem nenhuma explicação aparente. `refine`
+já vem parseado desse prefixo; é `0` tanto para um item sem refino quanto
+para um item não refinável — o site não permite diferenciar os dois casos.
+
 ### `GET /api/v1/shops/{svrId}/{mapId}/{ssi}/item`
 
 Detalhes do item anunciado nessa loja. Aceita `?lang=` opcional (padrão

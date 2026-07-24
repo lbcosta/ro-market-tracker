@@ -10,6 +10,8 @@
 // referências de módulo/erro que não são JSON e são simplesmente ignoradas.
 package gnjoy
 
+import "encoding/json"
+
 // StoreType é o tipo de negociação de uma loja de comércio.
 type StoreType string
 
@@ -61,6 +63,25 @@ type StoreDetail struct {
 	DatabaseType        string `json:"databaseType"`
 	Xpos                string `json:"xpos"`
 	Ypos                string `json:"ypos"`
+
+	// Refine é o nível de refino do equipamento (ex.: 7 para "+7"), extraído
+	// do prefixo "+N" em ItemFullName. É 0 tanto para um item sem refino
+	// quanto para um item que não é equipamento refinável (armas/armaduras
+	// não têm esse prefixo) — não há como distinguir os dois casos a partir
+	// dos dados que o site expõe.
+	Refine int `json:"refine"`
+}
+
+// UnmarshalJSON decodifica StoreDetail normalmente e, em seguida, calcula
+// Refine a partir de ItemFullName — o site não expõe o refino como um campo
+// próprio, só embutido nesse prefixo do nome completo do item.
+func (d *StoreDetail) UnmarshalJSON(data []byte) error {
+	type alias StoreDetail
+	if err := json.Unmarshal(data, (*alias)(d)); err != nil {
+		return err
+	}
+	d.Refine = parseRefine(d.ItemFullName)
+	return nil
 }
 
 // ItemDetail são os detalhes do item sendo vendido/comprado em uma loja
