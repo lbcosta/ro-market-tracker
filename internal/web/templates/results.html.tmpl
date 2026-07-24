@@ -1,0 +1,37 @@
+{{if .Error}}
+<p class="error">{{.Error}}</p>
+{{else if not .Items}}
+<p class="empty">Nenhum resultado encontrado.</p>
+{{else}}
+<table class="results-table">
+  <thead>
+    <tr>
+      <th>Item</th>
+      <th>Preço</th>
+      <th>Loja</th>
+      <th>Qtd</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .Items}}
+    <tr class="item-row" title="Clique para expandir ou recolher os detalhes"
+        hx-get="/web/shops/{{.SvrId}}/{{.MapId}}/{{.SSI}}/expand"
+        hx-target="#detail-{{.SSI}}" hx-swap="innerHTML" hx-trigger="click once"
+        hx-indicator="#spinner-{{.SSI}}"
+        onclick="toggleRow(this)">
+      <td><span class="expand-icon" aria-hidden="true">▸</span>{{.ItemName}}</td>
+      <td>{{formatMoney .ItemPrice}}</td>
+      <td>{{.StoreName}}</td>
+      <td>{{.ItemCnt}}</td>
+    </tr>
+    <tr class="detail-row">
+      <td colspan="4">
+        <div id="detail-{{.SSI}}" class="detail-cell">
+          <span id="spinner-{{.SSI}}" class="htmx-indicator spinner"></span>
+        </div>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}

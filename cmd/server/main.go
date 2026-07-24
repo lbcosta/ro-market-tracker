@@ -8,9 +8,11 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/lbcosta/ro-market-tracker/internal/api"
 	"github.com/lbcosta/ro-market-tracker/internal/gnjoy"
+	"github.com/lbcosta/ro-market-tracker/internal/web"
 )
 
 func main() {
@@ -31,10 +33,13 @@ func main() {
 	}
 
 	client := gnjoy.New(opts...)
-	router := api.NewRouter(client)
+
+	mux := http.NewServeMux()
+	api.RegisterRoutes(mux, client)
+	web.RegisterRoutes(mux, client)
 
 	slog.Info("iniciando ro-market-tracker", "addr", addr)
-	if err := http.ListenAndServe(addr, router); err != nil {
+	if err := http.ListenAndServe(addr, withLogging(mux)); err != nil {
 		slog.Error("servidor encerrado", "error", err)
 		os.Exit(1)
 	}
@@ -45,6 +50,14 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func withLogging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		next.ServeHTTP(w, r)
+		slog.Info("request", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start))
+	})
 }
 
 // rateLimitOptionFromEnv monta a option de rate limit a partir de

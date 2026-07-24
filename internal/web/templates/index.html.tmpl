@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RO Market Tracker</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/htmx.min.js"></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <main class="container">
+    <h1>RO Market Tracker</h1>
+    <p class="subtitle">Preços do mercado de comércio do Ragnarok Online LATAM</p>
+
+    <form class="search-form" hx-get="/web/search" hx-target="#results" hx-swap="innerHTML" hx-indicator="#search-spinner">
+      <select name="server" aria-label="Servidor">
+        <option value="NIDHOGG" selected>NIDHOGG</option>
+        <option value="FREYA">FREYA</option>
+      </select>
+      <input type="text" name="item" placeholder="Nome do item" aria-label="Nome do item" required autofocus>
+      <button type="submit" class="search-button" aria-label="Buscar">
+        <span aria-hidden="true">🔍</span>
+        <span id="search-spinner" class="htmx-indicator spinner" aria-hidden="true"></span>
+      </button>
+    </form>
+
+    <div id="results"></div>
+  </main>
+</body>
+</html>

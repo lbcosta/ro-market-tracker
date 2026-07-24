@@ -1,0 +1,230 @@
+:root {
+  color-scheme: light dark;
+  --border: #d9d3c7;
+  --muted: #6b6255;
+  --accent: #8a5a2b;
+  --bg-card: #faf7f0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #fffdf8;
+  color: #2b2620;
+}
+
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+}
+
+h1 {
+  margin-bottom: 0.2rem;
+}
+
+.subtitle {
+  color: var(--muted);
+  margin-top: 0;
+  margin-bottom: 1.5rem;
+}
+
+.search-form {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+
+.search-form input,
+.search-form select {
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.search-form input[name="item"] {
+  flex: 1;
+  min-width: 200px;
+}
+
+.search-button {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1rem;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.search-button:hover {
+  filter: brightness(1.05);
+}
+
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.results-table th {
+  text-align: left;
+  border-bottom: 2px solid var(--border);
+  padding: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.results-table td {
+  padding: 0.6rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.item-row {
+  cursor: pointer;
+}
+
+.item-row:hover {
+  background: var(--bg-card);
+}
+
+.expand-icon {
+  display: inline-block;
+  width: 1em;
+  margin-right: 0.3rem;
+  color: var(--muted);
+}
+
+.detail-row {
+  display: none;
+}
+
+.detail-row.open {
+  display: table-row;
+}
+
+.detail-row td {
+  border-bottom: 1px solid var(--border);
+  padding: 0;
+}
+
+.detail-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 0.5rem 0;
+}
+
+.detail-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.detail-card-title {
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+
+.detail-card-price {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.refine-badge {
+  display: inline-block;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 4px;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.85rem;
+  margin-left: 0.3rem;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.detail-grid dt {
+  color: var(--muted);
+}
+
+.detail-grid dd {
+  margin: 0;
+}
+
+.navi-copy {
+  font-family: ui-monospace, monospace;
+  background: #fff;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+}
+
+.navi-copy:hover {
+  border-style: solid;
+}
+
+h4 {
+  margin-bottom: 0.4rem;
+}
+
+.error {
+  color: #a4291f;
+}
+
+.empty {
+  color: var(--muted);
+}
+
+.spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  border: 2px solid rgba(0, 0, 0, 0.15);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+.htmx-indicator {
+  opacity: 0;
+  transition: opacity 150ms ease-in;
+}
+
+.htmx-indicator.htmx-request {
+  opacity: 1;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background: #1c1a16;
+    color: #ece6da;
+  }
+  .detail-card,
+  .navi-copy {
+    background: #262319;
+  }
+}

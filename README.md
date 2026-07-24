@@ -1,16 +1,18 @@
 # ro-market-tracker
 Tracker de preços do mercado RO LATAM
 
-Client HTTP em Go, com uma API REST própria, que consulta as rotas internas
-do site do GnJoy LATAM (reverse-engineered a partir do DevTools, ver anexo
-no fim deste arquivo) e expõe os dados de mercado como JSON.
+Client HTTP em Go, com uma API REST própria e um frontend em HTMX, que
+consulta as rotas internas do site do GnJoy LATAM (reverse-engineered a
+partir do DevTools, ver anexo no fim deste arquivo) e expõe os dados de
+mercado.
 
 ## Estrutura do projeto
 
 ```
 cmd/server/main.go        binário do servidor HTTP
 internal/gnjoy/           client para as rotas internas do GnJoy LATAM
-internal/api/             API REST própria (handlers + roteador)
+internal/api/              API REST própria (JSON, handlers + roteador)
+internal/web/               frontend HTMX (fragmentos HTML, handlers + roteador)
 ```
 
 ## Rodando
@@ -18,6 +20,43 @@ internal/api/             API REST própria (handlers + roteador)
 ```
 go run ./cmd/server
 ```
+
+Depois, acesse `http://localhost:8080/` para a página de busca (frontend),
+ou use a [API REST](#endpoints-da-api-rest) diretamente em `/api/v1/...`.
+
+## Frontend (HTMX)
+
+Página de busca em `/`: escolha o servidor (`NIDHOGG` ou `FREYA`, `NIDHOGG`
+por padrão), digite o nome do item e clique na lupa. A busca sempre procura
+lojas comprando o item (ou seja, anúncios de jogadores vendendo o item) —
+não há seletor de tipo de negociação na UI. A busca (`GET /web/search`)
+devolve o fragmento HTML da tabela — nome, preço, loja e quantidade — que o
+HTMX troca dentro do resultado, sem recarregar a página.
+
+Cada linha da tabela tem um indicador "▸" mostrando que é expansível.
+Clicar nela dispara `GET /web/shops/{svrId}/{mapId}/{ssi}/expand` (com um
+spinner enquanto carrega) e expande a linha em um card com:
+
+- Refino do equipamento (só aparece aqui — ver aviso na seção da API sobre
+  por que a busca não traz essa informação).
+- Vendedor, loja e tipo do item.
+- Localização como um botão com o comando `/navi <mapa>/<x>/<y>`: clicar
+  copia o comando para a área de transferência.
+- Estatísticas dos últimos 7 dias (mínimo, médio, máximo, quantidade
+  vendida e desvio padrão), calculadas a partir dos agregados diários que o
+  GnJoy LATAM devolve (`GetPriceHistory` com `Limit: 7`) — a média e o
+  desvio padrão são ponderados pela quantidade negociada em cada dia, já
+  que só temos a média diária, não o preço de cada venda individual.
+
+A busca ao servidor só acontece na primeira vez que uma linha é expandida
+(`hx-trigger="click once"`, o ícone vira "▾"). Clicar de novo apenas
+colapsa o card (ícone volta a "▸") sem descartar o que foi carregado;
+clicar uma terceira vez reexpande mostrando os mesmos dados instantaneamente,
+sem refazer a consulta — só um `toggleRow` em `internal/web/static/app.js`
+alternando a visibilidade, nenhuma requisição nova ao upstream.
+
+O HTMX é vendorizado localmente em `internal/web/static/htmx.min.js`
+(embutido no binário via `go:embed`) — não depende de CDN em runtime.
 
 Variáveis de ambiente (todas opcionais):
 

@@ -1,0 +1,36 @@
+{{if .Error}}
+<p class="error">{{.Error}}</p>
+{{else}}
+<div class="detail-card">
+  <div class="detail-card-top">
+    <div class="detail-card-title">
+      {{.Store.ItemFullName}}
+      {{if gt .Store.Refine 0}}<span class="refine-badge">+{{.Store.Refine}}</span>{{end}}
+    </div>
+    <div class="detail-card-price">{{formatMoney .Store.ItemPrice}}</div>
+  </div>
+
+  <dl class="detail-grid">
+    <dt>Vendedor</dt><dd>{{.Store.ItemSellerCharName}}</dd>
+    <dt>Loja</dt><dd>{{.Store.StoreName}}</dd>
+    {{if .Item}}<dt>Tipo</dt><dd>{{.Item.ItemType}}</dd>{{end}}
+    <dt>Localização</dt>
+    <dd>
+      <button type="button" class="navi-copy" onclick="copyNavi(this, '{{.NaviCommand}}')">{{.NaviCommand}}</button>
+    </dd>
+  </dl>
+
+  <h4>Últimos {{.Stats.Days}} dias</h4>
+  {{if eq .Stats.Days 0}}
+  <p class="empty">Sem histórico de vendas recente.</p>
+  {{else}}
+  <dl class="detail-grid stats-grid">
+    <dt>Mínimo</dt><dd>{{formatMoney .Stats.Min}}</dd>
+    <dt>Médio</dt><dd>{{formatMoneyF .Stats.WeightedAvg}}</dd>
+    <dt>Máximo</dt><dd>{{formatMoney .Stats.Max}}</dd>
+    <dt>Qtd. vendida</dt><dd>{{.Stats.QtySold}}</dd>
+    <dt>Desvio padrão</dt><dd>{{formatMoneyF .Stats.StdDev}}</dd>
+  </dl>
+  {{end}}
+</div>
+{{end}}
