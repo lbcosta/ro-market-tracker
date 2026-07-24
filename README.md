@@ -9,10 +9,18 @@ mercado.
 ## Estrutura do projeto
 
 ```
-cmd/server/main.go        binário do servidor HTTP
-internal/gnjoy/           client para as rotas internas do GnJoy LATAM
-internal/api/              API REST própria (JSON, handlers + roteador)
-internal/web/               frontend HTMX (fragmentos HTML, handlers + roteador)
+cmd/server/main.go              binário do servidor HTTP
+internal/gnjoy/                 client para as rotas internas do GnJoy LATAM
+  client.go, flight.go            requisições, rate limiting, parser do formato RSC Flight
+  discover.go                     descoberta/auto-refresh do action id da Server Action
+  refine.go, types.go             parsing de refino, tipos de dados devolvidos pelo client
+internal/api/                   API REST própria (JSON) — handlers + roteador
+internal/web/                   frontend HTMX — handlers + roteador
+  templates/                      *.html.tmpl (página, fragmentos de busca/expand)
+  static/                         CSS, JS (app.js, watchlist.js) e htmx.min.js vendorizado
+  watchlist.go                    endpoint JSON de preço/refino ao vivo p/ a watchlist
+  stats.go, navi.go               estatísticas de 7 dias, comando /navi
+docs/webtools-api-research.md   pesquisa original no DevTools (captura de tráfego bruta)
 ```
 
 ## Rodando
@@ -67,38 +75,94 @@ navegador.
 Cada linha da watchlist mostra:
 
 - Uma luz verde (monitorando) ou vermelha (não monitorando), que alterna de
-  estado ao clicar — por enquanto é só um estado local, sem efeito além do
-  indicador visual (o que a ativação/desativação vai implicar ainda será
-  definido).
+  estado ao clicar — é o que decide se o item participa da checagem
+  periódica descrita abaixo.
 - Nome do item e, se a loja de menor preço for uma arma ou armadura
-  (`databaseType` "weapon"/"armor"), o refino dessa unidade específica.
-- Preço alvo (ainda sem forma de editar — fica em "—") e o menor preço
-  anunciado agora.
+  (`databaseType` "weapon"/"armor"), um badge com o refino dessa unidade —
+  para itens sem refino (não são equipamento), nada é mostrado ali.
+- Preço alvo, editável: clicar no valor ("Alvo: —" ou "Alvo: X z") vira um
+  campo numérico; `Enter` confirma e salva, `Esc` ou perder o foco sem
+  confirmar descarta a edição. Deixar o campo vazio e confirmar remove o
+  alvo (volta a "—").
+- Para itens que já mostraram ter refino, o badge também é editável do
+  mesmo jeito (clicar, digitar, `Enter`): em vez de mostrar o refino de
+  qualquer loja que estiver mais barata, passa a exigir esse refino
+  específico — o "menor preço atual" da linha vira o menor preço só entre
+  lojas NESSE refino (ex.: fixar "+10" numa arma que só é barata em +0
+  passa a mostrar o preço da unidade +10, mesmo que ela não seja a mais
+  barata no geral). Deixar o campo vazio e confirmar volta ao padrão
+  (qualquer refino, o que estiver mais barato).
+- O menor preço anunciado agora (respeitando o refino fixado, se houver).
+- Um badge "🎯 Alvo atingido" e a linha destacada com borda verde, quando o
+  menor preço atual está no valor do alvo ou abaixo dele.
 - Um "×" para remover da lista.
 
-O preço atual (e o refino, quando aplicável) é a única parte que depende do
-servidor: `GET /web/watchlist/price?server=...&itemId=...&item=...` refaz a
-mesma busca por nome usada na página principal, filtra pelo `itemId` exato
-(uma busca por nome pode casar itens diferentes — ver teste com "Espada",
-que retorna itens com itemId 7110, 24246 e 600009), pega o menor preço
-entre eles e, se a loja mais barata for equipamento, busca o refino dela
-via `GetStoreDetail`. Ligar/desligar e remover um item são só atualizações
-de `localStorage` + DOM, sem chamada ao servidor; adicionar um item novo
-busca o preço só dele (os demais já carregados não são recarregados).
+O preço atual (e o refino) é a única parte que depende do servidor:
+`GET /web/watchlist/price?server=...&itemId=...&item=...&refine=...`
+(`refine` é opcional) refaz a mesma busca por nome usada na página
+principal, filtra pelo `itemId` exato (uma busca por nome pode casar itens
+diferentes — ver teste com "Espada", que retorna itens com itemId 7110,
+24246 e 600009) e:
+
+- Sem `refine`: pega o menor preço entre eles e, se a loja mais barata for
+  equipamento, busca o refino dela via `GetStoreDetail` — só informativo.
+- Com `refine`: ordena os candidatos por preço crescente e consulta o
+  detalhe de cada um (`GetStoreDetail`), um de cada vez, até achar o
+  primeiro cujo refino bate exatamente com o pedido. Isso pode custar várias
+  chamadas ao upstream para um item com muitos anúncios — o rate limiter do
+  client já serializa tudo, então o efeito é essa checagem demorar mais
+  (a linha mostra o spinner enquanto isso), não rajadas de requisições.
+
+Ligar/desligar, editar o alvo, editar o refino fixado e remover um item são
+só atualizações de `localStorage` + DOM, sem chamada ao servidor (exceto
+editar o refino, que dispara uma nova consulta de preço — o filtro mudou, o
+preço em cache não serve mais); adicionar um item novo busca o preço só
+dele (os demais já carregados não são recarregados).
+
+#### Monitoramento e alertas
+
+Enquanto a página estiver aberta, a cada 10 minutos
+(`MONITOR_INTERVAL_MS` em `watchlist.js`) os itens com o indicador ligado
+(verde) têm o preço reconsultado. Se o menor preço atual cair para o valor
+do alvo ou abaixo dele, o usuário é avisado de duas formas:
+
+- Um toast no canto inferior direito da página (sempre aparece, não
+  depende de nenhuma permissão do navegador).
+- Uma notificação nativa do sistema operacional, via `Notification` do
+  navegador — a permissão só é pedida na hora em que ela faz falta (o
+  primeiro alvo atingido), não no carregamento da página; se for negada
+  ou o navegador não suportar, só o toast é mostrado.
+
+Cada item só notifica uma vez por "cruzamento" do alvo: enquanto o preço
+continuar no alvo ou abaixo dele, as checagens seguintes não repetem o
+aviso (o card e o badge continuam mostrando o status, só o toast/notificação
+não se repetem); se o preço voltar a subir acima do alvo e cair de novo
+depois, um novo aviso é disparado. Esse estado ("já avisado desta vez") é
+persistido em `localStorage` junto com o resto da entrada.
+
+Itens com o indicador desligado (vermelho) continuam na lista, mas não são
+reconsultados pela checagem periódica nem podem disparar aviso enquanto
+assim permanecerem — eles ainda têm o preço atualizado ao carregar a
+página ou ao serem adicionados, só não entram no ciclo de 10 minutos.
+
+Como a watchlist vive só no navegador, o monitoramento também só roda
+enquanto uma aba com a página estiver aberta; fechar a aba interrompe as
+checagens até ela ser reaberta (quando o ciclo recomeça imediatamente,
+antes do primeiro intervalo de 10 minutos).
 
 O HTMX é vendorizado localmente em `internal/web/static/htmx.min.js`
 (embutido no binário via `go:embed`) — não depende de CDN em runtime.
 
 Variáveis de ambiente (todas opcionais):
 
-| Variável          | Padrão                                   | Descrição                                            |
-|-------------------|-------------------------------------------|-------------------------------------------------------|
-| `PORT`            | `8080`                                     | Porta HTTP do servidor                                |
-| `GNJOY_BASE_URL`  | `https://ro.gnjoylatam.com`                | Domínio base do site do GnJoy LATAM                   |
-| `GNJOY_LOCALE`    | `pt`                                       | Locale usado nas rotas (`pt`, `en` ou `es`)            |
-| `GNJOY_ACTION_ID` | ver `gnjoy.DefaultActionID` no código      | Hash da Next.js Server Action (ver aviso abaixo)       |
-| `GNJOY_RATE_LIMIT_RPS`   | `1` (`gnjoy.DefaultRateLimitRPS`)    | Requisições por segundo permitidas ao upstream          |
-| `GNJOY_RATE_LIMIT_BURST` | `1` (`gnjoy.DefaultRateLimitBurst`)  | Rajada inicial permitida acima do ritmo sustentado       |
+| Variável                 | Padrão                                | Descrição                                          |
+|--------------------------|----------------------------------------|-----------------------------------------------------|
+| `PORT`                   | `8080`                                 | Porta HTTP do servidor                               |
+| `GNJOY_BASE_URL`         | `https://ro.gnjoylatam.com`            | Domínio base do site do GnJoy LATAM                  |
+| `GNJOY_LOCALE`           | `pt`                                   | Locale usado nas rotas (`pt`, `en` ou `es`)          |
+| `GNJOY_ACTION_ID`        | ver `gnjoy.DefaultActionID` no código  | Hash da Next.js Server Action (ver aviso abaixo)     |
+| `GNJOY_RATE_LIMIT_RPS`   | `1` (`gnjoy.DefaultRateLimitRPS`)      | Requisições por segundo permitidas ao upstream       |
+| `GNJOY_RATE_LIMIT_BURST` | `1` (`gnjoy.DefaultRateLimitBurst`)    | Rajada inicial permitida acima do ritmo sustentado   |
 
 ## Rate limiting
 

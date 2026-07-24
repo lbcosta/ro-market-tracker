@@ -213,6 +213,22 @@ h1 {
   margin-left: 0.3rem;
 }
 
+/* Sem isto, o atributo HTML "hidden" não tem efeito: a regra acima já
+   define "display: inline-block" com a mesma especificidade do "[hidden]"
+   do user-agent, e CSS de autor sempre vence o do user-agent em empate —
+   o badge continuava renderizando (vazio, sem texto) mesmo escondido. */
+.refine-badge[hidden] {
+  display: none;
+}
+
+.watchlist-refine {
+  cursor: pointer;
+}
+
+.watchlist-refine:hover {
+  filter: brightness(1.1);
+}
+
 .detail-grid {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -375,6 +391,70 @@ h4 {
 .watchlist-remove:hover {
   background: var(--border);
   color: #a4291f;
+}
+
+.watchlist-target {
+  cursor: pointer;
+  border-bottom: 1px dashed var(--muted);
+}
+
+.watchlist-target:hover {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.watchlist-target-input {
+  width: 6rem;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+}
+
+.watchlist-refine-input {
+  width: 3.5rem;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+}
+
+.watchlist-hit-badge {
+  font-weight: 600;
+  color: #2f9e44;
+}
+
+.watchlist-row.target-hit {
+  border-color: #2f9e44;
+  box-shadow: 0 0 0 1px #2f9e44;
+}
+
+.toast-container {
+  position: fixed;
+  bottom: 1.5rem;
+  right: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  z-index: 1000;
+  max-width: 320px;
+}
+
+.toast {
+  background: #2b2620;
+  color: #fff;
+  padding: 0.7rem 1rem;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  font-size: 0.9rem;
+  opacity: 0;
+  transform: translateY(0.5rem);
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 @media (prefers-color-scheme: dark) {
