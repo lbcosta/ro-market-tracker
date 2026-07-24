@@ -70,6 +70,34 @@ h1 {
   filter: brightness(1.05);
 }
 
+.results-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.results-title {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.watchlist-button {
+  flex-shrink: 0;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--accent);
+  background: transparent;
+  color: var(--accent);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.watchlist-button:hover {
+  background: var(--bg-card);
+}
+
 .results-table {
   width: 100%;
   border-collapse: collapse;

@@ -22,8 +22,9 @@ func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 }
 
 type resultsView struct {
-	Error string
-	Items []gnjoy.ShopListItem
+	Error    string
+	ItemName string
+	Items    []gnjoy.ShopListItem
 }
 
 // Search trata GET /web/search e devolve o fragmento HTML da tabela de
@@ -52,7 +53,14 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		render(w, "results.html.tmpl", resultsView{Error: "Não foi possível buscar no mercado agora. Tente novamente em instantes."})
 		return
 	}
-	render(w, "results.html.tmpl", resultsView{Items: result.Items})
+	view := resultsView{Items: result.Items}
+	if len(result.Items) > 0 {
+		// O nome digitado pelo usuário é só a palavra de busca; o nome
+		// canônico do item (acentuação, capitalização corretas) só é
+		// conhecido a partir do que a busca de fato encontrou.
+		view.ItemName = result.Items[0].ItemName
+	}
+	render(w, "results.html.tmpl", view)
 }
 
 type expandView struct {

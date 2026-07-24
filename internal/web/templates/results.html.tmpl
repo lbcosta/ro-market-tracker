@@ -3,6 +3,10 @@
 {{else if not .Items}}
 <p class="empty">Nenhum resultado encontrado.</p>
 {{else}}
+<div class="results-header">
+  <h2 class="results-title">Resultados de {{.ItemName}}</h2>
+  <button type="button" class="watchlist-button">+ Watchlist</button>
+</div>
 <table class="results-table">
   <thead>
     <tr>
