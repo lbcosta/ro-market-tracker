@@ -1,4 +1,7 @@
 # ro-market-tracker
+
+[![CI](https://github.com/lbcosta/ro-market-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/lbcosta/ro-market-tracker/actions/workflows/ci.yml)
+
 Tracker de preços do mercado RO LATAM
 
 Client HTTP em Go, com uma API REST própria e um frontend em HTMX, que
@@ -27,7 +30,37 @@ e2e/                            testes de navegador (Playwright)
 docs/webtools-api-research.md   pesquisa original no DevTools (captura de tráfego bruta)
 ```
 
-## Rodando
+## Baixando o executável
+
+Cada release publica um binário pronto em
+[Releases](https://github.com/lbcosta/ro-market-tracker/releases), para Linux,
+macOS (Intel e Apple Silicon) e Windows. Não há nada a instalar junto: o
+frontend e o HTMX são embutidos no binário (`go:embed`), então é um arquivo só.
+
+```sh
+# Linux (x86-64); troque o sufixo pelo do seu sistema
+curl -LO https://github.com/lbcosta/ro-market-tracker/releases/latest/download/ro-market-tracker_1.0.0_linux_amd64.tar.gz
+tar -xzf ro-market-tracker_1.0.0_linux_amd64.tar.gz
+./ro-market-tracker
+```
+
+Toda release traz um `SHA256SUMS` para conferir o download:
+
+```sh
+sha256sum -c SHA256SUMS
+```
+
+Os binários também são publicados com atestação de proveniência, que amarra
+cada artefato ao commit e ao workflow que o gerou:
+
+```sh
+gh attestation verify ro-market-tracker_1.0.0_linux_amd64.tar.gz \
+  --repo lbcosta/ro-market-tracker
+```
+
+Para saber qual versão você tem em mãos: `./ro-market-tracker -version`.
+
+## Rodando a partir do código
 
 ```
 go run ./cmd/server
@@ -59,6 +92,27 @@ mock e client compartilhassem a mesma struct.
 Os testes de navegador sobem esse mesmo mock como processo e apontam o
 servidor real para ele, então frontend, servidor e client são exercitados de
 ponta a ponta contra um upstream controlado.
+
+## CI/CD
+
+Dois workflows do GitHub Actions (`.github/workflows/`):
+
+- **`ci.yml`** — roda a cada push (em qualquer branch) e em pull requests:
+  formatação, `go vet`, `go mod tidy` limpo, testes nos três sistemas que
+  recebem binário (com detector de corrida no Linux) e os testes de navegador.
+- **`release.yml`** — dispara ao empurrar uma tag `v*`. Reaproveita a CI
+  inteira e só publica se ela passar; depois compila os binários, gera
+  checksums, atesta a proveniência e cria a release.
+
+Para publicar uma versão:
+
+```sh
+git tag -a v1.0.0 -m "v1.0.0"
+git push origin v1.0.0
+```
+
+Tags com sufixo (`v1.0.0-rc1`, `v1.0.0-beta2`) saem marcadas como pré-release,
+para não virarem o download padrão da página do projeto.
 
 ## Frontend (HTMX)
 

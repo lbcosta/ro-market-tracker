@@ -1,0 +1,26 @@
+version: 2
+
+# Manter as dependências atualizadas sozinho é o que torna sustentável fixar
+# as actions em versões maiores (v4, v5) em vez de em SHAs: o Dependabot abre
+# o PR, e a CI decide se ele pode entrar.
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"
+
+  - package-ecosystem: npm
+    directory: /e2e
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps"

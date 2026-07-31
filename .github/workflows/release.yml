@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  # Reaproveita a pipeline de CI inteira: nada é publicado sem lint, testes
+  # nos três sistemas e testes de navegador terem passado na tag.
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Compilar ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: ci
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+          - { goos: darwin, goarch: amd64 } # macOS Intel
+          - { goos: darwin, goarch: arm64 } # macOS Apple Silicon
+          - { goos: windows, goarch: amd64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Compilar o binário
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          # Sem cgo o binário é estático: roda em qualquer distro, inclusive
+          # em imagens sem glibc, sem depender do que há na máquina do usuário.
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          versao="${GITHUB_REF_NAME#v}"
+          nome="ro-market-tracker"
+          if [ "$GOOS" = "windows" ]; then
+            nome="${nome}.exe"
+          fi
+          mkdir -p dist
+          # -trimpath tira os caminhos da máquina de build do binário (não faz
+          # sentido vazar /home/runner para quem baixa) e é o que permite que
+          # o mesmo código gere sempre o mesmo binário.
+          # -s -w descartam a tabela de símbolos e o DWARF: o servidor não é
+          # depurado a partir do artefato publicado, e o binário fica menor.
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+            -o "dist/${nome}" \
+            ./cmd/server
+          echo "VERSAO=${versao}" >> "$GITHUB_ENV"
+
+      - name: Empacotar
+        run: |
+          set -euo pipefail
+          base="ro-market-tracker_${VERSAO}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          cp README.md dist/
+          cd dist
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip -q "../${base}.zip" ro-market-tracker.exe README.md
+          else
+            tar -czf "../${base}.tar.gz" ro-market-tracker README.md
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pacote-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: "ro-market-tracker_*"
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publicar release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      # Só este job escreve: os de build e teste seguem somente leitura.
+      contents: write
+      # Necessárias para a atestação de proveniência abaixo.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: pacote-*
+          merge-multiple: true
+
+      # Um arquivo único de checksums permite ao usuário conferir o download
+      # com "sha256sum -c SHA256SUMS".
+      - name: Gerar checksums
+        working-directory: dist
+        run: sha256sum ro-market-tracker_* > SHA256SUMS
+
+      # Vincula cada artefato ao commit e ao workflow que o produziu, de forma
+      # verificável com "gh attestation verify" — é o que permite a quem baixa
+      # confirmar que o binário saiu daqui, e não de outro lugar.
+      - name: Atestar a proveniência
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/ro-market-tracker_*
+
+      - name: Criar a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # O repositório precisa ser explícito: este job não faz checkout.
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Tags com sufixo (v1.2.3-rc1, -beta2) saem marcadas como pré-release
+          # para não virarem o download padrão da página do projeto.
+          pre=""
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            pre="--prerelease"
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag \
+            $pre \
+            dist/*

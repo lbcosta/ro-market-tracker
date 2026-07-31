@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  # Todo push em qualquer branch. Tags ficam de fora porque quem cuida delas é
+  # o workflow de release — que, por sua vez, chama este aqui (workflow_call)
+  # para não publicar nada sem os testes terem passado.
+  push:
+    tags-ignore: ["**"]
+  # Pull requests também: o evento `push` testa o commit da branch, enquanto o
+  # `pull_request` testa o merge dele com a base, que é um código diferente e
+  # pode quebrar mesmo com a branch verde. Também é o que cobre PRs de forks.
+  pull_request:
+  workflow_call:
+
+# Um push novo torna o run anterior da mesma ref obsoleto. Cancelar economiza
+# fila e dá feedback mais rápido — exceto nas branches integradoras, onde vale
+# manter o resultado de cada commit.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/develop' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint e formatação
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # A versão vem do go.mod: um lugar só para atualizar.
+          go-version-file: go.mod
+
+      - name: Verificar formatação
+        run: |
+          nao_formatados=$(gofmt -l .)
+          if [ -n "$nao_formatados" ]; then
+            echo "::error::Estes arquivos não estão formatados. Rode 'gofmt -w .':"
+            echo "$nao_formatados"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Verificar go.mod e go.sum
+        run: |
+          go mod tidy
+          if ! git diff --exit-code go.mod go.sum; then
+            echo "::error::go.mod/go.sum estão desatualizados. Rode 'go mod tidy' e commite."
+            exit 1
+          fi
+
+  test:
+    name: Testes (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Uma falha só em um SO não deve esconder o resultado dos outros.
+      fail-fast: false
+      matrix:
+        # Os três sistemas para os quais publicamos binário: se o código não
+        # passa neles, não faz sentido distribuí-lo.
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Compilar
+        run: go build ./...
+
+      # O detector de corrida roda só no Linux: ele deixa a suíte
+      # significativamente mais lenta e as corridas que importam aqui (rate
+      # limiter, log de atividade, pub/sub do SSE) não são específicas de SO.
+      # Nos outros dois o objetivo é validar o comportamento na plataforma.
+      - name: Testes com detector de corrida
+        if: runner.os == 'Linux'
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Testes
+        if: runner.os != 'Linux'
+        run: go test ./...
+
+      - name: Resumo da cobertura
+        if: runner.os == 'Linux'
+        run: |
+          {
+            echo '### Cobertura de testes'
+            echo
+            echo '```'
+            go tool cover -func=coverage.out | tail -n 20
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  e2e:
+    name: Testes de navegador
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Instalar dependências
+        working-directory: e2e
+        run: npm ci
+
+      # A versão do Playwright faz parte da chave: um navegador em cache de
+      # uma versão antiga não serve, e restaurá-lo só faria o passo seguinte
+      # baixar tudo de novo sem economizar nada.
+      - name: Descobrir a versão do Playwright
+        id: playwright
+        working-directory: e2e
+        run: echo "version=$(npm ls @playwright/test --json | jq -r '.dependencies["@playwright/test"].version')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache dos navegadores
+        id: cache-browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      - name: Instalar o navegador
+        working-directory: e2e
+        # As dependências de sistema não vêm no cache do diretório de
+        # navegadores, então --with-deps roda sempre.
+        run: npx playwright install --with-deps chromium
+
+      # Os testes sobem sozinhos o mock do GnJoy e o servidor real apontado
+      # para ele (ver e2e/global-setup.js): nada aqui toca a API de verdade.
+      - name: Rodar os testes
+        working-directory: e2e
+        run: npm test
+
+      - name: Guardar o relatório em caso de falha
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          retention-days: 7
