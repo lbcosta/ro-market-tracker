@@ -276,7 +276,14 @@ function buildWatchlistRow(entry) {
 
   const nameRow = document.createElement("div");
   nameRow.className = "watchlist-name";
-  nameRow.append(entry.itemName);
+  // O nome vai em um elemento próprio (e não como texto solto) para ser ele —
+  // e não o badge de refino ao lado — quem encurta com reticências quando não
+  // couber; ver .watchlist-name no CSS.
+  const nameText = document.createElement("span");
+  nameText.className = "watchlist-name-text";
+  nameText.textContent = entry.itemName;
+  nameText.title = entry.itemName;
+  nameRow.appendChild(nameText);
   const refineBadge = document.createElement("span");
   refineBadge.className = "refine-badge watchlist-refine";
   refineBadge.tabIndex = 0;

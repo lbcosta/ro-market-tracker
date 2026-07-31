@@ -225,6 +225,10 @@ h1 {
 
 .watchlist-refine {
   cursor: pointer;
+  /* O espaçamento vem do gap da linha do nome; a margem herdada de
+     .refine-badge somaria a ele. */
+  margin-left: 0;
+  flex-shrink: 0;
 }
 
 .watchlist-refine:hover {
@@ -399,9 +403,21 @@ h4 {
   min-width: 0;
 }
 
+/* O nome e o badge de refino dividem a linha como itens flex, em vez de o
+   badge ser conteúdo inline dentro de uma caixa que trunca: assim só o texto
+   do nome encurta com reticências, e o badge — que é clicável, é por ele que
+   se fixa o refino — nunca é comido pelo overflow de um nome comprido. */
 .watchlist-name {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
   font-weight: 600;
   font-size: 0.9rem;
+}
+
+.watchlist-name-text {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
