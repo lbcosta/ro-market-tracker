@@ -8,6 +8,7 @@
   <script src="/static/htmx.min.js"></script>
   <script src="/static/app.js" defer></script>
   <script src="/static/watchlist.js" defer></script>
+  <script src="/static/activity-bar.js" defer></script>
 </head>
 <body>
   <main class="page">
@@ -42,5 +43,15 @@
       <p id="watchlist-empty" class="empty">Nenhum item na watchlist.</p>
     </aside>
   </main>
+
+  <div id="activity-bar" class="activity-bar" role="button" tabindex="0" aria-expanded="false" aria-label="Barra de atividades — clique para expandir ou recolher">
+    <div class="activity-bar-body">
+      <p>oi sou uma barra de atividades</p>
+    </div>
+    <div class="activity-bar-header">
+      <span class="activity-bar-title">Atividade</span>
+      <span class="activity-bar-icon" aria-hidden="true">▲</span>
+    </div>
+  </div>
 </body>
 </html>
