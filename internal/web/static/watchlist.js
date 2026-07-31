@@ -22,6 +22,13 @@ const MONITOR_INTERVAL_MS = 10 * 60 * 1000;
 // (sem esperar a próxima consulta) quando o usuário edita o preço alvo.
 const lastKnownPrice = new Map();
 
+// nextMonitorRunAt (em memória, não persistido) é o timestamp da próxima
+// checagem automática — usado só para renderizar o cronômetro regressivo do
+// painel. monitorTimerId guarda o setTimeout atual para poder cancelá-lo ao
+// forçar uma atualização manual.
+let nextMonitorRunAt = null;
+let monitorTimerId = null;
+
 function loadWatchlist() {
   try {
     const raw = localStorage.getItem(WATCHLIST_KEY);
@@ -443,6 +450,38 @@ function runMonitoringCheck() {
   }
 }
 
+// scheduleMonitoring (re)agenda a próxima checagem automática usando
+// setTimeout (em vez de setInterval) para que "forçar atualização agora"
+// possa cancelar a espera pendente e recomeçar a contagem do zero, sem
+// deixar uma checagem duplicada rodando em paralelo.
+function scheduleMonitoring(delayMs = MONITOR_INTERVAL_MS) {
+  if (monitorTimerId) clearTimeout(monitorTimerId);
+  nextMonitorRunAt = Date.now() + delayMs;
+  monitorTimerId = setTimeout(() => {
+    runMonitoringCheck();
+    scheduleMonitoring();
+  }, delayMs);
+  updateCountdownDisplay();
+}
+
+// forceMonitoringNow é chamado pelo botão "↻" ao lado do título da
+// watchlist: roda a checagem imediatamente e reinicia o cronômetro para um
+// novo ciclo completo de MONITOR_INTERVAL_MS.
+function forceMonitoringNow() {
+  runMonitoringCheck();
+  scheduleMonitoring();
+}
+
+function updateCountdownDisplay() {
+  const el = document.getElementById("watchlist-countdown");
+  if (!el || nextMonitorRunAt == null) return;
+  const remainingMs = Math.max(0, nextMonitorRunAt - Date.now());
+  const totalSeconds = Math.ceil(remainingMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  el.textContent = String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+}
+
 // renderWatchlist reconstrói o painel inteiro a partir do localStorage —
 // usado só no carregamento da página. Ações do usuário (adicionar, remover,
 // ligar/desligar, editar alvo) atualizam o DOM diretamente em vez de chamar
@@ -464,5 +503,9 @@ function renderWatchlist() {
 
 document.addEventListener("DOMContentLoaded", () => {
   renderWatchlist();
-  setInterval(runMonitoringCheck, MONITOR_INTERVAL_MS);
+  scheduleMonitoring();
+  setInterval(updateCountdownDisplay, 1000);
+
+  const refreshButton = document.getElementById("watchlist-refresh-now");
+  if (refreshButton) refreshButton.addEventListener("click", forceMonitoringNow);
 });

@@ -31,7 +31,13 @@
     </div>
 
     <aside class="watchlist-panel" aria-label="Watchlist">
-      <h2>Watchlist</h2>
+      <div class="watchlist-header">
+        <h2>Watchlist</h2>
+        <div class="watchlist-timer" title="Tempo até a próxima checagem automática de preços">
+          <span id="watchlist-countdown">--:--</span>
+          <button type="button" id="watchlist-refresh-now" aria-label="Atualizar agora e reiniciar o cronômetro" title="Atualizar agora">↻</button>
+        </div>
+      </div>
       <ul id="watchlist-list" class="watchlist-list"></ul>
       <p id="watchlist-empty" class="empty">Nenhum item na watchlist.</p>
     </aside>
