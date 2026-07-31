@@ -80,7 +80,11 @@ func (c *Client) discoverActionID(ctx context.Context) (string, error) {
 	}
 	req.Header.Set("accept", "text/html")
 
-	body, err := c.do(req)
+	body, err := c.do(req, activityLabels{
+		InProgress: "Verificando se a rota da loja mudou",
+		Success:    "Rota da loja verificada",
+		Error:      "Falha ao verificar a rota da loja",
+	})
 	if err != nil {
 		return "", fmt.Errorf("gnjoy: buscando página para descoberta do action id: %w", err)
 	}
@@ -109,7 +113,11 @@ func (c *Client) discoverActionID(ctx context.Context) (string, error) {
 			if err != nil {
 				return
 			}
-			chunkBody, err := c.do(req)
+			chunkBody, err := c.do(req, activityLabels{
+				InProgress: "Procurando a rota atualizada nos arquivos do site",
+				Success:    "Arquivo do site consultado",
+				Error:      "Falha ao consultar arquivo do site",
+			})
 			if err != nil {
 				return
 			}

@@ -59,6 +59,10 @@ const (
 	// upstream mande um "Retry-After" maior, para não travar uma
 	// requisição indefinidamente por causa de um valor anômalo.
 	maxRetryAfter = 2 * time.Minute
+
+	// activityLogCapacity é quantas chamadas recentes o ActivityLog do
+	// Client mantém em memória para a barra de atividades do frontend.
+	activityLogCapacity = 200
 )
 
 // Client consulta as rotas internas do site do GnJoy LATAM usadas pela
@@ -79,6 +83,11 @@ type Client struct {
 	// uma fila com atraso em vez de disparar tudo de uma vez — o objetivo
 	// é nunca esbarrar no rate limiter do site.
 	limiter *rate.Limiter
+
+	// activity registra o histórico de chamadas ao upstream (fila do rate
+	// limiter, em voo, sucesso/erro) para quem quiser observar a atividade
+	// do Client em tempo real — ver Activity() e internal/web/activity.go.
+	activity *ActivityLog
 
 	actionIDMu sync.RWMutex
 	actionID   string
@@ -133,11 +142,20 @@ func New(opts ...Option) *Client {
 			"(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
 		httpClient: &http.Client{Timeout: 15 * time.Second},
 		limiter:    rate.NewLimiter(rate.Limit(DefaultRateLimitRPS), DefaultRateLimitBurst),
+		activity:   NewActivityLog(activityLogCapacity),
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
 	return c
+}
+
+// Activity devolve o log de atividade do Client — histórico das chamadas
+// mais recentes ao upstream e um jeito de assinar atualizações em tempo
+// real. Usado pela barra de atividades do frontend (ver
+// internal/web/activity.go).
+func (c *Client) Activity() *ActivityLog {
+	return c.activity
 }
 
 // HTTPError é retornado quando o upstream responde com um status HTTP
@@ -156,8 +174,15 @@ func (e *HTTPError) Error() string {
 // mesmo assim responda 429, aguarda o tempo indicado em "Retry-After" (ou
 // um backoff exponencial, se o cabeçalho não vier) e tenta de novo, até
 // maxTooManyRequestsRetries vezes.
-func (c *Client) do(req *http.Request) ([]byte, error) {
+//
+// labels são as descrições amigáveis da chamada, uma por fase do ciclo de
+// vida (ver activityLabels) — usadas só para popular o ActivityLog do
+// Client, não afetam a requisição em si. Todo o ciclo de vida da chamada
+// (fila do rate limiter, em voo, sucesso/erro/retry) é publicado lá para
+// quem estiver observando (a barra de atividades do frontend).
+func (c *Client) do(req *http.Request, labels activityLabels) ([]byte, error) {
 	req.Header.Set("user-agent", c.userAgent)
+	handle := c.activity.begin(labels)
 
 	var lastErr error
 	for attempt := 0; attempt <= maxTooManyRequestsRetries; attempt++ {
@@ -166,27 +191,47 @@ func (c *Client) do(req *http.Request) ([]byte, error) {
 			// com corpo (POST) precisam recriá-lo, já que ele já foi
 			// consumido na tentativa anterior.
 			if req.GetBody == nil {
-				return nil, fmt.Errorf("gnjoy: upstream retornou 429 e a requisição não pode ser refeita (sem corpo reaproveitável): %w", lastErr)
+				err := fmt.Errorf("gnjoy: upstream retornou 429 e a requisição não pode ser refeita (sem corpo reaproveitável): %w", lastErr)
+				handle.fail(err)
+				return nil, err
 			}
 			body, err := req.GetBody()
 			if err != nil {
-				return nil, fmt.Errorf("gnjoy: recriando corpo da requisição para nova tentativa: %w", err)
+				err = fmt.Errorf("gnjoy: recriando corpo da requisição para nova tentativa: %w", err)
+				handle.fail(err)
+				return nil, err
 			}
 			req.Body = io.NopCloser(body)
 		}
 
-		if err := c.limiter.Wait(req.Context()); err != nil {
-			return nil, fmt.Errorf("gnjoy: aguardando vaga no rate limiter: %w", err)
+		now := time.Now()
+		reservation := c.limiter.ReserveN(now, 1)
+		delay := reservation.DelayFrom(now)
+		if delay > 0 {
+			handle.waiting(now.Add(delay))
+			select {
+			case <-time.After(delay):
+			case <-req.Context().Done():
+				reservation.Cancel()
+				err := req.Context().Err()
+				handle.fail(err)
+				return nil, err
+			}
 		}
 
+		handle.running()
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("gnjoy: executando requisição: %w", err)
+			err = fmt.Errorf("gnjoy: executando requisição: %w", err)
+			handle.fail(err)
+			return nil, err
 		}
 		body, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 		resp.Body.Close()
 		if err != nil {
-			return nil, fmt.Errorf("gnjoy: lendo corpo da resposta: %w", err)
+			err = fmt.Errorf("gnjoy: lendo corpo da resposta: %w", err)
+			handle.fail(err)
+			return nil, err
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests {
@@ -195,22 +240,30 @@ func (c *Client) do(req *http.Request) ([]byte, error) {
 				break
 			}
 			wait := retryAfterDuration(resp.Header.Get("Retry-After"), attempt)
+			handle.waiting(time.Now().Add(wait))
 			slog.Warn("gnjoy: upstream respondeu 429, aguardando antes de tentar de novo",
 				"path", req.URL.Path, "tentativa", attempt+1, "espera", wait)
 			select {
 			case <-time.After(wait):
 			case <-req.Context().Done():
-				return nil, req.Context().Err()
+				err := req.Context().Err()
+				handle.fail(err)
+				return nil, err
 			}
 			continue
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			return nil, &HTTPError{StatusCode: resp.StatusCode, Body: truncateBody(body)}
+			err := &HTTPError{StatusCode: resp.StatusCode, Body: truncateBody(body)}
+			handle.fail(err)
+			return nil, err
 		}
+		handle.succeed()
 		return body, nil
 	}
-	return nil, fmt.Errorf("gnjoy: upstream continuou retornando 429 após %d tentativas: %w", maxTooManyRequestsRetries+1, lastErr)
+	err := fmt.Errorf("gnjoy: upstream continuou retornando 429 após %d tentativas: %w", maxTooManyRequestsRetries+1, lastErr)
+	handle.fail(err)
+	return nil, err
 }
 
 func truncateBody(body []byte) string {
@@ -319,7 +372,12 @@ func (c *Client) SearchShops(ctx context.Context, p SearchShopsParams) (*ShopSea
 	req.Header.Set("next-router-state-tree", c.routerStateTree())
 	req.Header.Set("referer", c.pageURL(tradingPath))
 
-	body, err := c.do(req)
+	labels := activityLabels{
+		InProgress: fmt.Sprintf("Buscando %q no servidor %s", p.SearchWord, p.ServerType),
+		Success:    fmt.Sprintf("Busca por %q no servidor %s concluída", p.SearchWord, p.ServerType),
+		Error:      fmt.Sprintf("Falha ao buscar %q no servidor %s", p.SearchWord, p.ServerType),
+	}
+	body, err := c.do(req, labels)
 	if err != nil {
 		return nil, err
 	}
@@ -353,10 +411,10 @@ type actionEnvelope struct {
 // desatualizado (o site teve um novo deploy), o id atual é redescoberto
 // automaticamente a partir dos chunks JS da página e a chamada é refeita
 // uma única vez.
-func (c *Client) callAction(ctx context.Context, actionType string, params any, out any) error {
+func (c *Client) callAction(ctx context.Context, actionType string, params any, out any, labels activityLabels) error {
 	actionID := c.currentActionID()
 
-	err := c.callActionWithID(ctx, actionType, params, out, actionID)
+	err := c.callActionWithID(ctx, actionType, params, out, actionID, labels)
 	if err == nil || !isStaleActionIDErr(err) {
 		return err
 	}
@@ -370,10 +428,10 @@ func (c *Client) callAction(ctx context.Context, actionType string, params any, 
 		// a falha não era mesmo sobre o action id estar desatualizado).
 		return err
 	}
-	return c.callActionWithID(ctx, actionType, params, out, newID)
+	return c.callActionWithID(ctx, actionType, params, out, newID, labels)
 }
 
-func (c *Client) callActionWithID(ctx context.Context, actionType string, params any, out any, actionID string) error {
+func (c *Client) callActionWithID(ctx context.Context, actionType string, params any, out any, actionID string, labels activityLabels) error {
 	payload, err := json.Marshal([]actionRequest{{Type: actionType, Params: params}})
 	if err != nil {
 		return fmt.Errorf("gnjoy: montando payload da action %q: %w", actionType, err)
@@ -391,7 +449,7 @@ func (c *Client) callActionWithID(ctx context.Context, actionType string, params
 	req.Header.Set("origin", c.baseURL)
 	req.Header.Set("referer", reqURL)
 
-	body, err := c.do(req)
+	body, err := c.do(req, labels)
 	if err != nil {
 		return err
 	}
@@ -433,7 +491,12 @@ func (c *Client) GetStoreDetail(ctx context.Context, loc StoreLocation) (*StoreD
 		"ssi":   loc.SSI,
 	}
 	var detail StoreDetail
-	if err := c.callAction(ctx, "store", params, &detail); err != nil {
+	labels := activityLabels{
+		InProgress: fmt.Sprintf("Consultando detalhes de uma loja (mapa %d)", loc.MapId),
+		Success:    fmt.Sprintf("Detalhes da loja consultados (mapa %d)", loc.MapId),
+		Error:      fmt.Sprintf("Falha ao consultar detalhes da loja (mapa %d)", loc.MapId),
+	}
+	if err := c.callAction(ctx, "store", params, &detail, labels); err != nil {
 		return nil, err
 	}
 	return &detail, nil
@@ -453,7 +516,12 @@ func (c *Client) GetItemDetail(ctx context.Context, loc StoreLocation, lang stri
 		"multiLan": lang,
 	}
 	var detail ItemDetail
-	if err := c.callAction(ctx, "item", params, &detail); err != nil {
+	labels := activityLabels{
+		InProgress: "Consultando detalhes do item anunciado",
+		Success:    "Detalhes do item consultados",
+		Error:      "Falha ao consultar detalhes do item",
+	}
+	if err := c.callAction(ctx, "item", params, &detail, labels); err != nil {
 		return nil, err
 	}
 	return &detail, nil
@@ -499,7 +567,12 @@ func (c *Client) GetPriceHistory(ctx context.Context, p PriceHistoryParams) (*Pr
 		"period": period,
 	}
 	var history PriceHistory
-	if err := c.callAction(ctx, "price", params, &history); err != nil {
+	labels := activityLabels{
+		InProgress: fmt.Sprintf("Consultando histórico de preço do item #%d", p.ItemId),
+		Success:    fmt.Sprintf("Histórico de preço do item #%d consultado", p.ItemId),
+		Error:      fmt.Sprintf("Falha ao consultar histórico de preço do item #%d", p.ItemId),
+	}
+	if err := c.callAction(ctx, "price", params, &history, labels); err != nil {
 		return nil, err
 	}
 	return &history, nil

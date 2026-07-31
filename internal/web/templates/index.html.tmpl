@@ -45,11 +45,12 @@
   </main>
 
   <div id="activity-bar" class="activity-bar" role="button" tabindex="0" aria-expanded="false" aria-label="Barra de atividades — clique para expandir ou recolher">
-    <div class="activity-bar-body">
-      <p>oi sou uma barra de atividades</p>
-    </div>
+    <ul id="activity-history" class="activity-history"></ul>
     <div class="activity-bar-header">
-      <span class="activity-bar-title">Atividade</span>
+      <span class="activity-line">
+        <span id="activity-current-label">Nenhuma atividade ainda.</span>
+        <span id="activity-spinner" class="spinner" hidden aria-hidden="true"></span>
+      </span>
       <span class="activity-bar-icon" aria-hidden="true">▲</span>
     </div>
   </div>
