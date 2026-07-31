@@ -61,16 +61,19 @@ jobs:
             ./cmd/server
           echo "VERSAO=${versao}" >> "$GITHUB_ENV"
 
+      # Vai junto o LEIAME de quem usa, não o README do projeto: quem baixa o
+      # executável quer saber como abri-lo e que endereço acessar, não a
+      # estrutura de pacotes nem como rodar os testes.
       - name: Empacotar
         run: |
           set -euo pipefail
           base="ro-market-tracker_${VERSAO}_${{ matrix.goos }}_${{ matrix.goarch }}"
-          cp README.md dist/
+          cp docs/LEIAME.txt dist/
           cd dist
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip -q "../${base}.zip" ro-market-tracker.exe README.md
+            zip -q "../${base}.zip" ro-market-tracker.exe LEIAME.txt
           else
-            tar -czf "../${base}.tar.gz" ro-market-tracker README.md
+            tar -czf "../${base}.tar.gz" ro-market-tracker LEIAME.txt
           fi
 
       - uses: actions/upload-artifact@v7

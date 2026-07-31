@@ -1,0 +1,134 @@
+RO MARKET TRACKER
+Preços do mercado de comércio do Ragnarok Online LATAM
+===============================================================================
+
+O QUE É
+
+  Um programa que consulta as lojas de comércio do Ragnarok Online LATAM e
+  mostra, em uma página no seu navegador, quem está anunciando um item, por
+  quanto e em qual loja — sem precisar ficar procurando no site do jogo.
+
+  Também dá para marcar itens para acompanhar e ser avisado quando o preço
+  cair até o valor que você quiser pagar.
+
+
+COMO EXECUTAR
+
+  Windows
+    Dê um duplo clique em "ro-market-tracker.exe".
+    Uma janela preta (o terminal) vai abrir. Ela precisa continuar aberta
+    enquanto você usa o programa.
+
+    Se o Windows mostrar um aviso azul de "Windows protegeu o computador",
+    clique em "Mais informações" e depois em "Executar assim mesmo". Isso
+    aparece porque o programa não é assinado digitalmente.
+
+  Linux
+    Abra o terminal na pasta onde você extraiu o arquivo e rode:
+
+      chmod +x ro-market-tracker
+      ./ro-market-tracker
+
+  macOS
+    Abra o Terminal na pasta onde você extraiu o arquivo e rode:
+
+      chmod +x ro-market-tracker
+      xattr -d com.apple.quarantine ro-market-tracker
+      ./ro-market-tracker
+
+    A linha do "xattr" é necessária porque o macOS bloqueia programas
+    baixados da internet que não são assinados. Sem ela, aparece a mensagem
+    "não pode ser aberto porque o desenvolvedor não pode ser verificado".
+
+
+E DEPOIS?
+
+  Assim que o programa abrir, o terminal vai mostrar um endereço parecido
+  com este:
+
+      http://localhost:8080
+
+  Abra esse endereço no seu navegador (na maioria dos terminais dá para
+  clicar direto nele; se não der, copie e cole na barra de endereços).
+
+  É nessa página que tudo acontece. O terminal, daí em diante, fica quieto:
+  ele só vai mostrar alguma coisa se algo der errado.
+
+
+O QUE DÁ PARA FAZER NA PÁGINA
+
+  Buscar um item
+    Escolha o servidor (NIDHOGG ou FREYA), digite o nome do item e clique na
+    lupa. A lista mostra o preço, a loja e a quantidade de cada anúncio.
+
+    A busca encontra tudo que tem aquela palavra no nome: procurar por
+    "Espada" também traz "Carta Peixe-Espada", por exemplo.
+
+  Ver os detalhes de um anúncio
+    Clique em qualquer linha da lista para abri-la. Aparecem o refino do
+    equipamento, quem é o vendedor, um botão que copia o comando /navi para
+    ir até a loja dentro do jogo, e como o preço se comportou nos últimos
+    dias (mínimo, médio, máximo e quanto foi vendido).
+
+  Acompanhar itens na watchlist
+    Depois de buscar um item, clique em "+ Watchlist" (no canto direito, ao
+    lado do título dos resultados). O item passa a aparecer no painel da
+    direita com o menor preço anunciado no momento.
+
+    Nesse painel você pode:
+
+      - Definir um preço alvo: clique em "Alvo: —", digite o valor e aperte
+        Enter. Quando alguém anunciar o item por aquele valor ou menos, você
+        recebe um aviso na tela (e uma notificação do sistema, se permitir).
+
+      - Fixar um refino: para equipamentos, clique no selo "+0" ao lado do
+        nome e digite o refino que você procura. A linha passa a mostrar o
+        menor preço apenas entre os anúncios naquele refino.
+
+      - Ligar ou desligar o acompanhamento: a bolinha verde à esquerda. Verde
+        significa que o item é reconsultado de tempos em tempos; vermelha,
+        que ele continua na lista mas parado.
+
+    O cronômetro no topo do painel mostra quanto falta para a próxima
+    verificação automática. O botão ao lado dele verifica na hora.
+
+    Importante: a watchlist fica salva no seu navegador, não em uma conta.
+    Ela continua lá se você fechar e abrir de novo, mas é só nesse navegador
+    e nesse computador. E os avisos só chegam com a página aberta.
+
+  Acompanhar o que o programa está fazendo
+    A barra na parte de baixo da página mostra a consulta em andamento.
+    Clique nela para ver o histórico das anteriores.
+
+    Se algo parecer demorado, é provavelmente ali que está a explicação: o
+    programa faz as consultas devagar de propósito, uma de cada vez, para
+    não sobrecarregar o site do jogo nem correr o risco de ser bloqueado.
+
+
+CONFIGURAÇÃO (OPCIONAL)
+
+  Você não precisa configurar nada para usar. Mas, se a porta 8080 já
+  estiver ocupada por outro programa, dá para escolher outra:
+
+    Windows       set PORT=8081 && ro-market-tracker.exe
+    Linux/macOS   PORT=8081 ./ro-market-tracker
+
+  E, se algo der errado e você quiser ver os detalhes do que aconteceu:
+
+    Windows       set LOG_LEVEL=debug && ro-market-tracker.exe
+    Linux/macOS   LOG_LEVEL=debug ./ro-market-tracker
+
+
+COMO ENCERRAR
+
+  Feche a janela do terminal, ou clique nela e pressione Ctrl+C.
+
+
+PROBLEMAS E SUGESTÕES
+
+  https://github.com/lbcosta/ro-market-tracker/issues
+
+  Este programa lê o site do GnJoy LATAM da mesma forma que o seu navegador
+  leria. Como não existe uma API oficial, uma mudança no site pode quebrá-lo
+  sem aviso — se as buscas pararem de funcionar, é provavelmente isso, e vale
+  abrir uma issue no endereço acima.
