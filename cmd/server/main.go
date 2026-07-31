@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/lbcosta/ro-market-tracker/internal/api"
@@ -30,7 +32,9 @@ func main() {
 		return
 	}
 
-	addr := ":" + envOrDefault("PORT", "8080")
+	configureLogging()
+
+	port := envOrDefault("PORT", "8080")
 
 	var opts []gnjoy.Option
 	if baseURL := os.Getenv("GNJOY_BASE_URL"); baseURL != "" {
@@ -52,10 +56,95 @@ func main() {
 	api.RegisterRoutes(mux, client)
 	web.RegisterRoutes(mux, client)
 
-	slog.Info("iniciando ro-market-tracker", "versao", version, "addr", addr)
-	if err := http.ListenAndServe(addr, withLogging(mux)); err != nil {
+	// Ocupa a porta antes de dar as boas-vindas: se ela estiver em uso, o
+	// usuário precisa ver o motivo, e não um endereço que não vai abrir.
+	ln, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		fmt.Fprint(os.Stderr, mensagemDePortaOcupada(port, err))
+		os.Exit(1)
+	}
+
+	printBoasVindas(port)
+
+	if err := http.Serve(ln, withLogging(mux)); err != nil {
 		slog.Error("servidor encerrado", "error", err)
 		os.Exit(1)
+	}
+}
+
+// printBoasVindas é a primeira coisa que alguém vê ao abrir o executável: um
+// duplo clique no .exe abre um terminal e, sem isto, a janela ficaria em
+// branco sem dizer o que fazer em seguida.
+//
+// Sai pelo fmt, e não pelo slog: é uma tela para ler, não um registro de
+// evento — não faz sentido carregar horário e nível de severidade. O endereço
+// vai como URL crua porque os terminais atuais (Windows Terminal, iTerm2,
+// GNOME Terminal) a transformam em link clicável sozinhos; sequências de
+// escape para hyperlink apareceriam como lixo nos que não as suportam.
+func printBoasVindas(port string) {
+	fmt.Printf(`
+  RO Market Tracker %s
+  Preços do mercado de comércio do Ragnarok Online LATAM
+
+  Abra no navegador:  http://localhost:%s
+
+  O que dá para fazer por lá:
+    - Buscar um item e ver quem está anunciando, por quanto e em que loja
+    - Clicar em um anúncio para ver o refino, onde fica o vendedor e como
+      o preço se comportou nos últimos dias
+    - Acompanhar itens na watchlist e ser avisado quando o preço cair até
+      o alvo que você definir
+
+  Esta janela precisa ficar aberta enquanto você usa o site.
+  Para encerrar, feche-a ou pressione Ctrl+C.
+
+`, version, port)
+}
+
+// mensagemDePortaOcupada troca o erro cru do sistema por uma saída acionável:
+// quase sempre a causa é outro programa (ou outra cópia deste) já ocupando a
+// porta, e o que falta ao usuário é saber como escolher outra.
+func mensagemDePortaOcupada(port string, err error) string {
+	return fmt.Sprintf(`
+  Não foi possível abrir a porta %s: %v
+
+  Se outro programa já estiver usando essa porta, escolha outra:
+
+    Windows:       set PORT=8081 && ro-market-tracker.exe
+    Linux/macOS:   PORT=8081 ./ro-market-tracker
+
+`, port, err)
+}
+
+// configureLogging deixa o programa quieto por padrão: depois da tela inicial,
+// quem está usando só precisa saber de algo que exija atenção. LOG_LEVEL=debug
+// liga o registro de cada requisição, para investigar um problema sem precisar
+// de outro binário.
+func configureLogging() {
+	opts := &slog.HandlerOptions{
+		Level: logLevelFromEnv(),
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			// Data e fuso não ajudam quem está com a janela aberta na frente.
+			if len(groups) == 0 && a.Key == slog.TimeKey {
+				return slog.String(slog.TimeKey, a.Value.Time().Format("15:04:05"))
+			}
+			return a
+		},
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, opts)))
+}
+
+func logLevelFromEnv() slog.Level {
+	switch strings.ToLower(os.Getenv("LOG_LEVEL")) {
+	case "debug":
+		return slog.LevelDebug
+	case "info":
+		return slog.LevelInfo
+	case "error":
+		return slog.LevelError
+	default:
+		// Avisos e erros: o que o usuário precisa ver, e nada além disso.
+		return slog.LevelWarn
 	}
 }
 
@@ -66,11 +155,16 @@ func envOrDefault(key, fallback string) string {
 	return fallback
 }
 
+// withLogging registra cada requisição em nível de depuração. Uma sessão
+// normal gera uma enxurrada delas (cada asset, cada consulta da watchlist, o
+// stream da barra de atividades), e nenhuma diz nada a quem está usando o
+// programa — mas todas importam quando se está investigando um problema, e é
+// para isso que existe LOG_LEVEL=debug.
 func withLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)
-		slog.Info("request", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start))
+		slog.Debug("requisição", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start))
 	})
 }
 
