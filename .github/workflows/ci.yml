@@ -1,11 +1,14 @@
 name: CI
 
 on:
-  # Todo push em qualquer branch. Tags ficam de fora porque quem cuida delas é
-  # o workflow de release — que, por sua vez, chama este aqui (workflow_call)
-  # para não publicar nada sem os testes terem passado.
+  # Todo push em qualquer branch ("**" também cobre nomes com barra, o que um
+  # "*" sozinho não faria). Declarar só "branches" já deixa as tags de fora:
+  # quando apenas um dos lados (branches/tags) é filtrado, o outro para de
+  # disparar o workflow. E é o que queremos — quem cuida das tags é o workflow
+  # de release, que chama este aqui (workflow_call) para não publicar nada sem
+  # os testes terem passado.
   push:
-    tags-ignore: ["**"]
+    branches: ["**"]
   # Pull requests também: o evento `push` testa o commit da branch, enquanto o
   # `pull_request` testa o merge dele com a base, que é um código diferente e
   # pode quebrar mesmo com a branch verde. Também é o que cobre PRs de forks.
