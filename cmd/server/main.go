@@ -4,6 +4,8 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,7 +17,19 @@ import (
 	"github.com/lbcosta/ro-market-tracker/internal/web"
 )
 
+// version identifica o binário. O build de release a injeta com a tag do Git
+// (ver .github/workflows/release.yml); em builds locais fica "dev", que é o
+// que distingue "compilei aqui agora" de "baixei o executável da release".
+var version = "dev"
+
 func main() {
+	showVersion := flag.Bool("version", false, "mostra a versão do binário e sai")
+	flag.Parse()
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
+
 	addr := ":" + envOrDefault("PORT", "8080")
 
 	var opts []gnjoy.Option
@@ -38,7 +52,7 @@ func main() {
 	api.RegisterRoutes(mux, client)
 	web.RegisterRoutes(mux, client)
 
-	slog.Info("iniciando ro-market-tracker", "addr", addr)
+	slog.Info("iniciando ro-market-tracker", "versao", version, "addr", addr)
 	if err := http.ListenAndServe(addr, withLogging(mux)); err != nil {
 		slog.Error("servidor encerrado", "error", err)
 		os.Exit(1)
