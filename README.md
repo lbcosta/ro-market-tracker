@@ -20,6 +20,10 @@ internal/web/                   frontend HTMX — handlers + roteador
   static/                         CSS, JS (app.js, watchlist.js) e htmx.min.js vendorizado
   watchlist.go                    endpoint JSON de preço/refino ao vivo p/ a watchlist
   stats.go, navi.go               estatísticas de 7 dias, comando /navi
+  activity.go                     stream SSE da atividade do client (barra de atividades)
+internal/gnjoytest/             mock do site do GnJoy usado por todos os testes
+  cmd/mockgnjoy/                  o mesmo mock como processo, para os testes de navegador
+e2e/                            testes de navegador (Playwright)
 docs/webtools-api-research.md   pesquisa original no DevTools (captura de tráfego bruta)
 ```
 
@@ -31,6 +35,30 @@ go run ./cmd/server
 
 Depois, acesse `http://localhost:8080/` para a página de busca (frontend),
 ou use a [API REST](#endpoints-da-api-rest) diretamente em `/api/v1/...`.
+
+## Testes
+
+```
+go test ./...      # client, API REST e frontend
+cd e2e && npm test # testes de navegador (ver e2e/README.md)
+```
+
+**Nenhum teste toca a API real.** O site do GnJoy LATAM tem rate limiting
+próprio e não é uma API pública documentada, então uma suíte batendo nele
+seria frágil e um jeito rápido de tomar bloqueio. No lugar dele há
+`internal/gnjoytest`: um mock que fala o mesmo protocolo das rotas internas
+(RSC Flight, Server Actions e a descoberta do action id nos chunks JS), com
+injeção de falhas, de atrasos e de deploys do site (troca do action id).
+
+Os tipos do mock são declarados de forma independente dos tipos do client, de
+propósito: eles descrevem o que o site devolve (ver
+`docs/webtools-api-research.md`), não o que o client espera. Se um json tag do
+client divergir do contrato real, os testes quebram — o que não aconteceria se
+mock e client compartilhassem a mesma struct.
+
+Os testes de navegador sobem esse mesmo mock como processo e apontam o
+servidor real para ele, então frontend, servidor e client são exercitados de
+ponta a ponta contra um upstream controlado.
 
 ## Frontend (HTMX)
 

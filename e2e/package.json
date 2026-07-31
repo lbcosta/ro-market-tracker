@@ -1,0 +1,13 @@
+{
+  "name": "ro-market-tracker-e2e",
+  "private": true,
+  "description": "Testes de navegador do frontend, rodando contra o servidor real ligado ao mock do GnJoy LATAM",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  }
+}

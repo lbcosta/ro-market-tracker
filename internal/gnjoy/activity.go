@@ -28,10 +28,10 @@ const (
 // upstream. O mesmo ID é republicado várias vezes conforme a chamada avança
 // (waiting -> running -> success/error), até chegar num estado final.
 type ActivityEvent struct {
-	ID         int64
-	Label      string
-	Status     ActivityStatus
-	StartedAt  time.Time
+	ID        int64
+	Label     string
+	Status    ActivityStatus
+	StartedAt time.Time
 	// DispatchAt só é relevante quando Status == ActivityWaiting: é o
 	// horário em que essa requisição deve ser (re)disparada, usado pelo
 	// frontend para renderizar o cronômetro regressivo.
