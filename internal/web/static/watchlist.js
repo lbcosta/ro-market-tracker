@@ -15,7 +15,7 @@
 // cada checagem; só volta a notificar se o preço subir acima do alvo e cair
 // de novo depois (ver campo "notified" da entrada, persistido).
 const WATCHLIST_KEY = "ro-market-tracker:watchlist";
-const MONITOR_INTERVAL_MS = 10 * 60 * 1000;
+const MONITOR_INTERVAL_MS = 5 * 60 * 1000;
 
 // lastKnownPrice guarda, em memória (não persistido), o último preço mínimo
 // visto por item — usado para reavaliar o status de "alvo atingido" na hora
