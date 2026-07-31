@@ -28,9 +28,9 @@ jobs:
           - { goos: darwin, goarch: arm64 } # macOS Apple Silicon
           - { goos: windows, goarch: amd64 }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -73,7 +73,7 @@ jobs:
             tar -czf "../${base}.tar.gz" ro-market-tracker README.md
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pacote-${{ matrix.goos }}-${{ matrix.goarch }}
           path: "ro-market-tracker_*"
@@ -91,7 +91,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: pacote-*
@@ -107,7 +107,7 @@ jobs:
       # verificável com "gh attestation verify" — é o que permite a quem baixa
       # confirmar que o binário saiu daqui, e não de outro lugar.
       - name: Atestar a proveniência
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/ro-market-tracker_*
 
