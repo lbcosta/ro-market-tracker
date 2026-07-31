@@ -50,8 +50,9 @@ Toda release traz um `SHA256SUMS` para conferir o download:
 sha256sum -c SHA256SUMS
 ```
 
-Os binários também são publicados com atestação de proveniência, que amarra
-cada artefato ao commit e ao workflow que o gerou:
+Enquanto o repositório for público, os binários também saem com atestação de
+proveniência, que amarra cada artefato ao commit e ao workflow que o gerou (o
+GitHub não oferece o recurso em repositório privado de conta pessoal):
 
 ```sh
 gh attestation verify ro-market-tracker_1.0.0_linux_amd64.tar.gz \

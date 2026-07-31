@@ -106,7 +106,14 @@ jobs:
       # Vincula cada artefato ao commit e ao workflow que o produziu, de forma
       # verificável com "gh attestation verify" — é o que permite a quem baixa
       # confirmar que o binário saiu daqui, e não de outro lugar.
+      #
+      # O GitHub não oferece atestações em repositório privado de conta
+      # pessoal ("Feature not available for user-owned private repositories"),
+      # e sem a condição o passo derruba a publicação inteira. Deixando-a
+      # explícita, a atestação volta a acontecer sozinha se o repositório for
+      # aberto, sem ninguém precisar lembrar de mexer aqui.
       - name: Atestar a proveniência
+        if: ${{ !github.event.repository.private }}
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/ro-market-tracker_*
