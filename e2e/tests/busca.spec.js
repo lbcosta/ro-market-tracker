@@ -30,11 +30,14 @@ test("buscar um item mostra a tabela de resultados", async ({ page }) => {
   // O título usa o nome canônico do primeiro resultado, não o termo digitado.
   await expect(page.locator(".results-title")).toHaveText("Resultados de Espada Primordial");
 
+  // A tabela já vem ordenada por preço crescente por padrão, então a
+  // primeira linha é o anúncio mais barato entre os que casaram — não
+  // necessariamente o item do título.
   const linhas = page.locator(".item-row");
   await expect(linhas).toHaveCount(5);
-  await expect(linhas.first()).toContainText("Espada Primordial");
-  await expect(linhas.first()).toContainText("129.999.999 z");
-  await expect(linhas.first()).toContainText("Vendinha do Zé");
+  await expect(linhas.first()).toContainText("Espada Citadina");
+  await expect(linhas.first()).toContainText("59.000 z");
+  await expect(linhas.first()).toContainText("sk");
 
   // Toda linha se anuncia como expansível.
   await expect(linhas.first().locator(".expand-icon")).toHaveText("▸");
@@ -60,8 +63,9 @@ test("uma falha do mercado vira uma mensagem, não uma página quebrada", async 
 test("expandir uma linha mostra refino, localização e estatísticas", async ({ page }) => {
   await buscar(page, "Espada");
 
-  // A segunda linha é o anúncio +7 (ver as fixtures do mock).
-  const linha = page.locator(".item-row").nth(1);
+  // Com a ordenação padrão por preço crescente, o anúncio +7 (158.000.000 z)
+  // é o quarto da lista (ver as fixtures do mock).
+  const linha = page.locator(".item-row").nth(3);
   await linha.click();
 
   const card = page.locator(".detail-card").first();
@@ -86,8 +90,9 @@ test("expandir uma linha mostra refino, localização e estatísticas", async ({
 test("um item sem refino não ganha badge de refino", async ({ page }) => {
   await buscar(page, "Espada");
 
-  // A última linha é a carta — não é equipamento.
-  const linha = page.locator(".item-row").nth(4);
+  // Com a ordenação padrão por preço crescente, a carta (4.999.999 z) é a
+  // segunda mais barata da lista — não é equipamento.
+  const linha = page.locator(".item-row").nth(1);
   await linha.click();
 
   const card = page.locator(".detail-card").first();

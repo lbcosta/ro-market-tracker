@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 
@@ -206,6 +207,107 @@ func TestSearchErroDoUpstream(t *testing.T) {
 		t.Errorf("status = %d, quero 200 (o HTMX precisa trocar o fragmento)", resp.StatusCode)
 	}
 	wantContains(t, html, `class="error"`, "Não foi possível buscar no mercado agora.")
+}
+
+// TestSearchOrdenaPorPreco confere que "sort=price" reordena os resultados
+// (o fixture "Espada" tem preços bem distintos entre os itens que casam) e
+// que o cabeçalho da coluna carrega o link para inverter a direção.
+func TestSearchOrdenaPorPreco(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	assertOrder := func(t *testing.T, query string, wantAscByPrice []string) {
+		t.Helper()
+		_, html := getHTML(t, srv, "/web/search?"+query)
+		positions := make([]int, len(wantAscByPrice))
+		for i, needle := range wantAscByPrice {
+			pos := strings.Index(html, needle)
+			if pos == -1 {
+				t.Fatalf("HTML não contém %q.\nHTML:\n%s", needle, html)
+			}
+			positions[i] = pos
+		}
+		if !sort.IntsAreSorted(positions) {
+			t.Errorf("ordem inesperada para %q: posições %v (queria em ordem crescente)", query, positions)
+		}
+	}
+
+	precosCrescentes := []string{"59.000 z", "4.999.999 z", "129.999.999 z", "158.000.000 z", "299.999.999 z"}
+	precosDecrescentes := []string{"299.999.999 z", "158.000.000 z", "129.999.999 z", "4.999.999 z", "59.000 z"}
+
+	t.Run("asc", func(t *testing.T) {
+		assertOrder(t, "server=NIDHOGG&item=Espada&sort=price&dir=asc", precosCrescentes)
+	})
+	t.Run("desc", func(t *testing.T) {
+		assertOrder(t, "server=NIDHOGG&item=Espada&sort=price&dir=desc", precosDecrescentes)
+	})
+	t.Run("sort sem dir usa asc", func(t *testing.T) {
+		assertOrder(t, "server=NIDHOGG&item=Espada&sort=price", precosCrescentes)
+	})
+
+	// A busca inicial, sem clicar em nenhum cabeçalho, já vem ordenada por
+	// preço crescente — é o que faz a seta aparecer de cara, deixando claro
+	// que a tabela é ordenável.
+	t.Run("busca inicial já vem ordenada por preço crescente", func(t *testing.T) {
+		assertOrder(t, "server=NIDHOGG&item=Espada", precosCrescentes)
+	})
+	_, html := getHTML(t, srv, "/web/search?server=NIDHOGG&item=Espada")
+	wantContains(t, html, "Preço ▲")
+
+	// O cabeçalho de preço aponta para a direção oposta à atual (alterna ao
+	// clicar de novo) e mostra a seta correspondente.
+	_, html = getHTML(t, srv, "/web/search?server=NIDHOGG&item=Espada&sort=price&dir=asc")
+	wantContains(t, html,
+		`hx-get="/web/search?dir=desc&amp;item=Espada&amp;server=NIDHOGG&amp;sort=price"`,
+		"Preço ▲",
+	)
+	_, html = getHTML(t, srv, "/web/search?server=NIDHOGG&item=Espada&sort=price&dir=desc")
+	wantContains(t, html,
+		`hx-get="/web/search?dir=asc&amp;item=Espada&amp;server=NIDHOGG&amp;sort=price"`,
+		"Preço ▼",
+	)
+}
+
+// TestSearchOrdenaPorQuantidade confere a ordenação pela coluna Qtd, usando
+// um mock dedicado já que o fixture padrão não varia ItemCnt entre os itens.
+func TestSearchOrdenaPorQuantidade(t *testing.T) {
+	mock := gnjoytest.New(gnjoytest.Config{
+		Searches: map[string]gnjoytest.SearchResult{
+			"Poção": {Items: []gnjoytest.ShopListItem{
+				{SvrId: 303, MapId: 835, SSI: "p1", ItemId: 1, ItemName: "Poção", StoreName: "A", ItemPrice: 100, ItemCnt: 50},
+				{SvrId: 303, MapId: 835, SSI: "p2", ItemId: 1, ItemName: "Poção", StoreName: "B", ItemPrice: 100, ItemCnt: 5},
+				{SvrId: 303, MapId: 835, SSI: "p3", ItemId: 1, ItemName: "Poção", StoreName: "C", ItemPrice: 100, ItemCnt: 999},
+			}},
+		},
+	})
+	defer mock.Close()
+
+	client := gnjoy.New(gnjoy.WithBaseURL(mock.URL), gnjoy.WithRateLimit(1000, 1000))
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, client)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	q := url.Values{"server": {"NIDHOGG"}, "item": {"Poção"}, "sort": {"qty"}, "dir": {"asc"}}
+	_, html := getHTML(t, srv, "/web/search?"+q.Encode())
+
+	posB, posA, posC := strings.Index(html, ">B<"), strings.Index(html, ">A<"), strings.Index(html, ">C<")
+	if !(posB < posA && posA < posC) {
+		t.Errorf("ordem por qtd asc incorreta: B=%d A=%d C=%d\nHTML:\n%s", posB, posA, posC, html)
+	}
+	wantContains(t, html, "Qtd ▲")
+}
+
+// TestSearchOrdenacaoInvalidaEIgnorada garante que valores desconhecidos de
+// "sort"/"dir" não quebram a busca — só caem de volta para a ordem da API.
+func TestSearchOrdenacaoInvalidaEIgnorada(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	q := url.Values{"server": {"NIDHOGG"}, "item": {"Espada"}, "sort": {"nome"}, "dir": {"lateral"}}
+	resp, html := getHTML(t, srv, "/web/search?"+q.Encode())
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, quero 200", resp.StatusCode)
+	}
+	wantContains(t, html, "Espada Primordial")
 }
 
 // TestSearchEscapaHTML garante que um nome de loja com marcação (os jogadores

@@ -3,6 +3,8 @@ package web
 import (
 	"log/slog"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -27,6 +29,20 @@ type resultsView struct {
 	ItemID   int
 	ItemName string
 	Items    []gnjoy.ShopListItem
+
+	SortBy       string
+	SortDir      string
+	PriceSortURL string
+	QtySortURL   string
+	PriceArrow   string
+	QtyArrow     string
+}
+
+// sortableColumns mapeia os valores aceitos no parâmetro "sort" para a
+// função que extrai a chave de comparação de cada item.
+var sortableColumns = map[string]func(gnjoy.ShopListItem) int64{
+	"price": func(i gnjoy.ShopListItem) int64 { return i.ItemPrice },
+	"qty":   func(i gnjoy.ShopListItem) int64 { return int64(i.ItemCnt) },
 }
 
 // Search trata GET /web/search e devolve o fragmento HTML da tabela de
@@ -42,6 +58,18 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sortBy := q.Get("sort")
+	if _, ok := sortableColumns[sortBy]; !ok {
+		// A busca inicial (sem clicar em nenhum cabeçalho) já vem ordenada
+		// por preço crescente: é o que torna óbvio, de cara, que a tabela é
+		// ordenável — sem isso a seta só aparece depois do primeiro clique.
+		sortBy = "price"
+	}
+	sortDir := q.Get("dir")
+	if sortDir != "asc" && sortDir != "desc" {
+		sortDir = "asc"
+	}
+
 	// O frontend só procura lojas comprando o item (ou seja, anúncios de
 	// jogadores vendendo o item, que é o que interessa para quem está
 	// rastreando preços) — não há seletor de tipo de negociação na UI.
@@ -55,15 +83,66 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		render(w, "results.html.tmpl", resultsView{Error: "Não foi possível buscar no mercado agora. Tente novamente em instantes."})
 		return
 	}
-	view := resultsView{Server: server, Items: result.Items}
+
+	view := resultsView{
+		Server:  server,
+		Items:   result.Items,
+		SortBy:  sortBy,
+		SortDir: sortDir,
+	}
 	if len(result.Items) > 0 {
 		// O nome digitado pelo usuário é só a palavra de busca; o nome
 		// canônico do item (acentuação, capitalização corretas) só é
-		// conhecido a partir do que a busca de fato encontrou.
+		// conhecido a partir do que a busca de fato encontrou. Isso é lido
+		// antes de ordenar, na ordem em que a API devolveu, para não trocar
+		// de item conforme a coluna/direção de ordenação escolhida.
 		view.ItemName = result.Items[0].ItemName
 		view.ItemID = result.Items[0].ItemId
 	}
+
+	if key, ok := sortableColumns[sortBy]; ok {
+		sort.SliceStable(result.Items, func(i, j int) bool {
+			a, b := key(result.Items[i]), key(result.Items[j])
+			if sortDir == "desc" {
+				return a > b
+			}
+			return a < b
+		})
+	}
+	view.PriceSortURL = sortURL(server, item, "price", sortBy, sortDir)
+	view.QtySortURL = sortURL(server, item, "qty", sortBy, sortDir)
+	view.PriceArrow = sortArrow(sortBy, sortDir, "price")
+	view.QtyArrow = sortArrow(sortBy, sortDir, "qty")
 	render(w, "results.html.tmpl", view)
+}
+
+// sortURL monta a URL de /web/search que reordena os resultados por column,
+// preservando servidor e termo buscado. Clicar de novo na mesma coluna já
+// ordenada inverte a direção; clicar em outra coluna começa em ordem
+// ascendente.
+func sortURL(server, item, column, currentSortBy, currentDir string) string {
+	dir := "asc"
+	if currentSortBy == column && currentDir == "asc" {
+		dir = "desc"
+	}
+	v := url.Values{}
+	v.Set("server", server)
+	v.Set("item", item)
+	v.Set("sort", column)
+	v.Set("dir", dir)
+	return "/web/search?" + v.Encode()
+}
+
+// sortArrow devolve o indicador visual de direção para o cabeçalho de
+// column, ou vazio se a coluna não for a que está ordenando no momento.
+func sortArrow(sortBy, dir, column string) string {
+	if sortBy != column {
+		return ""
+	}
+	if dir == "desc" {
+		return " ▼"
+	}
+	return " ▲"
 }
 
 type expandView struct {

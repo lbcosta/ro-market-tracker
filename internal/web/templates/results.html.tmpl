@@ -13,9 +13,13 @@
   <thead>
     <tr>
       <th>Item</th>
-      <th>Preço</th>
+      <th aria-sort="{{if eq .SortBy "price"}}{{if eq .SortDir "desc"}}descending{{else}}ascending{{end}}{{else}}none{{end}}">
+        <a href="{{.PriceSortURL}}" hx-get="{{.PriceSortURL}}" hx-target="#results" hx-swap="innerHTML" hx-indicator="#search-spinner" class="sort-link">Preço{{.PriceArrow}}</a>
+      </th>
       <th>Loja</th>
-      <th>Qtd</th>
+      <th aria-sort="{{if eq .SortBy "qty"}}{{if eq .SortDir "desc"}}descending{{else}}ascending{{end}}{{else}}none{{end}}">
+        <a href="{{.QtySortURL}}" hx-get="{{.QtySortURL}}" hx-target="#results" hx-swap="innerHTML" hx-indicator="#search-spinner" class="sort-link">Qtd{{.QtyArrow}}</a>
+      </th>
     </tr>
   </thead>
   <tbody>
