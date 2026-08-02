@@ -140,6 +140,32 @@ func (c *Client) discoverActionID(ctx context.Context) (string, error) {
 	return "", ErrActionIDNotFound
 }
 
+// WarmupActionID testa se o action id atual ainda é aceito pelo site,
+// gastando uma única requisição mínima: um pedido de detalhe de loja com
+// parâmetros que não correspondem a loja nenhuma de verdade. Uma resposta
+// "loja não encontrada" (o esperado, e o que ErrActionFailed sinaliza) já
+// confirma que o id está válido; só uma resposta que indique o id
+// desatualizado dispara a redescoberta automática embutida em callAction —
+// do mesmo jeito que aconteceria durante a primeira ação real do usuário, só
+// que fora do caminho crítico dela.
+//
+// Ao contrário de RefreshActionID, NÃO força uma varredura completa dos
+// chunks JS da página: essa varredura, mais cara e mais sujeita a esbarrar
+// no rate limiter do site, só acontece quando de fato é necessária.
+func (c *Client) WarmupActionID(ctx context.Context) error {
+	params := map[string]any{"svrId": 0, "mapId": 0, "ssi": ""}
+	labels := activityLabels{
+		InProgress: "Verificando conexão com o mercado",
+		Success:    "Conexão com o mercado verificada",
+		Error:      "Falha ao verificar conexão com o mercado",
+	}
+	err := c.callAction(ctx, "store", params, nil, labels)
+	if err == nil || errors.Is(err, ErrActionFailed) {
+		return nil
+	}
+	return err
+}
+
 func dedupeStrings(items []string) []string {
 	seen := make(map[string]bool, len(items))
 	out := make([]string, 0, len(items))

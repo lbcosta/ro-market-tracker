@@ -70,6 +70,60 @@ func TestRefreshActionIDAposDeployDoSite(t *testing.T) {
 	}
 }
 
+// TestWarmupActionIDComIdJaValido cobre o caso comum: o action id já é
+// válido, então o aquecimento não deveria pagar o preço de uma redescoberta
+// completa (que bateria na página e em cada chunk JS) — só o da própria
+// chamada de teste. Também confere que a "loja não encontrada" esperada para
+// os parâmetros fictícios (gnjoy.ErrActionFailed) não vaza como erro: do
+// ponto de vista de quem chama, o id foi confirmado com sucesso.
+func TestWarmupActionIDComIdJaValido(t *testing.T) {
+	srv := gnjoytest.New(gnjoytest.DemoConfig())
+	defer srv.Close()
+
+	client := gnjoy.New(
+		gnjoy.WithBaseURL(srv.URL),
+		gnjoy.WithActionID(srv.ActionID()),
+		gnjoy.WithRateLimit(1000, 1000),
+	)
+
+	if err := client.WarmupActionID(context.Background()); err != nil {
+		t.Fatalf("WarmupActionID: %v", err)
+	}
+
+	if got := srv.RequestCount(); got != 1 {
+		t.Errorf("requisições ao upstream = %d, quero 1 (nenhuma redescoberta completa deveria ter sido disparada)", got)
+	}
+}
+
+// TestWarmupActionIDComIdDesatualizado simula o processo subindo já com o id
+// desatualizado (ex.: o site foi redeployado entre uma execução e outra): o
+// aquecimento deve disparar a redescoberta completa por baixo dos panos, de
+// modo que a primeira ação de verdade do usuário, logo em seguida, já
+// funcione de primeira — sem pagar o custo da redescoberta no meio dela.
+func TestWarmupActionIDComIdDesatualizado(t *testing.T) {
+	srv := gnjoytest.New(gnjoytest.DemoConfig())
+	defer srv.Close()
+
+	client := gnjoy.New(
+		gnjoy.WithBaseURL(srv.URL),
+		gnjoy.WithActionID("hash-de-um-deploy-antigo"),
+		gnjoy.WithRateLimit(1000, 1000),
+	)
+
+	if err := client.WarmupActionID(context.Background()); err != nil {
+		t.Fatalf("WarmupActionID: %v", err)
+	}
+
+	before := srv.RequestCount()
+	loc := gnjoy.StoreLocation{SvrId: 303, MapId: 835, SSI: "s-citadina"}
+	if _, err := client.GetStoreDetail(context.Background(), loc); err != nil {
+		t.Fatalf("GetStoreDetail depois do aquecimento: %v", err)
+	}
+	if got := srv.RequestCount() - before; got != 1 {
+		t.Errorf("a ação real custou %d requisições depois do aquecimento, quero 1 (sem precisar de outra redescoberta)", got)
+	}
+}
+
 func TestRefreshActionIDPaginaSemChunks(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("content-type", "text/html")

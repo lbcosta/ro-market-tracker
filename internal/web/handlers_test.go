@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lbcosta/ro-market-tracker/internal/gnjoy"
 	"github.com/lbcosta/ro-market-tracker/internal/gnjoytest"
@@ -75,7 +76,7 @@ func wantContains(t *testing.T, html string, trechos ...string) {
 }
 
 func TestIndex(t *testing.T) {
-	srv, mock := newWebServer(t)
+	srv, _ := newWebServer(t)
 
 	resp, html := getHTML(t, srv, "/")
 	if resp.StatusCode != http.StatusOK {
@@ -94,9 +95,60 @@ func TestIndex(t *testing.T) {
 		`id="watchlist-countdown"`,
 	)
 
-	// A página em si não consulta o mercado: só a busca faz isso.
-	if got := mock.RequestCount(); got != 0 {
-		t.Errorf("carregar a página custou %d requisições ao upstream, quero 0", got)
+	// Abrir a página dispara, em segundo plano, o aquecimento do action id
+	// (ver TestIndexAquecePreviamenteOActionID) — então, ao contrário da
+	// busca em si, ela pode custar requisições ao upstream, só que
+	// assíncronas e fora do caminho crítico da resposta.
+}
+
+// TestIndexAquecePreviamenteOActionID garante que abrir a página já dispara
+// em segundo plano um teste do action id da Server Action do Next.js, em vez
+// de deixar a primeira ação de verdade do usuário (expandir uma linha) topar
+// com o id desatualizado e pagar o custo da redescoberta no meio da
+// interação — o que dava a impressão de o site estar lento. Como o
+// aquecimento roda em background, o teste espera (com um prazo curto) até a
+// chamada chegar ao mock, em vez de checar o efeito imediatamente após a
+// resposta de "/". No caso comum (id já válido, como aqui), o teste custa
+// uma única requisição — a redescoberta completa não é necessária.
+func TestIndexAquecePreviamenteOActionID(t *testing.T) {
+	srv, mock := newWebServer(t)
+
+	if _, err := srv.Client().Get(srv.URL + "/"); err != nil {
+		t.Fatalf("GET /: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for mock.RequestCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := mock.RequestCount(); got != 1 {
+		t.Errorf("requisições ao upstream após abrir a página = %d, quero 1 (a chamada de teste do action id, sem redescoberta completa já que o id atual já é válido)", got)
+	}
+}
+
+// TestIndexAquecimentoSoDisparaUmaVez garante que recarregar a página várias
+// vezes não repete o custo do aquecimento a cada carregamento — só a
+// primeira chamada a "/" do processo dispara o teste do action id.
+func TestIndexAquecimentoSoDisparaUmaVez(t *testing.T) {
+	srv, mock := newWebServer(t)
+
+	for i := 0; i < 3; i++ {
+		if _, err := srv.Client().Get(srv.URL + "/"); err != nil {
+			t.Fatalf("GET / (%d): %v", i, err)
+		}
+	}
+
+	// Dá tempo de sobra para qualquer aquecimento (ou repetição indevida
+	// dele) terminar antes de conferir o total.
+	time.Sleep(200 * time.Millisecond)
+
+	// O número exato não importa aqui, só que ele pare de crescer depois da
+	// primeira rodada — nenhuma das duas recargas seguintes deveria disparar
+	// outro teste do action id.
+	first := mock.RequestCount()
+	time.Sleep(200 * time.Millisecond)
+	if second := mock.RequestCount(); second != first {
+		t.Errorf("requisições ao upstream continuaram crescendo (%d -> %d) depois de várias cargas da página; o aquecimento deveria disparar só uma vez", first, second)
 	}
 }
 

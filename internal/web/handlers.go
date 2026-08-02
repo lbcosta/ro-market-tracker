@@ -1,18 +1,25 @@
 package web
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/lbcosta/ro-market-tracker/internal/gnjoy"
 )
 
 type Handler struct {
 	client *gnjoy.Client
+
+	// warmupOnce garante que o aquecimento do action id (ver warmupActionID)
+	// só dispare uma vez por processo, mesmo que a página seja recarregada
+	// várias vezes.
+	warmupOnce sync.Once
 }
 
 func NewHandler(client *gnjoy.Client) *Handler {
@@ -20,7 +27,30 @@ func NewHandler(client *gnjoy.Client) *Handler {
 }
 
 func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
+	h.warmupActionID()
 	render(w, "index.html.tmpl", nil)
+}
+
+// warmupActionID testa o action id da Server Action do Next.js em segundo
+// plano assim que a página é aberta pela primeira vez, em vez de esperar a
+// primeira ação do usuário (expandir uma linha) topar com o id desatualizado
+// e pagar o custo da redescoberta no meio da interação — o que dá a
+// impressão de o site estar lento. O teste (gnjoy.Client.WarmupActionID)
+// gasta só uma requisição mínima no caso comum (id já válido); a
+// redescoberta completa, mais cara, só é disparada se de fato for
+// necessária. Roda desacoplada do contexto da requisição (que seria
+// cancelado assim que Index devolvesse a resposta) e só uma vez por
+// processo: qualquer chamada de action que mais tarde encontrar o id
+// realmente desatualizado (ex.: um novo deploy do GnJoy) continua se
+// autocorrigindo sozinha (ver gnjoy.Client.callAction).
+func (h *Handler) warmupActionID() {
+	h.warmupOnce.Do(func() {
+		go func() {
+			if err := h.client.WarmupActionID(context.Background()); err != nil {
+				slog.Debug("web: aquecimento do action id não confirmou a chave, seguirá tentando sob demanda", "error", err)
+			}
+		}()
+	})
 }
 
 type resultsView struct {

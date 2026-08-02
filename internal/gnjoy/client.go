@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -168,6 +169,13 @@ type HTTPError struct {
 func (e *HTTPError) Error() string {
 	return fmt.Sprintf("gnjoy: resposta inesperada do upstream: status %d: %s", e.StatusCode, e.Body)
 }
+
+// ErrActionFailed é devolvido quando uma Server Action foi aceita pelo site
+// (ou seja, o action id era válido) mas respondeu "success: false" — o
+// equivalente, do lado do Next.js, a um pedido que não achou o que
+// procurava (ex.: uma loja ou item que já não existe mais). Ao contrário de
+// um action id desatualizado, isso não é sinal de nada errado com o id.
+var ErrActionFailed = errors.New("gnjoy: action reportou falha")
 
 // do executa req respeitando o rate limiter do Client — se necessário, a
 // chamada fica bloqueada em fila até haver "vaga" — e, caso o upstream
@@ -463,7 +471,7 @@ func (c *Client) callActionWithID(ctx context.Context, actionType string, params
 		return err
 	}
 	if !env.Success {
-		return fmt.Errorf("gnjoy: action %q reportou falha", actionType)
+		return fmt.Errorf("gnjoy: action %q reportou falha: %w", actionType, ErrActionFailed)
 	}
 	if out == nil {
 		return nil
