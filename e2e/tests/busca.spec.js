@@ -76,8 +76,8 @@ test("expandir uma linha mostra refino, localização e estatísticas", async ({
   await expect(card).toContainText("Wololol");
   await expect(card).toContainText("mercatung");
 
-  // O comando /navi sai sem a extensão .gat do nome do mapa.
-  await expect(card.locator(".navi-copy")).toHaveText("/navi prt_mk/120/150");
+  // O comando /navi mantém a extensão .gat do nome do mapa.
+  await expect(card.locator(".navi-copy")).toHaveText("/navi prt_mk.gat 120/150");
 
   // Estatísticas calculadas a partir dos agregados diários do histórico.
   await expect(card).toContainText("Últimos 3 dias");

@@ -10,24 +10,24 @@ func TestNaviCommand(t *testing.T) {
 		want    string
 	}{
 		{
-			// O detalhe da loja devolve o nome do arquivo de mapa; o comando
-			// do jogo espera só o nome, sem a extensão.
-			name:    "remove a extensão .gat",
+			// O caso comum: o detalhe da loja já devolve o nome do arquivo
+			// de mapa com a extensão, que o comando do jogo exige.
+			name:    "mantém a extensão .gat",
 			mapName: "prt_mk.gat",
 			x:       "114", y: "180",
-			want: "/navi prt_mk/114/180",
+			want: "/navi prt_mk.gat 114/180",
 		},
 		{
-			name:    "nome já sem extensão passa direto",
+			name:    "nome sem extensão ganha .gat",
 			mapName: "prontera",
 			x:       "1", y: "2",
-			want: "/navi prontera/1/2",
+			want: "/navi prontera.gat 1/2",
 		},
 		{
-			name:    "só o sufixo final é removido",
+			name:    "extensão não é duplicada",
 			mapName: "prt_gat.gat",
 			x:       "0", y: "0",
-			want: "/navi prt_gat/0/0",
+			want: "/navi prt_gat.gat 0/0",
 		},
 	}
 

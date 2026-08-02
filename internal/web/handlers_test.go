@@ -356,8 +356,8 @@ func TestExpand(t *testing.T) {
 		"158.000.000 z",
 		"Wololol",
 		"mercatung",
-		// O comando /navi vem sem a extensão .gat do nome do mapa.
-		"/navi prt_mk/120/150",
+		// O comando /navi mantém a extensão .gat do nome do mapa.
+		"/navi prt_mk.gat 120/150",
 		// Estatísticas dos dias com histórico (ver fixtures do mock).
 		"Últimos 3 dias",
 		"500 z",      // mínimo
