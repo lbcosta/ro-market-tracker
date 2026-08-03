@@ -43,6 +43,34 @@ npx playwright test busca    # só um arquivo
 npm run report               # abre o relatório HTML da última execução
 ```
 
+### Se todo teste falhar no lançamento do navegador
+
+```
+browserType.launch: Target page, context or browser has been closed
+[err] .../chrome: error while loading shared libraries: libnspr4.so: cannot
+open shared object file: No such file or directory
+```
+
+Isso não é problema da suíte: o Chromium foi baixado, mas as bibliotecas de
+sistema de que ele depende não estão instaladas — o que acontece quando o
+`playwright install` roda **sem** o `--with-deps` da receita acima (esse é o
+trecho que precisa de root, e é fácil ele ficar de fora). O erro cita só a
+primeira biblioteca que faltou; para ver todas:
+
+```sh
+ldd ~/.cache/ms-playwright/chromium-*/chrome-linux64/chrome | grep "not found"
+```
+
+No Ubuntu 24.04 basta instalar os pacotes que as fornecem:
+
+```sh
+sudo apt-get install -y libnss3 libnspr4 libasound2t64
+```
+
+O equivalente genérico é `sudo npx playwright install-deps chromium`, que
+instala o conjunto completo recomendado pelo Playwright (bem maior) sem você
+precisar descobrir os nomes dos pacotes.
+
 ## Plano de controle do mock
 
 O binário do mock expõe rotas sob `/__mock/` que os testes usam para provocar
