@@ -8,3 +8,7 @@ e2e/.cache/
 # Perfis de cobertura
 *.cov
 coverage.out
+
+# Recurso de ícone/versão do Windows, gerado pelo release.yml a partir de
+# build/windows/ — não faz sentido versionar um binário derivado.
+cmd/server/*.syso

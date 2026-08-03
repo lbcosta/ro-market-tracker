@@ -34,6 +34,23 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # É o que faz o .exe carregar um ícone próprio e aparecer como "RO
+      # Market Tracker" (não "ro-market-tracker.exe") no Explorer e no
+      # Gerenciador de Tarefas do Windows. O gerador escreve um .syso ao
+      # lado do main.go; o "go build" do passo seguinte o inclui sozinho,
+      # pelo sufixo _windows_amd64 no nome, sem precisar de cgo.
+      - name: Gerar ícone e metadados do executável (Windows)
+        if: matrix.goos == 'windows'
+        env:
+          GOBIN: ${{ github.workspace }}/.bin
+        run: |
+          set -euo pipefail
+          go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0
+          "$GOBIN/goversioninfo" \
+            -icon=build/windows/icone.ico \
+            -o=cmd/server/resource_windows_amd64.syso \
+            build/windows/versioninfo.json
+
       - name: Compilar o binário
         env:
           GOOS: ${{ matrix.goos }}

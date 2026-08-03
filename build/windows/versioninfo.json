@@ -1,0 +1,20 @@
+{
+	"FixedFileInfo": {
+		"FileVersion": { "Major": 0, "Minor": 0, "Patch": 0, "Build": 0 },
+		"ProductVersion": { "Major": 0, "Minor": 0, "Patch": 0, "Build": 0 },
+		"FileFlagsMask": "3f",
+		"FileFlags ": "00",
+		"FileOS": "040004",
+		"FileType": "01",
+		"FileSubType": "00"
+	},
+	"StringFileInfo": {
+		"FileDescription": "RO Market Tracker",
+		"InternalName": "ro-market-tracker",
+		"OriginalFilename": "ro-market-tracker.exe",
+		"ProductName": "RO Market Tracker"
+	},
+	"VarFileInfo": {
+		"Translation": { "LangID": "0409", "CharsetID": "04B0" }
+	}
+}

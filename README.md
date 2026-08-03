@@ -30,6 +30,7 @@ internal/gnjoytest/             mock do site do GnJoy usado por todos os testes
   cmd/mockgnjoy/                  o mesmo mock como processo, para os testes de navegador
 e2e/                            testes de navegador (Playwright)
 docs/webtools-api-research.md   pesquisa original no DevTools (captura de tráfego bruta)
+build/windows/                  ícone e metadados do .exe, usados só pelo release.yml
 ```
 
 ## Baixando o executável
