@@ -168,17 +168,30 @@ Como a busca casa por trecho do nome, o resultado costuma ter mais de uma
 linha: "rapidez" traz "Módulo de S-Rapidez" e "Automódulo de M-Rapidez", e a
 ordem devolvida pelo site (por relevância) é preservada.
 
-O período consultado é o de 7 dias (`period=7` — o site aceita `1`, `7`, `30`
-e `ALL`). Se essa janela vier vazia, `internal/web/history.go` refaz a
-consulta com `ALL` antes de concluir qualquer coisa: um item pode nunca ter
-sido vendido no servidor ou apenas estar parado há mais de uma semana, e a
-diferença muda a resposta. Daí os três desfechos:
+São sempre **duas** consultas, uma por janela (`period` aceita `1`, `7`, `30`
+e `ALL`), porque elas respondem coisas diferentes:
 
-| Últimos 7 dias | Histórico completo | O que aparece |
-| --- | --- | --- |
-| tem vendas | (não consultado) | tabela dos últimos 7 dias |
-| vazio | tem vendas | tabela do histórico completo, avisando que não houve venda na última semana |
-| vazio | vazio | aviso de que o item nunca foi vendido no servidor |
+- **`ALL`, o histórico completo, define QUAIS itens existem.** É ele que
+  monta a lista. Usar a janela curta para isso escondia todo item que não
+  vendeu na última semana: buscar "reformador primordial ii" mostrava só o
+  "III", porque só ele tinha vendido nos últimos 7 dias — o "II" sumia da
+  tela sem o usuário ter como saber que existe.
+- **`7` refina os números.** Em um mercado volátil o mínimo de todo o
+  histórico diz pouco sobre quanto o item custa hoje (para o "Reformador
+  Primordial III", 38,5M no histórico contra 130M na semana).
+
+`mergeHistoryRows` junta as duas: uma linha por item do histórico completo,
+com os números da janela recente para quem vendeu nela. Quando as linhas
+divergem de janela, a tabela ganha uma coluna "Período" dizendo de qual veio
+cada uma — quando todas concordam, o texto acima da tabela já diz isso e a
+coluna não é renderizada. Um item presente só na janela recente (o upstream
+se contradizendo entre as duas consultas) também entra na tabela: a regra é
+não perder item nenhum.
+
+Falhar a consulta de `ALL` é fatal — sem a lista não há tabela. Falhar a de 7
+dias não é: a tabela sai inteira com os números do histórico completo, e cada
+linha já diz de qual janela veio. Se `ALL` vier vazio, o item nunca foi
+vendido no servidor e a resposta é o aviso correspondente, sem tabela.
 
 ### Watchlist
 

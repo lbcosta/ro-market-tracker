@@ -77,6 +77,26 @@ test("um item fora do mercado mostra os preços praticados nos últimos dias", a
   await expect(page.locator(".watchlist-row")).toContainText("Módulo de S-Rapidez");
 });
 
+// Um item que não vendeu na última semana não pode sumir da tabela só por
+// isso: ele existe, tem histórico, e quem procurou precisa saber disso.
+test("um item sem venda recente ainda aparece, com o período da linha", async ({ page }) => {
+  await buscar(page, "Reformador Primordial");
+
+  const linhas = page.locator(".history-row");
+  await expect(linhas).toHaveCount(2);
+
+  // O III vendeu na última semana; o II, não.
+  await expect(linhas.first()).toContainText("Reformador Primordial III");
+  await expect(linhas.first().locator(".history-period")).toHaveText("7 dias");
+  await expect(linhas.nth(1)).toContainText("Reformador Primordial II");
+  await expect(linhas.nth(1).locator(".history-period")).toHaveText("todo o histórico");
+
+  // E dá para rastrear o item que não vendeu na semana, que é justamente o
+  // que alguém procurando por ele quer.
+  await linhas.nth(1).locator(".watchlist-button").click();
+  await expect(page.locator(".watchlist-row")).toContainText("Reformador Primordial II");
+});
+
 test("um item sem vendas na última semana mostra o histórico completo", async ({ page }) => {
   await buscar(page, "Bota do Andarilho");
 

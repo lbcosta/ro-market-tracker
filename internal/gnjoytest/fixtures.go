@@ -26,19 +26,42 @@ func DemoConfig() Config {
 		// está anunciando, a situação de quem procura um item para rastrear e
 		// não o encontra no mercado atual. Cada um cobre um desfecho da
 		// consulta de preços praticados (ver internal/web/history.go).
+		// A consulta de preços praticados é feita em duas janelas: o histórico
+		// completo ("ALL"), que diz quais itens existem, e os últimos 7 dias,
+		// que diz quanto eles custam hoje. Os três termos abaixo cobrem as
+		// três combinações possíveis entre elas.
 		MarketPrices: map[MarketPriceScope]MarketPriceResult{
-			// "Rapidez" casa dois itens diferentes — o caso que revelou que a
-			// tabela precisa ter uma linha por item, e não uma linha só. Os
-			// números são os que o site devolveu de verdade para esse termo.
+			// Todos os itens venderam na última semana. "Rapidez" casa dois
+			// itens diferentes — o caso que revelou que a tabela precisa ter
+			// uma linha por item, e não uma linha só. Os números da janela de
+			// 7 dias são os que o site devolveu de verdade para esse termo; os
+			// do histórico completo são mais largos de propósito, para os
+			// testes verem qual das duas janelas ganhou.
 			{ServerType: "NIDHOGG", SearchWord: "Rapidez", Period: "7"}: {Items: []MarketPriceItem{
 				demoMarketPrice(1000125, "Automódulo de M-Rapidez", 3, 5000000, 8666666, 12000000),
 				demoMarketPrice(25690, "Módulo de S-Rapidez", 2, 5000000, 7500000, 10000000),
 			}},
+			{ServerType: "NIDHOGG", SearchWord: "Rapidez", Period: "ALL"}: {Items: []MarketPriceItem{
+				demoMarketPrice(1000125, "Automódulo de M-Rapidez", 40, 1000000, 4000000, 20000000),
+				demoMarketPrice(25690, "Módulo de S-Rapidez", 30, 900000, 3000000, 18000000),
+			}},
 
-			// Vendido antes, mas não na última semana: a janela de 7 dias vem
-			// vazia e só o histórico completo tem o que mostrar.
+			// Nenhum item vendeu na última semana: a janela curta vem vazia e
+			// só o histórico completo tem o que mostrar.
 			{ServerType: "NIDHOGG", SearchWord: "Bota do Andarilho", Period: "ALL"}: {Items: []MarketPriceItem{
 				demoMarketPrice(610003, "Bota do Andarilho", 14, 800000, 1250000, 2000000),
+			}},
+
+			// Janelas divergentes, o caso que dava item sumido: o "III" vendeu
+			// na última semana e o "II" não, então montar a tabela a partir da
+			// janela curta escondia o "II" — que existe e tem histórico. Estes
+			// são os números reais dos dois no servidor NIDHOGG.
+			{ServerType: "NIDHOGG", SearchWord: "Reformador Primordial", Period: "ALL"}: {Items: []MarketPriceItem{
+				demoMarketPrice(100834, "Reformador Primordial III", 8, 38500000, 80187498, 129999999),
+				demoMarketPrice(100820, "Reformador Primordial II", 8, 109999998, 222624999, 500000000),
+			}},
+			{ServerType: "NIDHOGG", SearchWord: "Reformador Primordial", Period: "7"}: {Items: []MarketPriceItem{
+				demoMarketPrice(100834, "Reformador Primordial III", 2, 129999988, 129999993, 129999999),
 			}},
 
 			// "Elmo Ancestral" não é registrado em nenhum período: item que

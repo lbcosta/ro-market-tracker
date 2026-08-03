@@ -108,33 +108,82 @@ func TestHistoricoTemBotaoDeWatchlistPorLinha(t *testing.T) {
 	}
 }
 
-// TestHistoricoConsultaOsUltimos7Dias trava os parâmetros da consulta: é o
-// período de 7 dias que produz os números que o site mostra na página de
-// preços de mercado.
-func TestHistoricoConsultaOsUltimos7Dias(t *testing.T) {
-	srv, mock := newWebServer(t)
-
-	buscarEm(t, srv, "NIDHOGG", "Rapidez")
-
-	var consultas []url.Values
+// periodosConsultados devolve, na ordem, os períodos das consultas de preços
+// praticados que chegaram ao mock.
+func periodosConsultados(mock *gnjoytest.Server) []string {
+	var periodos []string
 	for _, req := range mock.Requests() {
 		if strings.HasSuffix(req.Path, "/market-price") {
-			consultas = append(consultas, req.Query)
+			periodos = append(periodos, req.Query.Get("period"))
 		}
 	}
-	if len(consultas) != 1 {
-		t.Fatalf("consultas de preços praticados = %d, quero 1 (a janela de 7 dias já tinha o que mostrar)", len(consultas))
+	return periodos
+}
+
+// TestHistoricoConsultaAsDuasJanelas trava os parâmetros e a ordem das
+// consultas. São duas porque elas respondem coisas diferentes: o histórico
+// completo diz quais itens existem, e a janela de 7 dias diz quanto eles
+// custam hoje — e é a segunda que ganha quando o item vendeu nas duas.
+func TestHistoricoConsultaAsDuasJanelas(t *testing.T) {
+	srv, mock := newWebServer(t)
+
+	html := buscarEm(t, srv, "NIDHOGG", "Rapidez")
+
+	if got := periodosConsultados(mock); strings.Join(got, ",") != "ALL,7" {
+		t.Errorf("períodos consultados = %v, quero [ALL 7] (a lista completa primeiro)", got)
 	}
-	q := consultas[0]
-	if got := q.Get("period"); got != "7" {
-		t.Errorf("period = %q, quero \"7\"", got)
+	for _, req := range mock.Requests() {
+		if !strings.HasSuffix(req.Path, "/market-price") {
+			continue
+		}
+		if got := req.Query.Get("searchWord"); got != "Rapidez" {
+			t.Errorf("searchWord = %q, quero \"Rapidez\"", got)
+		}
+		if got := req.Query.Get("serverType"); got != "NIDHOGG" {
+			t.Errorf("serverType = %q, quero \"NIDHOGG\"", got)
+		}
 	}
-	if got := q.Get("searchWord"); got != "Rapidez" {
-		t.Errorf("searchWord = %q, quero \"Rapidez\"", got)
+
+	// Os dois itens venderam na última semana, então são os números dessa
+	// janela que aparecem — não os do histórico completo, mais largos.
+	wantContains(t, html, "8.666.666 z")
+	if strings.Contains(html, "20.000.000 z") {
+		t.Errorf("os números do histórico completo não deveriam aparecer quando há venda recente:\n%s", html)
 	}
-	if got := q.Get("serverType"); got != "NIDHOGG" {
-		t.Errorf("serverType = %q, quero \"NIDHOGG\"", got)
+	// Com todas as linhas na mesma janela, a coluna de período não acrescenta
+	// nada e não deve ser renderizada.
+	if strings.Contains(html, "history-period") {
+		t.Error("a coluna de período só deveria aparecer quando as linhas vêm de janelas diferentes")
 	}
+}
+
+// TestHistoricoNaoPerdeItemSemVendaRecente é a regressão do caso "reformador
+// primordial ii": buscar por ele mostrava só o "III". O "II" existe e tem
+// histórico, mas não vendeu na última semana — e a tabela era montada a
+// partir dessa janela, então ele sumia sem o usuário ter como saber que
+// existe.
+func TestHistoricoNaoPerdeItemSemVendaRecente(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	html := buscarEm(t, srv, "NIDHOGG", "Reformador Primordial")
+
+	if got := strings.Count(html, `class="history-row"`); got != 2 {
+		t.Fatalf("linhas na tabela = %d, quero 2 (o II não pode sumir por não ter vendido na semana)\nHTML:\n%s", got, html)
+	}
+	wantContains(t, html,
+		"Reformador Primordial III",
+		"Reformador Primordial II",
+
+		// O "III" vendeu na última semana: números dessa janela.
+		"129.999.988 z",
+		// O "II" não vendeu: números de todo o histórico, e é por isso que a
+		// linha precisa dizer de qual janela ela veio.
+		"109.999.998 z",
+		"500.000.000 z",
+
+		"history-period",
+		"todo o histórico",
+	)
 }
 
 // TestHistoricoCaiParaOHistoricoCompleto cobre o item que já foi vendido,
@@ -155,14 +204,13 @@ func TestHistoricoCaiParaOHistoricoCompleto(t *testing.T) {
 		"<td>14</td>",
 	)
 
-	var periodos []string
-	for _, req := range mock.Requests() {
-		if strings.HasSuffix(req.Path, "/market-price") {
-			periodos = append(periodos, req.Query.Get("period"))
-		}
+	if got := periodosConsultados(mock); strings.Join(got, ",") != "ALL,7" {
+		t.Errorf("períodos consultados = %v, quero [ALL 7]", got)
 	}
-	if strings.Join(periodos, ",") != "7,ALL" {
-		t.Errorf("períodos consultados = %v, quero [7 ALL]", periodos)
+	// Todas as linhas na mesma janela: o texto acima da tabela já diz qual é,
+	// e a coluna por linha seria só ruído.
+	if strings.Contains(html, "history-period") {
+		t.Error("a coluna de período não deveria aparecer com todas as linhas na mesma janela")
 	}
 }
 
@@ -179,39 +227,54 @@ func TestHistoricoDeItemNuncaVendido(t *testing.T) {
 	}
 }
 
-// TestHistoricoErroDoUpstream: uma falha na consulta é diferente de "nunca
-// foi vendido", que é uma resposta legítima do site.
-func TestHistoricoErroDoUpstream(t *testing.T) {
-	tests := []struct {
-		name         string
-		item         string
-		passthroughs int
-	}{
-		// A busca no mercado passa (não acha nada) e a consulta da janela de
-		// 7 dias falha.
-		{"janela de 7 dias", "Rapidez", 1},
-		// A janela de 7 dias passa (vem vazia) e o histórico completo falha.
-		{"histórico completo", "Bota do Andarilho", 2},
+// TestHistoricoErroNoHistoricoCompleto: sem a lista completa não há tabela a
+// montar, e uma falha é diferente de "nunca foi vendido", que é uma resposta
+// legítima do site.
+func TestHistoricoErroNoHistoricoCompleto(t *testing.T) {
+	srv, mock := newWebServer(t)
+
+	// A busca no mercado passa (não acha nada) e a primeira consulta de
+	// preços praticados, a do histórico completo, falha.
+	mock.QueueFailure(gnjoytest.Failure{Passthrough: true}, 1)
+	mock.QueueFailure(gnjoytest.Failure{Status: http.StatusInternalServerError}, 20)
+
+	resp, html := getHTML(t, srv, "/web/search?server=NIDHOGG&item=Rapidez")
+
+	// O fragmento é trocado no DOM pelo HTMX, então precisa vir com 200 e a
+	// mensagem de erro dentro.
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, quero 200 (o HTMX precisa trocar o fragmento)", resp.StatusCode)
 	}
+	wantContains(t, html, `class="error"`, "Não foi possível consultar o histórico de preços agora.")
+	if strings.Contains(html, "history-table") {
+		t.Errorf("não deveria haver tabela quando a consulta falha:\n%s", html)
+	}
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			srv, mock := newWebServer(t)
-			mock.QueueFailure(gnjoytest.Failure{Passthrough: true}, tt.passthroughs)
-			mock.QueueFailure(gnjoytest.Failure{Status: http.StatusInternalServerError}, 20)
+// TestHistoricoSegueSemAJanelaRecente: falhar a segunda consulta não custa a
+// tabela inteira. A lista completa já está em mãos, e cada linha diz de qual
+// janela vieram seus números — mostrar o histórico completo é bem melhor que
+// um "não foi possível consultar" com os dados na mão.
+func TestHistoricoSegueSemAJanelaRecente(t *testing.T) {
+	srv, mock := newWebServer(t)
 
-			resp, html := getHTML(t, srv, "/web/search?server=NIDHOGG&item="+url.QueryEscape(tt.item))
+	// Passam a busca no mercado e o histórico completo; falha só a janela de
+	// 7 dias e as repetições que o client tentar depois dela.
+	mock.QueueFailure(gnjoytest.Failure{Passthrough: true}, 2)
+	mock.QueueFailure(gnjoytest.Failure{Status: http.StatusInternalServerError}, 20)
 
-			// O fragmento é trocado no DOM pelo HTMX, então precisa vir com
-			// 200 e a mensagem de erro dentro.
-			if resp.StatusCode != http.StatusOK {
-				t.Errorf("status = %d, quero 200 (o HTMX precisa trocar o fragmento)", resp.StatusCode)
-			}
-			wantContains(t, html, `class="error"`, "Não foi possível consultar o histórico de preços agora.")
-			if strings.Contains(html, "history-table") {
-				t.Errorf("não deveria haver tabela quando a consulta falha:\n%s", html)
-			}
-		})
+	_, html := getHTML(t, srv, "/web/search?server=NIDHOGG&item=Rapidez")
+
+	if strings.Contains(html, `class="error"`) {
+		t.Errorf("a tabela deveria sair mesmo sem a janela recente:\n%s", html)
+	}
+	wantContains(t, html,
+		"nenhuma venda nos últimos 7 dias",
+		// Os números do histórico completo, já que a janela recente não veio.
+		"20.000.000 z",
+	)
+	if got := strings.Count(html, `class="history-row"`); got != 2 {
+		t.Errorf("linhas na tabela = %d, quero 2", got)
 	}
 }
 
@@ -232,12 +295,14 @@ func TestHistoricoEscapaHTML(t *testing.T) {
 // do item devolvido pela API, que também alimenta o atributo do botão da
 // watchlist.
 func TestHistoricoEscapaNomeDeItem(t *testing.T) {
+	suspeito := gnjoytest.MarketPriceResult{Items: []gnjoytest.MarketPriceItem{{
+		SvrId: 303, ItemId: 1, ItemName: `<img src=x onerror="alert(1)">`,
+		TotalItemCnt: 1, MinItemPrice: 1, AvgItemPrice: 1, MaxItemPrice: 1,
+	}}}
 	srv, _ := newWebServerWith(t, gnjoytest.Config{
 		MarketPrices: map[gnjoytest.MarketPriceScope]gnjoytest.MarketPriceResult{
-			{ServerType: "NIDHOGG", SearchWord: "Suspeito", Period: "7"}: {Items: []gnjoytest.MarketPriceItem{{
-				SvrId: 303, ItemId: 1, ItemName: `<img src=x onerror="alert(1)">`,
-				TotalItemCnt: 1, MinItemPrice: 1, AvgItemPrice: 1, MaxItemPrice: 1,
-			}}},
+			{ServerType: "NIDHOGG", SearchWord: "Suspeito", Period: "ALL"}: suspeito,
+			{ServerType: "NIDHOGG", SearchWord: "Suspeito", Period: "7"}:   suspeito,
 		},
 	})
 

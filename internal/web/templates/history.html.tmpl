@@ -6,8 +6,10 @@
 <div class="results-header">
   <h2 class="results-title">Histórico de {{.Query}}</h2>
 </div>
-{{if .FullHistory}}
+{{if .AllHistoric}}
 <p class="empty">Nenhum anúncio no mercado agora, e nenhuma venda nos últimos {{.Days}} dias. Abaixo, todo o histórico de vendas no servidor {{.Server}}:</p>
+{{else if .Mixed}}
+<p class="empty">Nenhum anúncio no mercado agora. Vendas no servidor {{.Server}}: dos últimos {{.Days}} dias para quem vendeu nesse período, de todo o histórico para os demais.</p>
 {{else}}
 <p class="empty">Nenhum anúncio no mercado agora. Vendas dos últimos {{.Days}} dias no servidor {{.Server}}:</p>
 {{end}}
@@ -19,17 +21,21 @@
       <th>Médio</th>
       <th>Máximo</th>
       <th>Volume</th>
+      {{if .Mixed}}<th>Período</th>{{end}}
       <th>Rastrear</th>
     </tr>
   </thead>
   <tbody>
-    {{range .Items}}
+    {{range .Rows}}
     <tr class="history-row">
       <td>{{.ItemName}}</td>
       <td>{{formatMoney .MinItemPrice}}</td>
       <td>{{formatMoney .AvgItemPrice}}</td>
       <td>{{formatMoney .MaxItemPrice}}</td>
       <td>{{.TotalItemCnt}}</td>
+      {{if $.Mixed}}
+      <td class="history-period">{{if .Recent}}{{$.Days}} dias{{else}}todo o histórico{{end}}</td>
+      {{end}}
       <td>
         <button type="button" class="watchlist-button"
             data-server="{{$.Server}}" data-item-id="{{.ItemId}}" data-item-name="{{.ItemName}}"

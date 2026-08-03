@@ -71,8 +71,10 @@ O QUE DÁ PARA FAZER NA PÁGINA
     máximo e quanto foi vendido nos últimos 7 dias. Em cada linha há um
     "+ Watchlist" para ser avisado quando aquele item voltar ao mercado.
 
-    Se não tiver havido venda nenhuma na última semana, a página mostra todo
-    o histórico do item e avisa que os números não são recentes.
+    Itens que não venderam na última semana também aparecem: nesse caso os
+    números são de todo o histórico, e a coluna "Período" da linha avisa
+    isso. É o que evita você concluir que um item não existe só porque
+    ninguém o vendeu nos últimos dias.
 
     E se o item nunca tiver sido vendido nesse servidor, ela avisa que não
     há nenhum preço registrado para ele.
