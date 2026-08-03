@@ -54,11 +54,11 @@ func (h *Handler) warmupActionID() {
 }
 
 type resultsView struct {
-	Error    string
-	Server   string
-	ItemID   int
-	ItemName string
-	Items    []gnjoy.ShopListItem
+	Error  string
+	Server string
+	Query  string
+	Items  []gnjoy.ShopListItem
+	Groups []resultsGroup
 
 	SortBy       string
 	SortDir      string
@@ -66,6 +66,38 @@ type resultsView struct {
 	QtySortURL   string
 	PriceArrow   string
 	QtyArrow     string
+}
+
+// resultsGroup é a seção da tabela de resultados com todos os anúncios de um
+// mesmo item de catálogo (mesmo ItemID). Uma busca por palavra pode casar
+// vários itens de nomes diferentes (ex.: "Espada" acha "Espada Primordial",
+// "Espada Citadina" e "Carta Peixe-Espada"); sem agrupar, um único botão "+
+// Watchlist" no topo da tabela não tem como dizer qual desses itens ele
+// adiciona.
+type resultsGroup struct {
+	ItemID   int
+	ItemName string
+	Items    []gnjoy.ShopListItem
+}
+
+// groupItems agrupa items — já ordenados pela coluna/direção escolhida — por
+// ItemID, preservando a ordem de primeira aparição de cada um. Como items já
+// chega ordenado e uma subsequência de uma sequência ordenada continua
+// ordenada, as linhas dentro de cada grupo saem na mesma ordem relativa que
+// teriam na tabela sem agrupamento.
+func groupItems(items []gnjoy.ShopListItem) []resultsGroup {
+	groups := make([]resultsGroup, 0, len(items))
+	index := make(map[int]int, len(items))
+	for _, it := range items {
+		i, ok := index[it.ItemId]
+		if !ok {
+			i = len(groups)
+			index[it.ItemId] = i
+			groups = append(groups, resultsGroup{ItemID: it.ItemId, ItemName: it.ItemName})
+		}
+		groups[i].Items = append(groups[i].Items, it)
+	}
+	return groups
 }
 
 // sortableColumns mapeia os valores aceitos no parâmetro "sort" para a
@@ -123,18 +155,16 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// O nome digitado pelo usuário é só a palavra de busca; o nome canônico
-	// do item (acentuação, capitalização corretas) só é conhecido a partir do
-	// que a busca de fato encontrou. Isso é lido antes de ordenar, na ordem
-	// em que a API devolveu, para não trocar de item conforme a
-	// coluna/direção de ordenação escolhida.
+	// O título mostra o termo digitado, não o nome canônico de um dos itens
+	// casados: a busca por palavra pode casar itens de nomes diferentes (ver
+	// resultsGroup), e não há "o" item cujo nome sirva de título — cada
+	// grupo já mostra o seu próprio nome canônico no cabeçalho da seção.
 	view := resultsView{
-		Server:   server,
-		Items:    result.Items,
-		ItemName: result.Items[0].ItemName,
-		ItemID:   result.Items[0].ItemId,
-		SortBy:   sortBy,
-		SortDir:  sortDir,
+		Server:  server,
+		Items:   result.Items,
+		Query:   item,
+		SortBy:  sortBy,
+		SortDir: sortDir,
 	}
 
 	if key, ok := sortableColumns[sortBy]; ok {
@@ -146,6 +176,7 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 			return a < b
 		})
 	}
+	view.Groups = groupItems(result.Items)
 	view.PriceSortURL = sortURL(server, item, "price", sortBy, sortDir)
 	view.QtySortURL = sortURL(server, item, "qty", sortBy, sortDir)
 	view.PriceArrow = sortArrow(sortBy, sortDir, "price")

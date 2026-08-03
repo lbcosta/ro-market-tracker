@@ -7,10 +7,7 @@
 <p class="empty">Nenhum resultado encontrado.</p>
 {{else}}
 <div class="results-header">
-  <h2 class="results-title">Resultados de {{.ItemName}}</h2>
-  <button type="button" class="watchlist-button"
-      data-server="{{.Server}}" data-item-id="{{.ItemID}}" data-item-name="{{.ItemName}}"
-      onclick="addToWatchlist(this)">+ Watchlist</button>
+  <h2 class="results-title">Resultados de {{.Query}}</h2>
 </div>
 <table class="results-table">
   <thead>
@@ -26,6 +23,17 @@
     </tr>
   </thead>
   <tbody>
+    {{range .Groups}}
+    <tr class="item-group-row">
+      <td colspan="4">
+        <div class="item-group-header">
+          <span class="item-group-name">{{.ItemName}}</span>
+          <button type="button" class="watchlist-button"
+              data-server="{{$.Server}}" data-item-id="{{.ItemID}}" data-item-name="{{.ItemName}}"
+              onclick="addToWatchlist(this)">+ Watchlist</button>
+        </div>
+      </td>
+    </tr>
     {{range .Items}}
     <tr class="item-row" title="Clique para expandir ou recolher os detalhes"
         hx-get="/web/shops/{{.SvrId}}/{{.MapId}}/{{.SSI}}/expand"
@@ -44,6 +52,7 @@
         </div>
       </td>
     </tr>
+    {{end}}
     {{end}}
   </tbody>
 </table>

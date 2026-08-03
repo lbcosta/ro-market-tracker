@@ -47,6 +47,15 @@ async function falharProximasRequisicoes(request, { status = 500, times = 1 } = 
   await request.post(`${MOCK_URL}/__mock/fail?status=${status}&times=${times}`);
 }
 
+// clicarWatchlistDoItem clica o "+ Watchlist" da seção de itemName na tabela
+// de resultados de busca. É preciso escopar pela seção porque a busca por
+// palavra pode casar vários itens de nomes diferentes (cada um com sua
+// própria seção e seu próprio botão) — ver internal/web/handlers.go
+// (resultsGroup).
+async function clicarWatchlistDoItem(page, itemName) {
+  await page.locator(".item-group-row", { hasText: itemName }).locator(".watchlist-button").click();
+}
+
 // anunciarNoMercado faz um item que ninguém estava anunciando aparecer na
 // busca do site falso — a transição que a watchlist em modo de
 // disponibilidade existe para pegar.
@@ -66,6 +75,7 @@ async function atrasarProximasRequisicoes(request, { ms, times = 1 }) {
 module.exports = {
   resetPage,
   buscar,
+  clicarWatchlistDoItem,
   contarRequisicoesAoUpstream,
   zerarContagemDoUpstream,
   falharProximasRequisicoes,

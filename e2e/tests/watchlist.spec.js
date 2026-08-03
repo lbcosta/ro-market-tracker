@@ -1,5 +1,5 @@
 const { test, expect } = require("@playwright/test");
-const { resetPage, buscar, anunciarNoMercado } = require("./helpers");
+const { resetPage, buscar, clicarWatchlistDoItem, anunciarNoMercado } = require("./helpers");
 
 // A consulta de preço da watchlist passa pelo rate limiter do servidor e pode
 // custar várias chamadas (uma por candidato, quando há refino fixado), então
@@ -9,7 +9,7 @@ const ESPERA_PRECO = { timeout: 15_000 };
 /** Adiciona à watchlist o item da busca por "Espada" (a Espada Primordial). */
 async function adicionarEspadaPrimordial(page) {
   await buscar(page, "Espada");
-  await page.click(".watchlist-button");
+  await clicarWatchlistDoItem(page, "Espada Primordial");
   return page.locator(".watchlist-row").first();
 }
 
@@ -33,7 +33,7 @@ test("adicionar um item mostra o menor preço anunciado", async ({ page }) => {
 
 test("adicionar o mesmo item duas vezes não duplica a linha", async ({ page }) => {
   await adicionarEspadaPrimordial(page);
-  await page.click(".watchlist-button");
+  await clicarWatchlistDoItem(page, "Espada Primordial");
 
   await expect(page.locator(".watchlist-row")).toHaveCount(1);
 });

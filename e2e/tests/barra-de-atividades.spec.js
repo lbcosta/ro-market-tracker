@@ -2,6 +2,7 @@ const { test, expect } = require("@playwright/test");
 const {
   resetPage,
   buscar,
+  clicarWatchlistDoItem,
   falharProximasRequisicoes,
   atrasarProximasRequisicoes,
 } = require("./helpers");
@@ -111,7 +112,7 @@ test("uma chamada esperando na fila mostra o cronômetro", async ({ page }) => {
 
 test("a atividade reflete o que a watchlist consulta, não só a busca", async ({ page }) => {
   await buscar(page, "Espada");
-  await page.click(".watchlist-button");
+  await clicarWatchlistDoItem(page, "Espada Primordial");
 
   // A watchlist consulta pelo nome canônico do item.
   await expect(page.locator("#activity-current-label")).toContainText(

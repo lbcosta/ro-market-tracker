@@ -184,9 +184,11 @@ func TestSearch(t *testing.T) {
 	}
 
 	wantContains(t, html,
-		// O título usa o nome canônico do primeiro resultado, não o que o
-		// usuário digitou.
-		"Resultados de Espada Primordial",
+		// O título mostra o termo digitado — a busca por palavra pode casar
+		// itens de nomes diferentes, então não há "o" nome canônico do
+		// resultado para usar aqui (cada seção mostra o seu).
+		"Resultados de Espada",
+		"Espada Primordial",
 		"Espada Citadina",
 		"Carta Peixe-Espada",
 		"129.999.999 z",
@@ -204,6 +206,45 @@ func TestSearch(t *testing.T) {
 	// jogadores vendendo) — não há seletor de tipo na UI.
 	if got := mock.Requests()[0].Query.Get("storeType"); got != "BUY" {
 		t.Errorf("storeType = %q, quero \"BUY\"", got)
+	}
+}
+
+// TestSearchAgrupaItensDeNomesDiferentes é a regressão do caso em que
+// "Espada" casa três itens diferentes (Espada Primordial em três preços,
+// Espada Citadina, Carta Peixe-Espada): um único "+ Watchlist" no topo da
+// tabela não tinha como dizer qual desses itens ele adicionava, e podia
+// adicionar um item que nem aparecia nos resultados. Agora cada item casado
+// tem sua própria seção, com seu próprio botão.
+func TestSearchAgrupaItensDeNomesDiferentes(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	q := url.Values{"server": {"NIDHOGG"}, "item": {"Espada"}}
+	_, html := getHTML(t, srv, "/web/search?"+q.Encode())
+
+	// Um botão por item casado — não mais um único botão ambíguo.
+	if got := strings.Count(html, `class="watchlist-button"`); got != 3 {
+		t.Fatalf(`"watchlist-button" aparece %d vez(es), quero 3 (uma por item casado)`, got)
+	}
+	for id, name := range map[string]string{"600009": "Espada Primordial", "1147": "Espada Citadina", "4089": "Carta Peixe-Espada"} {
+		if got := strings.Count(html, `data-item-id="`+id+`"`); got != 1 {
+			t.Errorf("data-item-id=%q (%s) aparece %d vez(es), quero 1", id, name, got)
+		}
+	}
+
+	// As três linhas de Espada Primordial (itemId 600009, preços diferentes)
+	// ficam juntas na mesma seção — nenhum item de nome diferente no meio.
+	// Ignora a primeira ocorrência do nome, que é o título "Resultados de
+	// Espada Primordial" (nome canônico do primeiro item devolvido pela
+	// busca), fora do corpo da tabela.
+	body := html[strings.Index(html, "<tbody>"):]
+	first := strings.Index(body, "Espada Primordial")
+	last := strings.LastIndex(body, "Espada Primordial")
+	if first == -1 || last <= first {
+		t.Fatalf("não achou as três ocorrências de Espada Primordial no corpo da tabela:\n%s", body)
+	}
+	section := body[first:last]
+	if strings.Contains(section, "Espada Citadina") || strings.Contains(section, "Carta Peixe-Espada") {
+		t.Errorf("itens de nomes diferentes aparecem misturados dentro da seção de Espada Primordial:\n%s", section)
 	}
 }
 

@@ -27,8 +27,10 @@ test("a página abre com busca, watchlist e barra de atividades", async ({ page 
 test("buscar um item mostra a tabela de resultados", async ({ page }) => {
   await buscar(page, "Espada");
 
-  // O título usa o nome canônico do primeiro resultado, não o termo digitado.
-  await expect(page.locator(".results-title")).toHaveText("Resultados de Espada Primordial");
+  // O título mostra o termo digitado — a busca por palavra pode casar itens
+  // de nomes diferentes, então não há "o" nome canônico do resultado para
+  // usar aqui (cada seção mostra o seu, ver .item-group-name).
+  await expect(page.locator(".results-title")).toHaveText("Resultados de Espada");
 
   // A tabela já vem ordenada por preço crescente por padrão, então a
   // primeira linha é o anúncio mais barato entre os que casaram — não

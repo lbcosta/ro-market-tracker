@@ -179,6 +179,36 @@ h1 {
   color: var(--accent);
 }
 
+/* Separa, dentro da mesma tabela de resultados, os anúncios de cada item
+   casado pela busca — sem isso não dá para saber a que item cada linha se
+   refere quando a palavra buscada casa vários (ex.: "Espada" acha "Espada
+   Primordial", "Espada Citadina" e "Carta Peixe-Espada"). */
+.item-group-row td {
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem;
+}
+
+.item-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.item-group-name {
+  font-weight: 600;
+}
+
+/* Discreto como o da tabela de histórico (ver .history-table
+   .watchlist-button): aqui também se repete uma vez por item casado, não é
+   mais o único botão da tabela. */
+.item-group-header .watchlist-button {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
 .item-row {
   cursor: pointer;
 }
