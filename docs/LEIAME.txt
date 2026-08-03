@@ -57,12 +57,21 @@ E DEPOIS?
 
 O QUE DÁ PARA FAZER NA PÁGINA
 
+  Trocar entre tema claro e escuro
+    O ícone de sol/lua no canto superior direito alterna o tema. A escolha
+    fica salva no navegador e vale para as próximas vezes que você abrir a
+    página; sem clicar nele, a página segue o tema (claro ou escuro) que já
+    estiver configurado no seu sistema.
+
   Buscar um item
     Escolha o servidor (NIDHOGG ou FREYA), digite o nome do item e clique na
     lupa. A lista mostra o preço, a loja e a quantidade de cada anúncio.
 
     A busca encontra tudo que tem aquela palavra no nome: procurar por
-    "Espada" também traz "Carta Peixe-Espada", por exemplo.
+    "Espada" também traz "Carta Peixe-Espada", por exemplo. Quando isso
+    acontece, cada item casado ganha sua própria seção na tabela, com o
+    nome em destaque e um "+ Watchlist" ao lado — para não ter dúvida de
+    qual item cada anúncio é, nem de qual deles o botão adiciona.
 
   Procurar um item que ninguém está vendendo
     Se ninguém estiver anunciando o item no momento, a busca não para por
@@ -92,9 +101,9 @@ O QUE DÁ PARA FAZER NA PÁGINA
     dias (mínimo, médio, máximo e quanto foi vendido).
 
   Acompanhar itens na watchlist
-    Depois de buscar um item, clique em "+ Watchlist" (no canto direito, ao
-    lado do título dos resultados). O item passa a aparecer no painel da
-    direita com o menor preço anunciado no momento.
+    Depois de buscar um item, clique em "+ Watchlist" ao lado do nome dele
+    na tabela de resultados. O item passa a aparecer no painel da direita
+    com o menor preço anunciado no momento.
 
     Nesse painel você pode:
 

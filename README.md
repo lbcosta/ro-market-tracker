@@ -17,11 +17,11 @@ internal/gnjoy/                 client para as rotas internas do GnJoy LATAM
   client.go, flight.go            requisições, rate limiting, parser do formato RSC Flight
   discover.go                     descoberta/auto-refresh do action id da Server Action
   refine.go, types.go             parsing de refino, tipos de dados devolvidos pelo client
-  searchword.go                   contorno do hífen, que o backend de busca recusa
+  searchword.go                   contorno do hífen e do "+", que o backend de busca recusa
 internal/api/                   API REST própria (JSON) — handlers + roteador
 internal/web/                   frontend HTMX — handlers + roteador
   templates/                      *.html.tmpl (página, fragmentos de busca/expand)
-  static/                         CSS, JS (app.js, watchlist.js) e htmx.min.js vendorizado
+  static/                         CSS, JS (app.js, watchlist.js, theme.js, activity-bar.js) e htmx.min.js vendorizado
   watchlist.go                    endpoint JSON de preço/refino ao vivo p/ a watchlist
   history.go                      preços praticados p/ item fora do mercado (busca sem resultado)
   stats.go, navi.go               estatísticas de 7 dias, comando /navi
@@ -196,12 +196,15 @@ vendido no servidor e a resposta é o aviso correspondente, sem tabela.
 
 ### Watchlist
 
-Painel fixo do lado direito da página. O botão "+ Watchlist", ao lado do
-cabeçalho "Resultados de \<item\>", adiciona o item buscado (identificado
-por servidor + itemId, para não duplicar) a uma lista mantida inteiramente
-no navegador via `localStorage` (`internal/web/static/watchlist.js`) — não
-há conta de usuário nem persistência no servidor; a lista é local a cada
-navegador.
+Painel fixo do lado direito da página. Como a busca por palavra pode casar
+itens de nomes diferentes (ex.: "Espada" acha "Espada Primordial", "Espada
+Citadina" e "Carta Peixe-Espada"), a tabela de resultados agrupa os anúncios
+por item — uma seção por nome casado, cada uma com seu próprio cabeçalho e
+botão "+ Watchlist". Clicar nele adiciona exatamente o item daquela seção
+(identificado por servidor + itemId, para não duplicar nem confundir com
+outro item de nome parecido) a uma lista mantida inteiramente no navegador
+via `localStorage` (`internal/web/static/watchlist.js`) — não há conta de
+usuário nem persistência no servidor; a lista é local a cada navegador.
 
 Cada linha da watchlist mostra:
 
@@ -232,8 +235,8 @@ O preço atual (e o refino) é a única parte que depende do servidor:
 `GET /web/watchlist/price?server=...&itemId=...&item=...&refine=...`
 (`refine` é opcional) refaz a mesma busca por nome usada na página
 principal, filtra pelo `itemId` exato (uma busca por nome pode casar itens
-diferentes — ver teste com "Espada", que retorna itens com itemId 7110,
-24246 e 600009) e:
+diferentes — ver teste com "Espada", que retorna itens com itemId 600009,
+1147 e 4089) e:
 
 - Sem `refine`: pega o menor preço entre eles e, se a loja mais barata for
   equipamento, busca o refino dela via `GetStoreDetail` — só informativo.
@@ -304,6 +307,19 @@ antes do primeiro intervalo de 10 minutos).
 
 O HTMX é vendorizado localmente em `internal/web/static/htmx.min.js`
 (embutido no binário via `go:embed`) — não depende de CDN em runtime.
+
+### Tema (claro/escuro)
+
+Segue a preferência do sistema (`prefers-color-scheme`) por padrão. O botão
+no topo da página força um dos dois independente do sistema, guardando a
+escolha em `localStorage` (`internal/web/static/theme.js`); um script
+inline em `index.html.tmpl`, antes do `<link>` da folha de estilo, aplica
+essa escolha antes da primeira pintura, para não piscar o tema errado a
+cada carregamento. Todas as cores do `style.css` são variáveis (`--bg`,
+`--text`, `--accent` etc.) redefinidas para os dois modos — não há cor fixa
+fora desse bloco de tokens, propositalmente: foi assim que uma cor "só do
+modo claro" (`--bg-card`) acabou vazando para o modo escuro antes desta
+seção existir, apagando o texto de cima dela.
 
 Variáveis de ambiente (todas opcionais):
 
