@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
-	"sync"
 )
 
 // chunkPathRe casa caminhos de chunks JS publicados pelo Next.js
@@ -94,47 +93,31 @@ func (c *Client) discoverActionID(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("%w: nenhum chunk JS encontrado na página", ErrActionIDNotFound)
 	}
 
-	searchCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	type result struct{ id string }
-	results := make(chan result, len(chunkPaths))
-	sem := make(chan struct{}, 6)
-
-	var wg sync.WaitGroup
+	// Os chunks são varridos um a um, e não em paralelo. O rate limiter do
+	// Client serializa as requisições de qualquer forma (uma por segundo, por
+	// padrão), então disparar todas de uma vez nunca economizou tempo de
+	// verdade contra o site real — só empilhava goroutines na fila do
+	// limiter. Em compensação custava caro: ao achar o id, as buscas
+	// perdedoras eram canceladas com requisições JÁ EM VOO, que chegavam ao
+	// site depois de a descoberta ter terminado. Daí vinham as entradas de
+	// "falha" no log de atividade que não correspondiam a falha nenhuma, e a
+	// impossibilidade de medir com precisão o custo da chamada seguinte —
+	// uma requisição atrasada aparecia na conta dela.
 	for _, path := range chunkPaths {
-		wg.Add(1)
-		go func(path string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			req, err := http.NewRequestWithContext(searchCtx, http.MethodGet, c.baseURL+path, nil)
-			if err != nil {
-				return
-			}
-			chunkBody, err := c.do(req, activityLabels{
-				InProgress: "Procurando a rota atualizada nos arquivos do site",
-				Success:    "Arquivo do site consultado",
-				Error:      "Falha ao consultar arquivo do site",
-			})
-			if err != nil {
-				return
-			}
-			if m := serverActionRe.FindSubmatch(chunkBody); m != nil {
-				results <- result{id: string(m[1])}
-				cancel()
-			}
-		}(path)
-	}
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	for r := range results {
-		if r.id != "" {
-			return r.id, nil
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+		if err != nil {
+			continue
+		}
+		chunkBody, err := c.do(req, activityLabels{
+			InProgress: "Procurando a rota atualizada nos arquivos do site",
+			Success:    "Arquivo do site consultado",
+			Error:      "Falha ao consultar arquivo do site",
+		})
+		if err != nil {
+			continue
+		}
+		if m := serverActionRe.FindSubmatch(chunkBody); m != nil {
+			return string(m[1]), nil
 		}
 	}
 	return "", ErrActionIDNotFound

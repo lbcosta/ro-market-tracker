@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lbcosta/ro-market-tracker/internal/gnjoy"
 	"github.com/lbcosta/ro-market-tracker/internal/gnjoytest"
@@ -197,5 +198,31 @@ func TestUpstreamInalcancavel(t *testing.T) {
 	var httpErr *gnjoy.HTTPError
 	if errors.As(err, &httpErr) {
 		t.Errorf("erro = %v, um erro de rede não deveria virar HTTPError", err)
+	}
+}
+
+// TestRefreshActionIDNaoDeixaRequisicaoParaTras garante que, ao devolver, a
+// descoberta não tem mais nenhuma requisição em voo.
+//
+// Já foi diferente: os chunks eram varridos em paralelo e, ao achar o id, as
+// buscas perdedoras eram canceladas com requisições já enviadas. Elas
+// chegavam ao site depois de a descoberta ter terminado, o que sujava o log
+// de atividade com falhas que não eram falhas e entrava na conta de quem
+// estivesse medindo o custo da chamada seguinte — deixando os testes de
+// redescoberta instáveis justamente na CI, mais lenta.
+func TestRefreshActionIDNaoDeixaRequisicaoParaTras(t *testing.T) {
+	srv := gnjoytest.New(gnjoytest.DemoConfig())
+	defer srv.Close()
+
+	client := gnjoy.New(gnjoy.WithBaseURL(srv.URL), gnjoy.WithRateLimit(1000, 1000))
+
+	if _, err := client.RefreshActionID(context.Background()); err != nil {
+		t.Fatalf("RefreshActionID: %v", err)
+	}
+
+	aoTerminar := srv.RequestCount()
+	time.Sleep(100 * time.Millisecond)
+	if got := srv.RequestCount(); got != aoTerminar {
+		t.Errorf("chegaram %d requisições depois de a descoberta terminar, quero 0", got-aoTerminar)
 	}
 }
