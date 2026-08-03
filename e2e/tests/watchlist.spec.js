@@ -1,5 +1,5 @@
 const { test, expect } = require("@playwright/test");
-const { resetPage, buscar } = require("./helpers");
+const { resetPage, buscar, anunciarNoMercado } = require("./helpers");
 
 // A consulta de preço da watchlist passa pelo rate limiter do servidor e pode
 // custar várias chamadas (uma por candidato, quando há refino fixado), então
@@ -189,6 +189,73 @@ test("remover tira o item da lista", async ({ page }) => {
   // E não volta ao recarregar.
   await page.reload();
   await expect(page.locator(".watchlist-row")).toHaveCount(0);
+});
+
+// --- itens fora do mercado: acompanhar disponibilidade, não preço ---
+
+/**
+ * Adiciona à watchlist o "Módulo de S-Rapidez" pela tabela de histórico —
+ * um item que ninguém está anunciando (ver as fixtures do mock).
+ */
+async function adicionarModuloForaDoMercado(page) {
+  await buscar(page, "Rapidez");
+  await page.locator(".history-row", { hasText: "Módulo de S-Rapidez" }).locator(".watchlist-button").click();
+  return page.locator(".watchlist-row").first();
+}
+
+test("um item fora do mercado entra na watchlist esperando ele aparecer", async ({ page }) => {
+  const linha = await adicionarModuloForaDoMercado(page);
+
+  await expect(linha.locator(".watchlist-name")).toContainText("Módulo de S-Rapidez");
+
+  // Não há preço a esperar, então também não há preço alvo a definir.
+  await expect(linha.locator(".watchlist-target")).toHaveCount(0);
+  await expect(linha.locator(".watchlist-current")).toHaveText("Nenhum anúncio", ESPERA_PRECO);
+  await expect(linha.locator(".watchlist-hit-badge")).not.toBeVisible();
+});
+
+// O ponto do modo de disponibilidade: avisar no primeiro anúncio que
+// aparecer, seja qual for o preço.
+test("quando o item aparece no mercado, a watchlist avisa", async ({ page, request }) => {
+  const linha = await adicionarModuloForaDoMercado(page);
+  await expect(linha.locator(".watchlist-current")).toHaveText("Nenhum anúncio", ESPERA_PRECO);
+
+  await anunciarNoMercado(request, {
+    itemName: "Módulo de S-Rapidez",
+    itemId: 25690,
+    price: 6000000,
+  });
+  await page.click("#watchlist-refresh-now");
+
+  await expect(linha.locator(".watchlist-current")).toHaveText("Produto encontrado por 6.000.000 z", ESPERA_PRECO);
+  await expect(linha.locator(".watchlist-hit-badge")).toBeVisible();
+  await expect(linha.locator(".watchlist-hit-badge")).toHaveText("🎯 Disponível");
+  await expect(linha).toHaveClass(/target-hit/);
+
+  const toast = page.locator(".toast").first();
+  await expect(toast).toBeVisible();
+  await expect(toast).toContainText("Módulo de S-Rapidez");
+  await expect(toast).toContainText("6.000.000 z");
+});
+
+// O modo de acompanhamento é da entrada, não da tela: precisa sobreviver ao
+// recarregamento junto com o resto da watchlist.
+test("o modo de disponibilidade sobrevive a recarregar a página", async ({ page }) => {
+  await adicionarModuloForaDoMercado(page);
+  await page.reload();
+
+  const linha = page.locator(".watchlist-row").first();
+  await expect(linha.locator(".watchlist-target")).toHaveCount(0);
+  await expect(linha.locator(".watchlist-current")).toHaveText("Nenhum anúncio", ESPERA_PRECO);
+});
+
+// Um item adicionado pela tabela de resultados continua no modo de preço: as
+// duas tabelas alimentam a mesma watchlist, com condições diferentes.
+test("um item adicionado pela busca continua acompanhando preço", async ({ page }) => {
+  const linha = await adicionarEspadaPrimordial(page);
+
+  await expect(linha.locator(".watchlist-target")).toHaveText("Alvo: —");
+  await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 129.999.999 z", ESPERA_PRECO);
 });
 
 test("o cronômetro conta e o botão de atualizar agora o reinicia", async ({ page }) => {

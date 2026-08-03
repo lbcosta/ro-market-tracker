@@ -77,6 +77,12 @@ O QUE DÁ PARA FAZER NA PÁGINA
     E se o item nunca tiver sido vendido nesse servidor, ela avisa que não
     há nenhum preço registrado para ele.
 
+    Um item adicionado à watchlist por aqui é acompanhado de um jeito
+    diferente: como ninguém está vendendo, não faz sentido esperar um preço
+    — o que você quer é saber quando ele aparecer. A linha mostra "Nenhum
+    anúncio" e, assim que alguém anunciar, vira "Produto encontrado por
+    <preço>" e você recebe o aviso, seja qual for o valor.
+
   Ver os detalhes de um anúncio
     Clique em qualquer linha da lista para abri-la. Aparecem o refino do
     equipamento, quem é o vendedor, um botão que copia o comando /navi para

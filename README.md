@@ -235,26 +235,47 @@ editar o refino, que dispara uma nova consulta de preço — o filtro mudou, o
 preço em cache não serve mais); adicionar um item novo busca o preço só
 dele (os demais já carregados não são recarregados).
 
+#### Acompanhar preço ou acompanhar disponibilidade
+
+Uma entrada acompanha uma de duas condições, conforme de qual tabela ela foi
+adicionada (é o `data-mode` do botão que decide — ver `MODE_PRICE` e
+`MODE_AVAILABILITY` em `watchlist.js`):
+
+| Origem | O que se espera | Como a linha aparece |
+| --- | --- | --- |
+| tabela de resultados | um **preço** | "Alvo: X" (editável) e "Atual: Y"; avisa quando o menor preço chega ao alvo |
+| tabela de histórico | o item **voltar ao mercado** | "Nenhum anúncio" → "Produto encontrado por Y"; avisa no primeiro anúncio, seja qual for o preço |
+
+O segundo caso existe porque quem chega pela tabela de histórico está
+olhando um item que ninguém está anunciando: não há preço a esperar, e um
+campo "Alvo: —" ali só confundiria o que a linha acompanha — por isso ele
+nem é renderizado nesse modo. Fora essa diferença, a mecânica é a mesma
+descrita abaixo, inclusive o "só um aviso por cruzamento": se o item sumir do
+mercado de novo, a entrada volta a esperar e avisa quando ele reaparecer.
+
+Entradas gravadas antes dessa distinção existir não têm o campo `mode` e são
+tratadas como acompanhamento de preço, que era o único comportamento.
+
 #### Monitoramento e alertas
 
 Enquanto a página estiver aberta, a cada 10 minutos
 (`MONITOR_INTERVAL_MS` em `watchlist.js`) os itens com o indicador ligado
-(verde) têm o preço reconsultado. Se o menor preço atual cair para o valor
-do alvo ou abaixo dele, o usuário é avisado de duas formas:
+(verde) têm o preço reconsultado. Se a condição que o item acompanha passar
+a valer, o usuário é avisado de duas formas:
 
 - Um toast no canto inferior direito da página (sempre aparece, não
   depende de nenhuma permissão do navegador).
 - Uma notificação nativa do sistema operacional, via `Notification` do
   navegador — a permissão só é pedida na hora em que ela faz falta (o
-  primeiro alvo atingido), não no carregamento da página; se for negada
-  ou o navegador não suportar, só o toast é mostrado.
+  primeiro aviso), não no carregamento da página; se for negada ou o
+  navegador não suportar, só o toast é mostrado.
 
-Cada item só notifica uma vez por "cruzamento" do alvo: enquanto o preço
-continuar no alvo ou abaixo dele, as checagens seguintes não repetem o
-aviso (o card e o badge continuam mostrando o status, só o toast/notificação
-não se repetem); se o preço voltar a subir acima do alvo e cair de novo
-depois, um novo aviso é disparado. Esse estado ("já avisado desta vez") é
-persistido em `localStorage` junto com o resto da entrada.
+Cada item só notifica uma vez por "cruzamento" da condição: enquanto ela
+continuar valendo, as checagens seguintes não repetem o aviso (o card e o
+badge continuam mostrando o status, só o toast/notificação não se repetem);
+se ela deixar de valer e voltar a valer depois, um novo aviso é disparado.
+Esse estado ("já avisado desta vez") é persistido em `localStorage` junto
+com o resto da entrada.
 
 Itens com o indicador desligado (vermelho) continuam na lista, mas não são
 reconsultados pela checagem periódica nem podem disparar aviso enquanto

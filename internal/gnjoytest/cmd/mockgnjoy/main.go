@@ -74,12 +74,44 @@ func main() {
 	mux.HandleFunc("GET /__mock/requests", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"count":%d}`, mock.RequestCount())
 	})
-	// Devolve o mock ao estado inicial: sem histórico de requisições e sem
-	// falhas ou atrasos pendentes. Os testes de navegador chamam isso antes
-	// de cada caso, para que nenhum consiga estragar o seguinte.
+	// Faz um item que ninguém estava anunciando passar a aparecer na busca do
+	// mercado. É o que permite exercitar a transição que a watchlist em modo
+	// de disponibilidade existe para pegar ("não tem anúncio" -> "apareceu
+	// um"), impossível de montar só com fixtures estáticas.
+	mux.HandleFunc("POST /__mock/anunciar", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		itemName := q.Get("itemName")
+		if itemName == "" {
+			http.Error(w, "'itemName' é obrigatório", http.StatusBadRequest)
+			return
+		}
+		itemId, err := strconv.Atoi(q.Get("itemId"))
+		if err != nil {
+			http.Error(w, "'itemId' deve ser um número inteiro", http.StatusBadRequest)
+			return
+		}
+		price, err := strconv.ParseInt(q.Get("price"), 10, 64)
+		if err != nil {
+			http.Error(w, "'price' deve ser um número inteiro", http.StatusBadRequest)
+			return
+		}
+		mock.SetSearch(itemName, gnjoytest.SearchResult{Items: []gnjoytest.ShopListItem{{
+			SvrId: 303, ItemId: itemId, MapId: 835, SSI: "anuncio-injetado",
+			ItemName: itemName, DatabaseType: "miscellaneous",
+			StoreName: "Loja que acabou de abrir", ItemPrice: price, ItemCnt: 1,
+			StoreTypeName: "BUY", ItemSellerCharName: "Vendedor novo",
+		}}})
+		w.WriteHeader(http.StatusNoContent)
+	})
+	// Devolve o mock ao estado inicial: sem histórico de requisições, sem
+	// falhas ou atrasos pendentes e com as buscas semeadas de volta (um
+	// anúncio injetado via /__mock/anunciar não pode sobreviver ao teste que
+	// o criou). Os testes de navegador chamam isso antes de cada caso, para
+	// que nenhum consiga estragar o seguinte.
 	mux.HandleFunc("POST /__mock/reset", func(w http.ResponseWriter, r *http.Request) {
 		mock.ResetRequests()
 		mock.ClearFailures()
+		mock.SetSearches(gnjoytest.DemoConfig().Searches)
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.Handle("/", mock)

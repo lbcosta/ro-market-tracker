@@ -8,14 +8,41 @@
 // aplicado no client Go.
 //
 // Monitoramento: a cada MONITOR_INTERVAL_MS, os itens com monitoring=true
-// têm o preço reconsultado; se o menor preço atual cair para o valor do
-// alvo ou abaixo dele, o usuário é avisado (toast + notificação do SO) e a
-// linha do item é destacada. Só existe uma notificação por "cruzamento" do
-// alvo — enquanto o preço continuar abaixo do alvo, não notifica de novo a
-// cada checagem; só volta a notificar se o preço subir acima do alvo e cair
-// de novo depois (ver campo "notified" da entrada, persistido).
+// têm o preço reconsultado; quando a condição que o item acompanha passa a
+// valer, o usuário é avisado (toast + notificação do SO) e a linha é
+// destacada. Só existe uma notificação por "cruzamento" da condição —
+// enquanto ela continuar valendo, não notifica de novo a cada checagem; só
+// volta a notificar se ela deixar de valer e voltar a valer depois (ver
+// campo "notified" da entrada, persistido).
 const WATCHLIST_KEY = "ro-market-tracker:watchlist";
 const MONITOR_INTERVAL_MS = 5 * 60 * 1000;
+
+// Uma entrada da watchlist acompanha uma de duas condições, conforme de onde
+// ela foi adicionada:
+//
+//   MODE_PRICE        o item está à venda e o que se espera é um PREÇO. É o
+//                     modo do botão na tabela de resultados da busca: a linha
+//                     mostra "Alvo: X" (editável) e "Atual: Y", e o aviso
+//                     dispara quando o menor preço chega ao alvo.
+//   MODE_AVAILABILITY o item não está anunciado por ninguém, então não há
+//                     preço a esperar — o que se espera é o item VOLTAR ao
+//                     mercado. É o modo do botão na tabela de histórico (ver
+//                     history.html.tmpl): a linha mostra "Nenhum anúncio" e o
+//                     aviso dispara no primeiro anúncio que aparecer, seja
+//                     qual for o preço.
+//
+// Entradas gravadas antes desta distinção existir não têm o campo "mode";
+// entryMode as trata como MODE_PRICE, que era o único comportamento.
+const MODE_PRICE = "price";
+const MODE_AVAILABILITY = "availability";
+
+function entryMode(entry) {
+  return entry.mode === MODE_AVAILABILITY ? MODE_AVAILABILITY : MODE_PRICE;
+}
+
+function isAvailabilityWatch(entry) {
+  return entryMode(entry) === MODE_AVAILABILITY;
+}
 
 // lastKnownPrice guarda, em memória (não persistido), o último preço mínimo
 // visto por item — usado para reavaliar o status de "alvo atingido" na hora
@@ -79,9 +106,12 @@ function targetLabel(targetPrice) {
   return "Alvo: " + (targetPrice != null ? formatMoney(targetPrice) : "—");
 }
 
-// addToWatchlist é chamado pelo botão "+ Watchlist" nos resultados de
-// busca (ver results.html.tmpl). O item é identificado por server+itemId —
-// duplicar o clique não duplica a entrada.
+// addToWatchlist é chamado pelo botão "+ Watchlist" das duas tabelas: a de
+// resultados da busca (results.html.tmpl) e a de histórico de um item fora do
+// mercado (history.html.tmpl). É o data-mode do botão que diz qual condição a
+// entrada vai acompanhar — ver MODE_PRICE e MODE_AVAILABILITY. O item é
+// identificado por server+itemId, então duplicar o clique não duplica a
+// entrada.
 function addToWatchlist(button) {
   const server = button.dataset.server;
   const itemId = button.dataset.itemId;
@@ -97,6 +127,7 @@ function addToWatchlist(button) {
     server,
     itemId: Number(itemId),
     itemName,
+    mode: button.dataset.mode === MODE_AVAILABILITY ? MODE_AVAILABILITY : MODE_PRICE,
     targetPrice: null,
     refineFilter: null,
     monitoring: true,
@@ -299,24 +330,32 @@ function buildWatchlistRow(entry) {
 
   const pricesRow = document.createElement("div");
   pricesRow.className = "watchlist-prices";
-  const target = document.createElement("span");
-  target.className = "watchlist-target";
-  target.tabIndex = 0;
-  target.title = "Clique para editar o preço alvo";
-  target.textContent = targetLabel(entry.targetPrice);
-  target.addEventListener("click", () => startEditingTarget(target, entry.id));
+
+  // Sem preço alvo no modo de disponibilidade: não há valor a esperar, e um
+  // campo "Alvo: —" ali só confundiria o que a linha está acompanhando.
+  if (!isAvailabilityWatch(entry)) {
+    const target = document.createElement("span");
+    target.className = "watchlist-target";
+    target.tabIndex = 0;
+    target.title = "Clique para editar o preço alvo";
+    target.textContent = targetLabel(entry.targetPrice);
+    target.addEventListener("click", () => startEditingTarget(target, entry.id));
+    pricesRow.appendChild(target);
+  }
+
+  // .watchlist-current é o espaço do estado ao vivo do item nos dois modos —
+  // o preço atual em um, o "tem anúncio?" no outro (ver fetchLivePrice).
   const current = document.createElement("span");
   current.className = "watchlist-current";
-  current.append("Atual: ");
+  if (!isAvailabilityWatch(entry)) current.append("Atual: ");
   const spinner = document.createElement("span");
   spinner.className = "spinner";
   current.appendChild(spinner);
   const hitBadge = document.createElement("span");
   hitBadge.className = "watchlist-hit-badge";
-  hitBadge.textContent = "🎯 Alvo atingido";
+  hitBadge.textContent = isAvailabilityWatch(entry) ? "🎯 Disponível" : "🎯 Alvo atingido";
   hitBadge.hidden = true;
 
-  pricesRow.appendChild(target);
   pricesRow.appendChild(current);
   pricesRow.appendChild(hitBadge);
   info.appendChild(nameRow);
@@ -333,7 +372,7 @@ function buildWatchlistRow(entry) {
   li.appendChild(info);
   li.appendChild(remove);
 
-  if (entry.targetPrice != null && lastKnownPrice.has(entry.id)) {
+  if (lastKnownPrice.has(entry.id)) {
     updateHitState(li, entry, lastKnownPrice.get(entry.id));
   }
   return li;
@@ -369,12 +408,14 @@ async function fetchLivePrice(entry) {
     }
 
     if (!data.found) {
-      currentEl.textContent = "Sem anúncios";
+      currentEl.textContent = isAvailabilityWatch(entry) ? "Nenhum anúncio" : "Sem anúncios";
       lastKnownPrice.set(entry.id, null);
       updateHitState(row, entry, null);
       return;
     }
-    currentEl.textContent = "Atual: " + formatMoney(data.minPrice);
+    currentEl.textContent = isAvailabilityWatch(entry)
+      ? "Produto encontrado por " + formatMoney(data.minPrice)
+      : "Atual: " + formatMoney(data.minPrice);
     lastKnownPrice.set(entry.id, data.minPrice);
     updateHitState(row, entry, data.minPrice);
   } catch {
@@ -382,12 +423,22 @@ async function fetchLivePrice(entry) {
   }
 }
 
-// updateHitState decide se o item está com o alvo atingido (preço mínimo
-// atual <= preço alvo), atualiza o destaque visual da linha e, ao detectar
-// a transição de "não atingido" para "atingido", dispara o aviso (toast +
-// notificação do SO) uma única vez por "cruzamento" do alvo.
+// isHit diz se a condição que a entrada acompanha está valendo agora. No modo
+// de preço é o alvo ter sido alcançado; no de disponibilidade basta existir
+// anúncio, que é a única coisa que se estava esperando.
+function isHit(entry, minPrice) {
+  if (minPrice == null) return false;
+  if (isAvailabilityWatch(entry)) return true;
+  return entry.targetPrice != null && minPrice <= entry.targetPrice;
+}
+
+// updateHitState atualiza o destaque visual da linha conforme isHit e, ao
+// detectar a transição de "não valia" para "vale", dispara o aviso (toast +
+// notificação do SO) uma única vez por cruzamento — o campo "notified" da
+// entrada é o que evita repetir o aviso a cada checagem e é rearmado quando a
+// condição deixa de valer.
 function updateHitState(row, entry, minPrice) {
-  const hit = entry.targetPrice != null && minPrice != null && minPrice <= entry.targetPrice;
+  const hit = isHit(entry, minPrice);
   row.classList.toggle("target-hit", hit);
   const badge = row.querySelector(".watchlist-hit-badge");
   if (badge) badge.hidden = !hit;
@@ -396,7 +447,7 @@ function updateHitState(row, entry, minPrice) {
   if (hit && !wasNotified) {
     const updated = updateEntry(entry.id, { notified: true });
     if (updated) entry.notified = true;
-    notifyTargetHit(entry, minPrice);
+    notifyHit(entry, minPrice);
   } else if (!hit && wasNotified) {
     const updated = updateEntry(entry.id, { notified: false });
     if (updated) entry.notified = false;
@@ -424,13 +475,15 @@ function showToast(message) {
   }, 6000);
 }
 
-// notifyTargetHit sempre mostra o toast (funciona sem nenhuma permissão) e,
-// se o navegador suportar e permitir, também dispara uma notificação nativa
-// do sistema operacional. A permissão só é pedida na hora em que ela de
-// fato faz falta (primeiro alvo atingido), não no carregamento da página.
-async function notifyTargetHit(entry, minPrice) {
-  const message = entry.itemName + " atingiu o alvo: " + formatMoney(minPrice) +
-    " (alvo: " + formatMoney(entry.targetPrice) + ")";
+// notifyHit sempre mostra o toast (funciona sem nenhuma permissão) e, se o
+// navegador suportar e permitir, também dispara uma notificação nativa do
+// sistema operacional. A permissão só é pedida na hora em que ela de fato faz
+// falta (primeiro aviso), não no carregamento da página.
+async function notifyHit(entry, minPrice) {
+  const message = isAvailabilityWatch(entry)
+    ? entry.itemName + " foi encontrado no mercado por " + formatMoney(minPrice)
+    : entry.itemName + " atingiu o alvo: " + formatMoney(minPrice) +
+      " (alvo: " + formatMoney(entry.targetPrice) + ")";
   showToast(message);
 
   if (!("Notification" in window)) return;

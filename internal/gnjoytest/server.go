@@ -215,6 +215,18 @@ func (m *Mock) SetSearch(searchWord string, result SearchResult) {
 	m.searches[searchWord] = result
 }
 
+// SetSearches troca o conjunto inteiro de buscas registradas, descartando o
+// anterior. Serve para devolver o mock ao estado semeado quando um teste
+// injetou um anúncio que os seguintes não devem enxergar.
+func (m *Mock) SetSearches(searches map[string]SearchResult) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if searches == nil {
+		searches = map[string]SearchResult{}
+	}
+	m.searches = searches
+}
+
 // SetStore registra (ou substitui) os detalhes da loja de um ssi.
 func (m *Mock) SetStore(ssi string, store StoreDetail) {
 	m.mu.Lock()

@@ -47,6 +47,14 @@ async function falharProximasRequisicoes(request, { status = 500, times = 1 } = 
   await request.post(`${MOCK_URL}/__mock/fail?status=${status}&times=${times}`);
 }
 
+// anunciarNoMercado faz um item que ninguém estava anunciando aparecer na
+// busca do site falso — a transição que a watchlist em modo de
+// disponibilidade existe para pegar.
+async function anunciarNoMercado(request, { itemName, itemId, price }) {
+  const q = new URLSearchParams({ itemName, itemId: String(itemId), price: String(price) });
+  await request.post(`${MOCK_URL}/__mock/anunciar?${q}`);
+}
+
 // atrasarProximasRequisicoes segura as próximas n respostas do site falso sem
 // falhá-las. É o que torna determinístico observar um estado transitório da
 // interface (o spinner, o texto no gerúndio) em vez de torcer para acertar
@@ -62,4 +70,5 @@ module.exports = {
   zerarContagemDoUpstream,
   falharProximasRequisicoes,
   atrasarProximasRequisicoes,
+  anunciarNoMercado,
 };

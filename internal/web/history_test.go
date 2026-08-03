@@ -99,6 +99,13 @@ func TestHistoricoTemBotaoDeWatchlistPorLinha(t *testing.T) {
 	if got := strings.Count(html, "addToWatchlist(this)"); got != 2 {
 		t.Errorf("botões de watchlist = %d, quero 2 (um por linha)", got)
 	}
+
+	// Quem chega por aqui não está esperando um preço: o item não está à
+	// venda, e o que se espera é ele voltar ao mercado. É o data-mode que diz
+	// isso à watchlist (ver MODE_AVAILABILITY em watchlist.js).
+	if got := strings.Count(html, `data-mode="availability"`); got != 2 {
+		t.Errorf("botões em modo de disponibilidade = %d, quero 2", got)
+	}
 }
 
 // TestHistoricoConsultaOsUltimos7Dias trava os parâmetros da consulta: é o
