@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -108,6 +109,114 @@ func TestSearchShopsSemResultados(t *testing.T) {
 	}
 	if len(result.Items) != 0 || result.TotalCount != 0 {
 		t.Errorf("resultado = %+v, quero vazio", result)
+	}
+}
+
+func TestSearchMarketPrice(t *testing.T) {
+	client, srv := newTestClient(t, gnjoytest.DemoConfig())
+
+	result, err := client.SearchMarketPrice(context.Background(), gnjoy.MarketPriceParams{
+		ServerType: "NIDHOGG",
+		SearchWord: "Rapidez",
+		Period:     gnjoy.MarketPricePeriodWeek,
+	})
+	if err != nil {
+		t.Fatalf("SearchMarketPrice: %v", err)
+	}
+
+	// O termo casa por trecho do nome, então a lista tem mais de um item — é
+	// o que distingue esta busca da consulta de histórico por itemId.
+	if got, want := len(result.Items), 2; got != want {
+		t.Fatalf("len(Items) = %d, quero %d", got, want)
+	}
+	if got, want := result.TotalCount, 2; got != want {
+		t.Errorf("TotalCount = %d, quero %d", got, want)
+	}
+
+	first := result.Items[0]
+	if first.ItemId != 1000125 || first.ItemName != "Automódulo de M-Rapidez" {
+		t.Errorf("primeiro item = (%d, %q), quero (1000125, \"Automódulo de M-Rapidez\")", first.ItemId, first.ItemName)
+	}
+	if first.MinItemPrice != 5000000 || first.AvgItemPrice != 8666666 || first.MaxItemPrice != 12000000 {
+		t.Errorf("preços = (%d, %d, %d), quero (5000000, 8666666, 12000000)",
+			first.MinItemPrice, first.AvgItemPrice, first.MaxItemPrice)
+	}
+	if first.TotalItemCnt != 3 {
+		t.Errorf("TotalItemCnt = %d, quero 3", first.TotalItemCnt)
+	}
+
+	reqs := srv.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("esperava 1 requisição ao upstream, houve %d", len(reqs))
+	}
+	req := reqs[0]
+	if !strings.HasSuffix(req.Path, "/intro/shop-search/market-price") {
+		t.Errorf("path = %q, quero a página de preços de mercado", req.Path)
+	}
+	for param, want := range map[string]string{
+		"serverType": "NIDHOGG",
+		"searchWord": "Rapidez",
+		"period":     "7",
+	} {
+		if got := req.Query.Get(param); got != want {
+			t.Errorf("%s = %q, quero %q", param, got, want)
+		}
+	}
+	if got := req.Header.Get("rsc"); got != "1" {
+		t.Errorf("cabeçalho rsc = %q, quero \"1\"", got)
+	}
+	// A árvore de rotas precisa apontar para esta página, e não para a de
+	// comércio: é ela que diz ao Next.js que navegação está sendo feita.
+	if got := req.Header.Get("next-router-state-tree"); !strings.Contains(got, url.QueryEscape("market-price")) {
+		t.Errorf("next-router-state-tree = %q, quero a rota de market-price", got)
+	}
+}
+
+// TestSearchMarketPriceSemPeriodo confirma que omitir o período não manda o
+// parâmetro vazio: o site trata a ausência dele como "todo o histórico".
+func TestSearchMarketPriceSemPeriodo(t *testing.T) {
+	client, srv := newTestClient(t, gnjoytest.DemoConfig())
+
+	if _, err := client.SearchMarketPrice(context.Background(), gnjoy.MarketPriceParams{
+		ServerType: "NIDHOGG", SearchWord: "Rapidez",
+	}); err != nil {
+		t.Fatalf("SearchMarketPrice: %v", err)
+	}
+
+	if _, ok := srv.Requests()[0].Query["period"]; ok {
+		t.Error("o parâmetro period foi enviado mesmo sem ter sido informado")
+	}
+}
+
+// TestSearchMarketPriceSemResultados: um item nunca vendido devolve lista
+// vazia, não erro — é assim que o site responde.
+func TestSearchMarketPriceSemResultados(t *testing.T) {
+	client, _ := newTestClient(t, gnjoytest.DemoConfig())
+
+	result, err := client.SearchMarketPrice(context.Background(), gnjoy.MarketPriceParams{
+		ServerType: "NIDHOGG", SearchWord: "Elmo Ancestral", Period: gnjoy.MarketPricePeriodAll,
+	})
+	if err != nil {
+		t.Fatalf("SearchMarketPrice: %v", err)
+	}
+	if len(result.Items) != 0 || result.TotalCount != 0 {
+		t.Errorf("resultado = %+v, quero vazio", result)
+	}
+}
+
+func TestSearchMarketPriceErroDoUpstream(t *testing.T) {
+	client, srv := newTestClient(t, gnjoytest.DemoConfig())
+	srv.QueueFailure(gnjoytest.Failure{Status: http.StatusInternalServerError, Body: "boom"}, 1)
+
+	_, err := client.SearchMarketPrice(context.Background(), gnjoy.MarketPriceParams{
+		ServerType: "NIDHOGG", SearchWord: "Rapidez", Period: gnjoy.MarketPricePeriodWeek,
+	})
+	var httpErr *gnjoy.HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("erro = %v, quero um *gnjoy.HTTPError", err)
+	}
+	if httpErr.StatusCode != http.StatusInternalServerError {
+		t.Errorf("StatusCode = %d, quero 500", httpErr.StatusCode)
 	}
 }
 

@@ -43,6 +43,37 @@ type ShopSearchResult struct {
 	TotalCount int            `json:"totalCount"`
 }
 
+// MarketPriceItem é um item devolvido pela busca de preços de mercado: um
+// resumo de por quanto ele andou sendo vendido no servidor, já agregado pelo
+// próprio site no período pedido.
+//
+// SvrId, MapId e SSI vêm junto porque a lista é montada a partir de um
+// anúncio de referência, mas o resumo (mínimo, médio, máximo e volume) é do
+// item no servidor inteiro, não daquele anúncio.
+type MarketPriceItem struct {
+	SvrId           int    `json:"svrId"`
+	ItemId          int    `json:"itemId"`
+	MapId           int    `json:"mapId"`
+	SSI             string `json:"ssi"`
+	ItemName        string `json:"itemName"`
+	DatabaseImgPath string `json:"databaseImgPath"`
+	DatabaseType    string `json:"databaseType"`
+
+	// TotalItemCnt é o volume negociado no período (a coluna "Vol" do site).
+	TotalItemCnt int   `json:"totalItemCnt"`
+	MinItemPrice int64 `json:"minItemPrice"`
+	MaxItemPrice int64 `json:"maxItemPrice"`
+	AvgItemPrice int64 `json:"avgItemPrice"`
+}
+
+// MarketPriceResult é o resultado da busca de preços de mercado por nome de
+// item. Um termo casa por trecho do nome, então a lista costuma ter mais de
+// um item ("rapidez" traz "Módulo de S-Rapidez" e "Automódulo de M-Rapidez").
+type MarketPriceResult struct {
+	Items      []MarketPriceItem `json:"list"`
+	TotalCount int               `json:"totalCount"`
+}
+
 // StoreDetail são os detalhes de uma loja específica (identificada por
 // svrId+mapId+ssi, o "endereço" de uma loja aberta por um personagem no
 // mundo do jogo).

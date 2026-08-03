@@ -46,7 +46,50 @@ test("buscar um item mostra a tabela de resultados", async ({ page }) => {
 test("uma busca sem resultados avisa em vez de mostrar uma tabela vazia", async ({ page }) => {
   await buscar(page, "item que ninguém anuncia", { esperarResultados: false });
 
-  await expect(page.locator("#results")).toContainText("Nenhum resultado encontrado.");
+  await expect(page.locator("#results")).toContainText("nunca foi vendido no servidor NIDHOGG");
+  await expect(page.locator(".results-table")).toHaveCount(0);
+});
+
+// Um item fora do mercado atual é justamente o que alguém quer rastrear: em
+// vez de parar em "nenhum resultado", a busca mostra por quanto cada item que
+// casou com o termo vinha sendo vendido e deixa colocá-los na watchlist.
+test("um item fora do mercado mostra os preços praticados nos últimos dias", async ({ page }) => {
+  await buscar(page, "Rapidez");
+
+  await expect(page.locator(".results-title")).toHaveText("Histórico de Rapidez");
+  await expect(page.locator("#results")).toContainText("Vendas dos últimos 7 dias no servidor NIDHOGG");
+
+  // Uma linha por item que casou com o termo (ver as fixtures do mock).
+  const linhas = page.locator(".history-row");
+  await expect(linhas).toHaveCount(2);
+  await expect(linhas.first()).toContainText("Automódulo de M-Rapidez");
+  await expect(linhas.first()).toContainText("5.000.000 z"); // mínimo
+  await expect(linhas.first()).toContainText("8.666.666 z"); // médio
+  await expect(linhas.first()).toContainText("12.000.000 z"); // máximo
+  await expect(linhas.nth(1)).toContainText("Módulo de S-Rapidez");
+
+  // Nenhum anúncio para expandir — não há loja vendendo o item agora.
+  await expect(page.locator(".item-row")).toHaveCount(0);
+
+  // Cada linha tem seu botão: só quem procurou sabe qual item quer rastrear.
+  await linhas.nth(1).locator(".watchlist-button").click();
+  await expect(page.locator(".watchlist-row")).toHaveCount(1);
+  await expect(page.locator(".watchlist-row")).toContainText("Módulo de S-Rapidez");
+});
+
+test("um item sem vendas na última semana mostra o histórico completo", async ({ page }) => {
+  await buscar(page, "Bota do Andarilho");
+
+  await expect(page.locator("#results")).toContainText("nenhuma venda nos últimos 7 dias");
+  await expect(page.locator("#results")).toContainText("todo o histórico de vendas no servidor NIDHOGG");
+  await expect(page.locator(".history-row")).toHaveCount(1);
+  await expect(page.locator(".history-row")).toContainText("1.250.000 z");
+});
+
+test("um item que nunca foi vendido no servidor avisa em vez de mostrar preços", async ({ page }) => {
+  await buscar(page, "Elmo Ancestral", { esperarResultados: false });
+
+  await expect(page.locator("#results")).toContainText("nunca foi vendido no servidor NIDHOGG");
   await expect(page.locator(".results-table")).toHaveCount(0);
 });
 

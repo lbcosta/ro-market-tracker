@@ -699,3 +699,55 @@ P%C3%B3+de+%C3%89ter
 0:{"a":"$@1","f":"","b":"wqSPZFmWubvOxqWJodTu-"}
 1:{"data":{"itemPriceMin":1500,"itemPriceMax":5000000,"priceDetailChartList":[{"nowDate":"2026-07-24","minItemPrice":400000,"maxItemPrice":1099998,"avgItemPrice":675897},{"nowDate":"2026-07-23","minItemPrice":350000,"maxItemPrice":1300000,"avgItemPrice":947959},{"nowDate":"2026-07-22","minItemPrice":1100000,"maxItemPrice":2499999,"avgItemPrice":1283479},{"nowDate":"2026-07-21","minItemPrice":1000000,"maxItemPrice":1999999,"avgItemPrice":1257676},{"nowDate":"2026-07-20","minItemPrice":1000000,"maxItemPrice":1290000,"avgItemPrice":1159835},{"nowDate":"2026-07-19","minItemPrice":950000,"maxItemPrice":1300000,"avgItemPrice":1163634},{"nowDate":"2026-07-18","minItemPrice":1000000,"maxItemPrice":1350000,"avgItemPrice":1207802},{"nowDate":"2026-07-17","minItemPrice":1000000,"maxItemPrice":1900000,"avgItemPrice":1245721},{"nowDate":"2026-07-16","minItemPrice":999999,"maxItemPrice":3499999,"avgItemPrice":1344211},{"nowDate":"2026-07-15","minItemPrice":130000,"maxItemPrice":1399000,"avgItemPrice":1176437},{"nowDate":"2026-07-14","minItemPrice":800000,"maxItemPrice":1333350,"avgItemPrice":1156197},{"nowDate":"2026-07-13","minItemPrice":1000000,"maxItemPrice":1350000,"avgItemPrice":1155964},{"nowDate":"2026-07-12","minItemPrice":1000000,"maxItemPrice":1310000,"avgItemPrice":1229637},{"nowDate":"2026-07-11","minItemPrice":1200000,"maxItemPrice":1550000,"avgItemPrice":1290448},{"nowDate":"2026-07-10","minItemPrice":1000000,"maxItemPrice":2599999,"avgItemPrice":1431499}],"priceDetailDayList":[{"nowDate":"2026-07-24","minItemPrice":400000,"maxItemPrice":1099998,"avgItemPrice":675897,"itemCnt":2079,"totalCount":32},{"nowDate":"2026-07-23","minItemPrice":350000,"maxItemPrice":1300000,"avgItemPrice":947959,"itemCnt":2810,"totalCount":32},{"nowDate":"2026-07-22","minItemPrice":1100000,"maxItemPrice":2499999,"avgItemPrice":1283479,"itemCnt":1889,"totalCount":32},{"nowDate":"2026-07-21","minItemPrice":1000000,"maxItemPrice":1999999,"avgItemPrice":1257676,"itemCnt":2041,"totalCount":32},{"nowDate":"2026-07-20","minItemPrice":1000000,"maxItemPrice":1290000,"avgItemPrice":1159835,"itemCnt":1406,"totalCount":32},{"nowDate":"2026-07-19","minItemPrice":950000,"maxItemPrice":1300000,"avgItemPrice":1163634,"itemCnt":1877,"totalCount":32},{"nowDate":"2026-07-18","minItemPrice":1000000,"maxItemPrice":1350000,"avgItemPrice":1207802,"itemCnt":1771,"totalCount":32},{"nowDate":"2026-07-17","minItemPrice":1000000,"maxItemPrice":1900000,"avgItemPrice":1245721,"itemCnt":910,"totalCount":32},{"nowDate":"2026-07-16","minItemPrice":999999,"maxItemPrice":3499999,"avgItemPrice":1344211,"itemCnt":2320,"totalCount":32},{"nowDate":"2026-07-15","minItemPrice":130000,"maxItemPrice":1399000,"avgItemPrice":1176437,"itemCnt":2273,"totalCount":32}]},"success":true}
 ````
+## Preços Praticados (página "market-price")
+
+Capturado depois da pesquisa original, ao investigar por que a busca por
+"rapidez" mostrava um item só. A seção de busca de mercado tem DUAS páginas
+(`/intro/shop-search/[id]`): `trading`, documentada acima, lista o que está
+anunciado agora; `market-price` resume por quanto cada item andou sendo
+vendido. Esta é a única que busca **por nome** e já devolve os agregados
+prontos — a Server Action `price` acima é por `itemId` e devolve a série
+diária.
+
+### General
+
+Request URL
+https://ro.gnjoylatam.com/pt/intro/shop-search/market-price?serverType=NIDHOGG&searchWord=rapidez&period=7
+Request Method
+GET
+Status Code
+200 OK
+
+### Request Headers
+
+Os mesmos da busca de lojas: `rsc: 1`, `accept: */*`, `next-url` e
+`next-router-state-tree` apontando para esta página (o segmento "id" da
+árvore é `market-price`, não `trading`), `referer` da própria página.
+
+### Query String Parameters
+
+serverType
+NIDHOGG
+
+searchWord
+rapidez
+
+period
+7
+
+O parâmetro `period` é a janela do resumo. O seletor do site oferece
+`1`, `7` e `30` (rótulos "1 dias", "7 dias", "30 dias") e usa `ALL` como
+padrão — omitir o parâmetro equivale a `ALL`. Um valor fora dessa lista faz
+o site devolver `list` vazia em vez de erro, ou seja, é indistinguível de um
+item que nunca foi vendido.
+
+### Response (trecho relevante; o resto é o mesmo ruído Flight da busca)
+
+````
+10:["$","$L12",null,{"queryParams":{"serverType":"NIDHOGG","searchWord":"rapidez"},"list":[{"svrId":303,"itemId":1000125,"mapId":835,"ssi":"7669502716552779450","itemName":"Automódulo de M-Rapidez","databaseImgPath":"https://assets.gnjoylatam.com/static/upload/database/item/2025/10/1000125.png","databaseType":"miscellaneous","totalItemCnt":3,"minItemPrice":5000000,"maxItemPrice":12000000,"avgItemPrice":8666666},{"svrId":303,"itemId":25690,"mapId":835,"ssi":"7669178055679874761","itemName":"Módulo de S-Rapidez","databaseImgPath":"https://assets.gnjoylatam.com/static/upload/database/item/2025/10/25690.png","databaseType":"miscellaneous","totalItemCnt":2,"minItemPrice":5000000,"maxItemPrice":10000000,"avgItemPrice":7500000}],"totalCount":2}]
+````
+
+Repare que o termo casa por trecho do nome e devolve uma linha por item —
+`totalItemCnt` é o volume negociado no período (a coluna "Vol" do site).
+`svrId`, `mapId` e `ssi` vêm de um anúncio de referência; os agregados são
+do item no servidor inteiro.

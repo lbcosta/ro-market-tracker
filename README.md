@@ -22,6 +22,7 @@ internal/web/                   frontend HTMX — handlers + roteador
   templates/                      *.html.tmpl (página, fragmentos de busca/expand)
   static/                         CSS, JS (app.js, watchlist.js) e htmx.min.js vendorizado
   watchlist.go                    endpoint JSON de preço/refino ao vivo p/ a watchlist
+  history.go                      preços praticados p/ item fora do mercado (busca sem resultado)
   stats.go, navi.go               estatísticas de 7 dias, comando /navi
   activity.go                     stream SSE da atividade do client (barra de atividades)
 internal/gnjoytest/             mock do site do GnJoy usado por todos os testes
@@ -145,6 +146,38 @@ colapsa o card (ícone volta a "▸") sem descartar o que foi carregado;
 clicar uma terceira vez reexpande mostrando os mesmos dados instantaneamente,
 sem refazer a consulta — só um `toggleRow` em `internal/web/static/app.js`
 alternando a visibilidade, nenhuma requisição nova ao upstream.
+
+### Item fora do mercado atual
+
+Quem procura um item para rastrear muitas vezes o procura justamente porque
+ninguém está anunciando. Nesse caso a busca não para em "nenhum resultado":
+ela consulta os preços praticados no servidor e mostra por quanto o item
+vinha sendo vendido, com um "+ Watchlist" por linha para ser avisado quando
+ele voltar a aparecer.
+
+Isso usa a OUTRA página da seção de busca do site,
+`/intro/shop-search/market-price` (`gnjoy.SearchMarketPrice`), que é a única
+que busca **por nome** e já devolve mínimo, médio, máximo e volume agregados
+por item. Não confundir com a Server Action `price` (`GetPriceHistory`), que
+é por `itemId` e devolve a série diária usada no card de detalhe de um
+anúncio — ela não serve aqui, porque um item fora do mercado não traz o
+próprio id junto.
+
+Como a busca casa por trecho do nome, o resultado costuma ter mais de uma
+linha: "rapidez" traz "Módulo de S-Rapidez" e "Automódulo de M-Rapidez", e a
+ordem devolvida pelo site (por relevância) é preservada.
+
+O período consultado é o de 7 dias (`period=7` — o site aceita `1`, `7`, `30`
+e `ALL`). Se essa janela vier vazia, `internal/web/history.go` refaz a
+consulta com `ALL` antes de concluir qualquer coisa: um item pode nunca ter
+sido vendido no servidor ou apenas estar parado há mais de uma semana, e a
+diferença muda a resposta. Daí os três desfechos:
+
+| Últimos 7 dias | Histórico completo | O que aparece |
+| --- | --- | --- |
+| tem vendas | (não consultado) | tabela dos últimos 7 dias |
+| vazio | tem vendas | tabela do histórico completo, avisando que não houve venda na última semana |
+| vazio | vazio | aviso de que o item nunca foi vendido no servidor |
 
 ### Watchlist
 

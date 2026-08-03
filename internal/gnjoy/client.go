@@ -24,10 +24,22 @@ const (
 	// DefaultLocale é o idioma padrão usado nas rotas ("pt", "en" ou "es").
 	DefaultLocale = "pt"
 
-	// tradingPath é o caminho (relativo ao locale) da página de busca de
-	// lojas de comércio, tanto para a busca em si (GET) quanto para as
-	// Server Actions de detalhe (POST).
-	tradingPath = "/intro/shop-search/trading"
+	// shopSearchPath é o caminho (relativo ao locale) da seção de busca de
+	// mercado do site. Ela tem duas páginas, e cada uma responde a uma
+	// pergunta diferente: tradingPageID lista o que está anunciado AGORA,
+	// marketPricePageID resume por quanto cada item ANDOU sendo vendido.
+	shopSearchPath = "/intro/shop-search"
+
+	// tradingPageID é a página de lojas de comércio, usada tanto pela busca
+	// em si (GET) quanto pelas Server Actions de detalhe (POST).
+	tradingPageID = "trading"
+
+	// marketPricePageID é a página de preços de mercado, que resume o
+	// histórico de vendas de cada item que casa com o termo buscado.
+	marketPricePageID = "market-price"
+
+	tradingPath     = shopSearchPath + "/" + tradingPageID
+	marketPricePath = shopSearchPath + "/" + marketPricePageID
 
 	// DefaultActionID é o identificador da Next.js Server Action usado
 	// pelas rotas de detalhe de loja/item/histórico de preço, capturado a
@@ -328,14 +340,15 @@ func (c *Client) setActionID(id string) {
 }
 
 // routerStateTree monta (de forma best-effort) o cabeçalho
-// "Next-Router-State-Tree" que o navegador envia ao navegar dentro da
-// página de comércio. O formato é interno do Next.js e não documentado
+// "Next-Router-State-Tree" que o navegador envia ao navegar dentro da seção
+// de busca de mercado. O formato é interno do Next.js e não documentado
 // oficialmente; o objetivo aqui não é reproduzi-lo byte a byte, e sim
 // enviar uma árvore de rotas plausível o bastante para o servidor aceitar a
-// requisição como uma navegação para tradingPath.
-func (c *Client) routerStateTree() string {
-	leaf := []any{"__PAGE__", map[string]any{}, tradingPath, "refresh"}
-	idNode := []any{[]any{"id", "trading", "d"}, map[string]any{"children": leaf}, nil, nil}
+// requisição como uma navegação para a página pageID (que é o segmento "id"
+// da rota, ver tradingPageID e marketPricePageID).
+func (c *Client) routerStateTree(pageID string) string {
+	leaf := []any{"__PAGE__", map[string]any{}, shopSearchPath + "/" + pageID, "refresh"}
+	idNode := []any{[]any{"id", pageID, "d"}, map[string]any{"children": leaf}, nil, nil}
 	shopSearchNode := []any{"shop-search", map[string]any{"children": idNode}, nil, nil}
 	introNode := []any{"intro", map[string]any{"children": shopSearchNode}, nil, nil}
 	primaryNode := []any{"(primary)", map[string]any{"children": introNode}, nil, nil}
@@ -377,7 +390,7 @@ func (c *Client) SearchShops(ctx context.Context, p SearchShopsParams) (*ShopSea
 	req.Header.Set("accept", "*/*")
 	req.Header.Set("rsc", "1")
 	req.Header.Set("next-url", "/"+c.locale+tradingPath)
-	req.Header.Set("next-router-state-tree", c.routerStateTree())
+	req.Header.Set("next-router-state-tree", c.routerStateTree(tradingPageID))
 	req.Header.Set("referer", c.pageURL(tradingPath))
 
 	labels := activityLabels{
@@ -395,6 +408,77 @@ func (c *Client) SearchShops(ctx context.Context, p SearchShopsParams) (*ShopSea
 		return nil, fmt.Errorf("gnjoy: interpretando resposta da busca: %w", err)
 	}
 	result := &ShopSearchResult{}
+	if err := decodeInto(obj, result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// Períodos aceitos pela busca de preços de mercado, os mesmos oferecidos no
+// seletor do site. Um valor fora desta lista faz o site devolver uma lista
+// vazia, e não um erro — então não dá para distinguir "período inválido" de
+// "item nunca vendido".
+const (
+	// MarketPricePeriodAll é o padrão do site: todo o histórico conhecido.
+	MarketPricePeriodAll   = "ALL"
+	MarketPricePeriodDay   = "1"
+	MarketPricePeriodWeek  = "7"
+	MarketPricePeriodMonth = "30"
+)
+
+// MarketPriceParams são os filtros aceitos pela busca de preços de mercado.
+type MarketPriceParams struct {
+	// ServerType é o nome do servidor (ex.: "NIDHOGG").
+	ServerType string
+	// SearchWord é o nome (ou parte do nome) do item procurado.
+	SearchWord string
+	// Period é a janela do resumo (ver MarketPricePeriod*). Se vazio, o site
+	// usa MarketPricePeriodAll.
+	Period string
+}
+
+// SearchMarketPrice busca, pelo nome do item, o resumo de preços praticados
+// no mercado de um servidor: mínimo, médio, máximo e volume negociado no
+// período, já agregados pelo próprio site.
+//
+// Ao contrário de SearchShops, que só enxerga o que está anunciado neste
+// instante, esta busca enxerga o que já foi vendido — é o que responde
+// "quanto esse item costuma custar?" para um item que ninguém está
+// anunciando agora. Equivale a usar a página "/intro/shop-search/market-price".
+func (c *Client) SearchMarketPrice(ctx context.Context, p MarketPriceParams) (*MarketPriceResult, error) {
+	q := url.Values{}
+	q.Set("serverType", p.ServerType)
+	q.Set("searchWord", p.SearchWord)
+	if p.Period != "" {
+		q.Set("period", p.Period)
+	}
+
+	reqURL := c.pageURL(marketPricePath) + "?" + q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("gnjoy: montando requisição de preços de mercado: %w", err)
+	}
+	req.Header.Set("accept", "*/*")
+	req.Header.Set("rsc", "1")
+	req.Header.Set("next-url", "/"+c.locale+marketPricePath)
+	req.Header.Set("next-router-state-tree", c.routerStateTree(marketPricePageID))
+	req.Header.Set("referer", c.pageURL(marketPricePath))
+
+	labels := activityLabels{
+		InProgress: fmt.Sprintf("Consultando preços praticados de %q no servidor %s", p.SearchWord, p.ServerType),
+		Success:    fmt.Sprintf("Preços praticados de %q no servidor %s consultados", p.SearchWord, p.ServerType),
+		Error:      fmt.Sprintf("Falha ao consultar preços praticados de %q no servidor %s", p.SearchWord, p.ServerType),
+	}
+	body, err := c.do(req, labels)
+	if err != nil {
+		return nil, err
+	}
+
+	obj, err := parseFlightObject(body, "list", "totalCount")
+	if err != nil {
+		return nil, fmt.Errorf("gnjoy: interpretando resposta de preços de mercado: %w", err)
+	}
+	result := &MarketPriceResult{}
 	if err := decodeInto(obj, result); err != nil {
 		return nil, err
 	}
@@ -453,7 +537,7 @@ func (c *Client) callActionWithID(ctx context.Context, actionType string, params
 	req.Header.Set("accept", "text/x-component")
 	req.Header.Set("content-type", "text/plain;charset=UTF-8")
 	req.Header.Set("next-action", actionID)
-	req.Header.Set("next-router-state-tree", c.routerStateTree())
+	req.Header.Set("next-router-state-tree", c.routerStateTree(tradingPageID))
 	req.Header.Set("origin", c.baseURL)
 	req.Header.Set("referer", reqURL)
 

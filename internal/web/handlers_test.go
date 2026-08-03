@@ -207,13 +207,16 @@ func TestSearch(t *testing.T) {
 	}
 }
 
+// TestSearchSemResultados garante que uma busca sem nenhum anúncio nunca
+// renderize a tabela de mercado vazia: ela sai do caminho da busca e passa
+// para o histórico de preços do item (ver history_test.go).
 func TestSearchSemResultados(t *testing.T) {
 	srv, _ := newWebServer(t)
 
 	q := url.Values{"server": {"NIDHOGG"}, "item": {"item que ninguém anuncia"}}
 	_, html := getHTML(t, srv, "/web/search?"+q.Encode())
 
-	wantContains(t, html, "Nenhum resultado encontrado.")
+	wantContains(t, html, "nunca foi vendido no servidor NIDHOGG")
 	if strings.Contains(html, "results-table") {
 		t.Error("uma busca sem resultados não deveria renderizar a tabela")
 	}

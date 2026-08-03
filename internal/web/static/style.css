@@ -151,6 +151,15 @@ h1 {
   border-bottom: 1px solid var(--border);
 }
 
+/* Na tabela de histórico o "+ Watchlist" se repete a cada linha (a busca casa
+   vários itens), então ele precisa ser mais discreto do que o botão único do
+   cabeçalho de resultados — sem virar a coisa mais chamativa da tabela. */
+.history-table .watchlist-button {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
 .sort-link {
   color: inherit;
   text-decoration: none;

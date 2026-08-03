@@ -25,6 +25,10 @@ const (
 	// usado tanto pela busca (GET) quanto pelas Server Actions (POST).
 	tradingPath = "/intro/shop-search/trading"
 
+	// marketPricePath é o caminho da página de preços de mercado, que resume
+	// por quanto cada item andou sendo vendido no servidor.
+	marketPricePath = "/intro/shop-search/market-price"
+
 	// buildID aparece na primeira linha de toda resposta Flight. O valor em
 	// si é irrelevante para o client; está aqui só para que o formato do
 	// payload fique fiel ao real.
@@ -90,6 +94,11 @@ type Config struct {
 	// Searches mapeia o termo buscado (searchWord) para o resultado. Um termo
 	// não registrado devolve uma lista vazia, não um erro — é o que o site faz.
 	Searches map[string]SearchResult
+	// MarketPrices mapeia servidor + termo + período para o resumo de preços
+	// praticados. A chave inclui o período porque a mesma busca devolve
+	// números diferentes (e listas de tamanhos diferentes) em cada janela —
+	// um item vendido há um mês aparece em "ALL" e não aparece em "7".
+	MarketPrices map[MarketPriceScope]MarketPriceResult
 	// Stores e Items mapeiam o ssi da loja para os detalhes correspondentes.
 	Stores map[string]StoreDetail
 	Items  map[string]ItemDetail
@@ -97,32 +106,42 @@ type Config struct {
 	Prices map[int]PriceHistory
 }
 
+// MarketPriceScope identifica uma busca de preços de mercado pelo trio que o
+// site de fato recebe na query string: servidor, termo procurado e período.
+type MarketPriceScope struct {
+	ServerType string
+	SearchWord string
+	Period     string
+}
+
 // Mock é o http.Handler que implementa o site falso. Use New para obter um
 // servidor HTTP pronto em testes de Go, ou monte-o diretamente sobre um
 // http.Server quando precisar de um processo de verdade (veja
 // internal/gnjoytest/cmd/mockgnjoy).
 type Mock struct {
-	mu        sync.Mutex
-	locale    string
-	actionID  string
-	searches  map[string]SearchResult
-	stores    map[string]StoreDetail
-	items     map[string]ItemDetail
-	prices    map[int]PriceHistory
-	failures  []Failure
-	requests  []RecordedRequest
-	unknownID int
+	mu           sync.Mutex
+	locale       string
+	actionID     string
+	searches     map[string]SearchResult
+	marketPrices map[MarketPriceScope]MarketPriceResult
+	stores       map[string]StoreDetail
+	items        map[string]ItemDetail
+	prices       map[int]PriceHistory
+	failures     []Failure
+	requests     []RecordedRequest
+	unknownID    int
 }
 
 // NewMock monta o handler do site falso a partir da configuração informada.
 func NewMock(cfg Config) *Mock {
 	m := &Mock{
-		locale:   cfg.Locale,
-		actionID: cfg.ActionID,
-		searches: cfg.Searches,
-		stores:   cfg.Stores,
-		items:    cfg.Items,
-		prices:   cfg.Prices,
+		locale:       cfg.Locale,
+		actionID:     cfg.ActionID,
+		searches:     cfg.Searches,
+		marketPrices: cfg.MarketPrices,
+		stores:       cfg.Stores,
+		items:        cfg.Items,
+		prices:       cfg.Prices,
 	}
 	if m.locale == "" {
 		m.locale = DefaultLocale
@@ -132,6 +151,9 @@ func NewMock(cfg Config) *Mock {
 	}
 	if m.searches == nil {
 		m.searches = map[string]SearchResult{}
+	}
+	if m.marketPrices == nil {
+		m.marketPrices = map[MarketPriceScope]MarketPriceResult{}
 	}
 	if m.stores == nil {
 		m.stores = map[string]StoreDetail{}
@@ -281,6 +303,8 @@ func (m *Mock) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		m.writeHTMLPage(w)
+	case r.Method == http.MethodGet && r.URL.Path == "/"+m.locale+marketPricePath:
+		m.handleMarketPrice(w, r)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/_next/static/chunks/"):
 		m.writeChunk(w, r.URL.Path)
 	default:
@@ -342,6 +366,50 @@ func (m *Mock) handleSearch(w http.ResponseWriter, r *http.Request) {
 				"storeType":  q.Get("storeType"),
 				"serverType": q.Get("serverType"),
 				"searchWord": searchWord,
+			},
+			"list":       items,
+			"totalCount": total,
+		},
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("content-type", "text/x-component")
+	m.writeFlightNoise(w)
+	fmt.Fprintf(w, "10:%s\n", payload)
+}
+
+// handleMarketPrice responde a busca de preços de mercado, no mesmo formato
+// Flight da busca de lojas — é a mesma página em Next.js, só que outra rota.
+func (m *Mock) handleMarketPrice(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	scope := MarketPriceScope{
+		ServerType: q.Get("serverType"),
+		SearchWord: q.Get("searchWord"),
+		Period:     q.Get("period"),
+	}
+
+	m.mu.Lock()
+	result := m.marketPrices[scope]
+	m.mu.Unlock()
+
+	total := result.TotalCount
+	if total == 0 {
+		total = len(result.Items)
+	}
+	items := result.Items
+	if items == nil {
+		items = []MarketPriceItem{}
+	}
+
+	payload, err := json.Marshal([]any{
+		"$", "$L12", nil,
+		map[string]any{
+			"queryParams": map[string]string{
+				"serverType": scope.ServerType,
+				"searchWord": scope.SearchWord,
 			},
 			"list":       items,
 			"totalCount": total,

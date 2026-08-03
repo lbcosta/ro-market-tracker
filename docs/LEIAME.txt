@@ -64,6 +64,19 @@ O QUE DÁ PARA FAZER NA PÁGINA
     A busca encontra tudo que tem aquela palavra no nome: procurar por
     "Espada" também traz "Carta Peixe-Espada", por exemplo.
 
+  Procurar um item que ninguém está vendendo
+    Se ninguém estiver anunciando o item no momento, a busca não para por
+    aí: ela vai ver por quanto ele vinha sendo vendido no servidor e mostra,
+    para cada item que casou com o que você digitou, o preço mínimo, médio,
+    máximo e quanto foi vendido nos últimos 7 dias. Em cada linha há um
+    "+ Watchlist" para ser avisado quando aquele item voltar ao mercado.
+
+    Se não tiver havido venda nenhuma na última semana, a página mostra todo
+    o histórico do item e avisa que os números não são recentes.
+
+    E se o item nunca tiver sido vendido nesse servidor, ela avisa que não
+    há nenhum preço registrado para ele.
+
   Ver os detalhes de um anúncio
     Clique em qualquer linha da lista para abri-la. Aparecem o refino do
     equipamento, quem é o vendedor, um botão que copia o comando /navi para

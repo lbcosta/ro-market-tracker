@@ -114,20 +114,27 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	view := resultsView{
-		Server:  server,
-		Items:   result.Items,
-		SortBy:  sortBy,
-		SortDir: sortDir,
+	if len(result.Items) == 0 {
+		// Item fora do mercado atual: em vez de parar em "nenhum resultado",
+		// vale checar se ele já foi vendido no servidor alguma vez — é o que
+		// interessa a quem quer rastrear um item que ninguém está anunciando
+		// no momento (ver history.go).
+		render(w, "history.html.tmpl", h.priceHistory(r.Context(), server, item))
+		return
 	}
-	if len(result.Items) > 0 {
-		// O nome digitado pelo usuário é só a palavra de busca; o nome
-		// canônico do item (acentuação, capitalização corretas) só é
-		// conhecido a partir do que a busca de fato encontrou. Isso é lido
-		// antes de ordenar, na ordem em que a API devolveu, para não trocar
-		// de item conforme a coluna/direção de ordenação escolhida.
-		view.ItemName = result.Items[0].ItemName
-		view.ItemID = result.Items[0].ItemId
+
+	// O nome digitado pelo usuário é só a palavra de busca; o nome canônico
+	// do item (acentuação, capitalização corretas) só é conhecido a partir do
+	// que a busca de fato encontrou. Isso é lido antes de ordenar, na ordem
+	// em que a API devolveu, para não trocar de item conforme a
+	// coluna/direção de ordenação escolhida.
+	view := resultsView{
+		Server:   server,
+		Items:    result.Items,
+		ItemName: result.Items[0].ItemName,
+		ItemID:   result.Items[0].ItemId,
+		SortBy:   sortBy,
+		SortDir:  sortDir,
 	}
 
 	if key, ok := sortableColumns[sortBy]; ok {

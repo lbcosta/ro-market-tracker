@@ -1,0 +1,42 @@
+{{if .Error}}
+<p class="error">{{.Error}}</p>
+{{else if .Message}}
+<p class="empty">{{.Message}}</p>
+{{else}}
+<div class="results-header">
+  <h2 class="results-title">Histórico de {{.Query}}</h2>
+</div>
+{{if .FullHistory}}
+<p class="empty">Nenhum anúncio no mercado agora, e nenhuma venda nos últimos {{.Days}} dias. Abaixo, todo o histórico de vendas no servidor {{.Server}}:</p>
+{{else}}
+<p class="empty">Nenhum anúncio no mercado agora. Vendas dos últimos {{.Days}} dias no servidor {{.Server}}:</p>
+{{end}}
+<table class="results-table history-table">
+  <thead>
+    <tr>
+      <th>Item</th>
+      <th>Mínimo</th>
+      <th>Médio</th>
+      <th>Máximo</th>
+      <th>Volume</th>
+      <th>Rastrear</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .Items}}
+    <tr class="history-row">
+      <td>{{.ItemName}}</td>
+      <td>{{formatMoney .MinItemPrice}}</td>
+      <td>{{formatMoney .AvgItemPrice}}</td>
+      <td>{{formatMoney .MaxItemPrice}}</td>
+      <td>{{.TotalItemCnt}}</td>
+      <td>
+        <button type="button" class="watchlist-button"
+            data-server="{{$.Server}}" data-item-id="{{.ItemId}}" data-item-name="{{.ItemName}}"
+            onclick="addToWatchlist(this)">+ Watchlist</button>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}

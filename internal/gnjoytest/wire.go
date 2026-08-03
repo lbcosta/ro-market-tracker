@@ -40,6 +40,29 @@ type SearchResult struct {
 	TotalCount int
 }
 
+// MarketPriceItem é um item da lista devolvida pela busca de preços de
+// mercado: o resumo de vendas do item no servidor, já agregado pelo site.
+type MarketPriceItem struct {
+	SvrId           int    `json:"svrId"`
+	ItemId          int    `json:"itemId"`
+	MapId           int    `json:"mapId"`
+	SSI             string `json:"ssi"`
+	ItemName        string `json:"itemName"`
+	DatabaseImgPath string `json:"databaseImgPath"`
+	DatabaseType    string `json:"databaseType"`
+	TotalItemCnt    int    `json:"totalItemCnt"`
+	MinItemPrice    int64  `json:"minItemPrice"`
+	MaxItemPrice    int64  `json:"maxItemPrice"`
+	AvgItemPrice    int64  `json:"avgItemPrice"`
+}
+
+// MarketPriceResult é o que a busca de preços de mercado devolve para um
+// termo: um resumo por item que casou com ele, e o total.
+type MarketPriceResult struct {
+	Items      []MarketPriceItem
+	TotalCount int
+}
+
 // StoreDetail são os detalhes de uma loja específica, como devolvidos pela
 // Server Action "store".
 //

@@ -1,6 +1,9 @@
 {{if .Error}}
 <p class="error">{{.Error}}</p>
 {{else if not .Items}}
+{{/* A busca sem resultados não chega aqui: ela cai para o histórico de
+     preços do item (history.html.tmpl). Este ramo é só a garantia de que
+     uma lista vazia nunca vire uma tabela com cabeçalho e nenhuma linha. */}}
 <p class="empty">Nenhum resultado encontrado.</p>
 {{else}}
 <div class="results-header">

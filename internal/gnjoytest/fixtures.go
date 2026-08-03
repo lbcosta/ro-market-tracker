@@ -22,6 +22,28 @@ func DemoConfig() Config {
 	}
 
 	return Config{
+		// Nenhum dos termos abaixo aparece em Searches: são itens que ninguém
+		// está anunciando, a situação de quem procura um item para rastrear e
+		// não o encontra no mercado atual. Cada um cobre um desfecho da
+		// consulta de preços praticados (ver internal/web/history.go).
+		MarketPrices: map[MarketPriceScope]MarketPriceResult{
+			// "Rapidez" casa dois itens diferentes — o caso que revelou que a
+			// tabela precisa ter uma linha por item, e não uma linha só. Os
+			// números são os que o site devolveu de verdade para esse termo.
+			{ServerType: "NIDHOGG", SearchWord: "Rapidez", Period: "7"}: {Items: []MarketPriceItem{
+				demoMarketPrice(1000125, "Automódulo de M-Rapidez", 3, 5000000, 8666666, 12000000),
+				demoMarketPrice(25690, "Módulo de S-Rapidez", 2, 5000000, 7500000, 10000000),
+			}},
+
+			// Vendido antes, mas não na última semana: a janela de 7 dias vem
+			// vazia e só o histórico completo tem o que mostrar.
+			{ServerType: "NIDHOGG", SearchWord: "Bota do Andarilho", Period: "ALL"}: {Items: []MarketPriceItem{
+				demoMarketPrice(610003, "Bota do Andarilho", 14, 800000, 1250000, 2000000),
+			}},
+
+			// "Elmo Ancestral" não é registrado em nenhum período: item que
+			// nunca foi vendido no servidor.
+		},
 		Searches: map[string]SearchResult{
 			// Busca ampla: casa itens diferentes que compartilham a palavra,
 			// que é o comportamento do site e o motivo de a watchlist
@@ -75,6 +97,22 @@ func DemoConfig() Config {
 			// mostrar "Sem histórico de vendas recente" em vez de zeros.
 			4005: {},
 		},
+	}
+}
+
+func demoMarketPrice(itemId int, name string, vol int, min, avg, max int64) MarketPriceItem {
+	return MarketPriceItem{
+		SvrId:           303,
+		ItemId:          itemId,
+		MapId:           835,
+		SSI:             "mp-" + name,
+		ItemName:        name,
+		DatabaseImgPath: "https://assets.example.invalid/" + name + ".png",
+		DatabaseType:    "miscellaneous",
+		TotalItemCnt:    vol,
+		MinItemPrice:    min,
+		MaxItemPrice:    max,
+		AvgItemPrice:    avg,
 	}
 }
 
