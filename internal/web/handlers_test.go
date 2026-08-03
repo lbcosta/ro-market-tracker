@@ -160,6 +160,7 @@ func TestArquivosEstaticos(t *testing.T) {
 	for _, path := range []string{
 		"/static/style.css",
 		"/static/app.js",
+		"/static/theme.js",
 		"/static/watchlist.js",
 		"/static/activity-bar.js",
 		"/static/htmx.min.js",

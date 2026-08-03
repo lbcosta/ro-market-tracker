@@ -1,10 +1,74 @@
+/* Tema "Terminal do Mercador": ardósia neutra + cião. Os tokens abaixo são a
+   única fonte de cor da página — todo o resto do arquivo lê var(--x), nunca
+   um hex direto, para não repetir o defeito do tema anterior (várias cores
+   só existiam para o modo claro, e qualquer componente novo que as usasse
+   saía ilegível no escuro).
+   Claro e escuro são definidos de propósito, um não é o inverso mecânico do
+   outro: --accent-ink muda de branco para um cião bem escuro porque o cião
+   do modo escuro é claro demais para receber texto branco em cima. */
 :root {
-  color-scheme: light dark;
-  --border: #d9d3c7;
-  --muted: #6b6255;
-  --accent: #8a5a2b;
-  --bg-card: #faf7f0;
+  color-scheme: light;
+  --bg: #f2f5f6;
+  --bg-card: #ffffff;
+  --bg-row: #ffffff;
+  --border: #d5dde1;
+  --text: #141e24;
+  --muted: #5c707a;
+  --accent: #0f8a8a;
+  --accent-ink: #ffffff;
+  --success: #2f9e44;
+  --danger: #a4291f;
   --activity-bar-collapsed-height: 2.75rem;
+  --activity-yellow: #9c7a17;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #0d1417;
+    --bg-card: #131c20;
+    --bg-row: #101820;
+    --border: #243138;
+    --text: #e3edf0;
+    --muted: #83969f;
+    --accent: #2dd4bf;
+    --accent-ink: #04201d;
+    --success: #3ddc73;
+    --danger: #ff6b6b;
+    --activity-yellow: #e0b23d;
+  }
+}
+
+/* O toggle manual (ver theme.js) sobrepõe a preferência do sistema nos dois
+   sentidos — sem isso, escolher "claro" com o sistema em modo escuro (ou
+   vice-versa) não teria efeito nenhum. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0d1417;
+  --bg-card: #131c20;
+  --bg-row: #101820;
+  --border: #243138;
+  --text: #e3edf0;
+  --muted: #83969f;
+  --accent: #2dd4bf;
+  --accent-ink: #04201d;
+  --success: #3ddc73;
+  --danger: #ff6b6b;
+  --activity-yellow: #e0b23d;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f5f6;
+  --bg-card: #ffffff;
+  --bg-row: #ffffff;
+  --border: #d5dde1;
+  --text: #141e24;
+  --muted: #5c707a;
+  --accent: #0f8a8a;
+  --accent-ink: #ffffff;
+  --success: #2f9e44;
+  --danger: #a4291f;
   --activity-yellow: #9c7a17;
 }
 
@@ -15,8 +79,8 @@
 body {
   margin: 0;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  background: #fffdf8;
-  color: #2b2620;
+  background: var(--bg);
+  color: var(--text);
 }
 
 /* Grid de áreas nomeadas em vez de duas colunas flex simples: título,
@@ -42,10 +106,61 @@ body {
   grid-area: results;
 }
 
-h1 {
+.page-header {
   grid-area: title;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
   margin-bottom: 0.2rem;
 }
+
+h1 {
+  margin: 0;
+}
+
+.theme-toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--muted);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.theme-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.theme-toggle svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  stroke: currentColor;
+  fill: none;
+}
+
+/* Os dois ícones sempre existem no DOM; qual deles aparece é decidido só
+   por CSS, a partir da preferência do sistema e do data-theme explícito
+   (ver theme.js) — assim não há um instante em que o ícone errado pisca
+   antes do JavaScript rodar. */
+.theme-toggle .icon-sun { display: none; }
+.theme-toggle .icon-moon { display: block; }
+
+@media (prefers-color-scheme: dark) {
+  .theme-toggle .icon-sun { display: block; }
+  .theme-toggle .icon-moon { display: none; }
+}
+
+:root[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+:root[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
+:root[data-theme="light"] .theme-toggle .icon-sun { display: none; }
+:root[data-theme="light"] .theme-toggle .icon-moon { display: block; }
 
 .subtitle {
   grid-area: subtitle;
@@ -87,21 +202,41 @@ h1 {
   min-width: 200px;
 }
 
+/* Tamanho fixo e position:relative para o spinner poder se centralizar por
+   cima do ícone (ver .search-button .spinner) em vez de ao lado dele — era
+   isso que descentralizava a lupa e esticava o botão: o layout reservava
+   espaço para os dois lado a lado mesmo com o spinner invisível. */
 .search-button {
+  position: relative;
+  flex-shrink: 0;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.6rem 1rem;
+  justify-content: center;
   border: 1px solid var(--accent);
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
   border-radius: 6px;
-  font-size: 1.1rem;
   cursor: pointer;
 }
 
 .search-button:hover {
-  filter: brightness(1.05);
+  filter: brightness(1.1);
+}
+
+.search-button svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  stroke: currentColor;
+  fill: none;
+}
+
+.search-button .spinner {
+  position: absolute;
+  inset: 0;
+  margin: auto;
 }
 
 .results-header {
@@ -266,7 +401,7 @@ h1 {
 .refine-badge {
   display: inline-block;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-ink);
   border-radius: 4px;
   padding: 0.05rem 0.4rem;
   font-size: 0.85rem;
@@ -310,7 +445,7 @@ h1 {
 
 .navi-copy {
   font-family: ui-monospace, monospace;
-  background: #fff;
+  background: var(--bg-card);
   border: 1px dashed var(--border);
   border-radius: 4px;
   padding: 0.15rem 0.5rem;
@@ -326,7 +461,7 @@ h4 {
 }
 
 .error {
-  color: #a4291f;
+  color: var(--danger);
 }
 
 .empty {
@@ -337,7 +472,7 @@ h4 {
   display: inline-block;
   width: 1em;
   height: 1em;
-  border: 2px solid rgba(0, 0, 0, 0.15);
+  border: 2px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.6s linear infinite;
@@ -424,7 +559,7 @@ h4 {
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem;
-  background: #fff;
+  background: var(--bg-row);
   border: 1px solid var(--border);
   border-radius: 6px;
 }
@@ -444,16 +579,16 @@ h4 {
   width: 0.7rem;
   height: 0.7rem;
   border-radius: 50%;
-  background: #999;
+  background: var(--muted);
 }
 
 .status-light.on {
-  background: #2f9e44;
-  box-shadow: 0 0 4px rgba(47, 158, 68, 0.6);
+  background: var(--success);
+  box-shadow: 0 0 4px var(--success);
 }
 
 .status-light.off {
-  background: #c92a2a;
+  background: var(--danger);
 }
 
 .watchlist-info {
@@ -503,7 +638,7 @@ h4 {
 
 .watchlist-remove:hover {
   background: var(--border);
-  color: #a4291f;
+  color: var(--danger);
 }
 
 .watchlist-target {
@@ -534,12 +669,12 @@ h4 {
 
 .watchlist-hit-badge {
   font-weight: 600;
-  color: #2f9e44;
+  color: var(--success);
 }
 
 .watchlist-row.target-hit {
-  border-color: #2f9e44;
-  box-shadow: 0 0 0 1px #2f9e44;
+  border-color: var(--success);
+  box-shadow: 0 0 0 1px var(--success);
 }
 
 .toast-container {
@@ -553,9 +688,13 @@ h4 {
   max-width: 320px;
 }
 
+/* De propósito invertido em relação à página (fundo claro no tema escuro e
+   vice-versa): um toast precisa se destacar por cima de qualquer coisa que
+   esteja atrás dele, então usa o contraste oposto ao do fundo em vez de mais
+   uma cor fixa para manter sincronizada com o tema. */
 .toast {
-  background: #2b2620;
-  color: #fff;
+  background: var(--text);
+  color: var(--bg);
   padding: 0.7rem 1rem;
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
@@ -647,11 +786,11 @@ h4 {
 }
 
 .activity-status-success {
-  color: #2f9e44;
+  color: var(--success);
 }
 
 .activity-status-error {
-  color: #a4291f;
+  color: var(--danger);
 }
 
 #activity-spinner[hidden] {
@@ -665,21 +804,4 @@ h4 {
 
 .activity-bar.expanded .activity-bar-icon {
   transform: rotate(180deg);
-}
-
-@media (prefers-color-scheme: dark) {
-  body {
-    background: #1c1a16;
-    color: #ece6da;
-  }
-  .detail-card,
-  .navi-copy,
-  .watchlist-panel,
-  .watchlist-row,
-  .activity-bar {
-    background: #262319;
-  }
-  :root {
-    --activity-yellow: #e0b23d;
-  }
 }

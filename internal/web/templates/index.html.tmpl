@@ -5,14 +5,40 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RO Market Tracker</title>
   <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // Aplica a escolha manual de tema (ver theme.js) antes da primeira
+    // pintura — sem isto, a página desenharia com o tema padrão por um
+    // instante e só depois trocaria pro escolhido, um flash perceptível a
+    // cada carregamento.
+    (function () {
+      try {
+        var tema = localStorage.getItem("ro-market-tracker:theme");
+        if (tema === "light" || tema === "dark") {
+          document.documentElement.dataset.theme = tema;
+        }
+      } catch (e) {}
+    })();
+  </script>
   <script src="/static/htmx.min.js"></script>
   <script src="/static/app.js" defer></script>
+  <script src="/static/theme.js" defer></script>
   <script src="/static/watchlist.js" defer></script>
   <script src="/static/activity-bar.js" defer></script>
 </head>
 <body>
   <main class="page">
-    <h1>RO Market Tracker</h1>
+    <div class="page-header">
+      <h1>RO Market Tracker</h1>
+      <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Alternar entre tema claro e escuro" title="Alternar tema">
+        <svg class="icon-sun" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="4"></circle>
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+        </svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"></path>
+        </svg>
+      </button>
+    </div>
     <p class="subtitle">Preços do mercado de comércio do Ragnarok Online LATAM</p>
 
     <form class="search-form" hx-get="/web/search" hx-target="#results" hx-swap="innerHTML" hx-indicator="#search-spinner">
@@ -22,7 +48,10 @@
       </select>
       <input type="text" name="item" placeholder="Nome do item" aria-label="Nome do item" required autofocus>
       <button type="submit" class="search-button" aria-label="Buscar">
-        <span aria-hidden="true">🔍</span>
+        <svg viewBox="0 0 24 24" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="7"></circle>
+          <line x1="21" y1="21" x2="16.2" y2="16.2"></line>
+        </svg>
         <span id="search-spinner" class="htmx-indicator spinner" aria-hidden="true"></span>
       </button>
     </form>

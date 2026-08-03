@@ -24,6 +24,27 @@ test("a página abre com busca, watchlist e barra de atividades", async ({ page 
   await expect(page.locator("#activity-history")).not.toBeVisible();
 });
 
+test("o botão de tema alterna entre claro e escuro e sobrevive a recarregar", async ({ page }) => {
+  // Sem escolha manual, a página segue a preferência do sistema — nenhum
+  // data-theme explícito no <html> (ver o script inline em index.html.tmpl).
+  await expect(page.locator("html")).not.toHaveAttribute("data-theme");
+
+  await page.click("#theme-toggle");
+  const primeiraEscolha = await page.locator("html").getAttribute("data-theme");
+  expect(["light", "dark"]).toContain(primeiraEscolha);
+
+  // A escolha é lida do localStorage antes da primeira pintura, então
+  // sobrevive a um recarregamento sem piscar o tema errado.
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", primeiraEscolha);
+
+  await page.click("#theme-toggle");
+  await expect(page.locator("html")).toHaveAttribute(
+    "data-theme",
+    primeiraEscolha === "dark" ? "light" : "dark"
+  );
+});
+
 test("buscar um item mostra a tabela de resultados", async ({ page }) => {
   await buscar(page, "Espada");
 
