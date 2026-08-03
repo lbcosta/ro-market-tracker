@@ -216,6 +216,45 @@ func TestBuscaComHifen(t *testing.T) {
 	})
 }
 
+// TestBuscaComMais cobre o mesmo defeito do upstream que TestBuscaComHifen,
+// só que para "+": itens de caixa de refino têm o nível embutido no próprio
+// nome do item de catálogo ("Caixa de Arma +13", "Caixa de Armadura +7"), e é
+// justamente esse nome canônico que a watchlist manda de volta ao consultar
+// o preço ao vivo (ver internal/web/watchlist.go) — sem o contorno, esses
+// itens ficam impossíveis de acompanhar.
+func TestBuscaComMais(t *testing.T) {
+	cfg := gnjoytest.Config{
+		Searches: map[string]gnjoytest.SearchResult{
+			// O termo que o client precisa enviar no lugar de "Caixa de Arma
+			// +13": o maior pedaço sem "+". Casa por trecho do nome, então
+			// traz também as outras caixas de refino.
+			"Caixa de Arma": {Items: []gnjoytest.ShopListItem{
+				{SvrId: 303, MapId: 835, SSI: "c7", ItemId: 22911, ItemName: "Caixa de Arma +7", ItemPrice: 1000000, ItemCnt: 1},
+				{SvrId: 303, MapId: 835, SSI: "c13", ItemId: 22917, ItemName: "Caixa de Arma +13", ItemPrice: 9000000, ItemCnt: 1},
+			}},
+		},
+	}
+
+	client, srv := newTestClient(t, cfg)
+
+	result, err := client.SearchShops(context.Background(), gnjoy.SearchShopsParams{
+		ServerType: "NIDHOGG", StoreType: gnjoy.StoreTypeBuy, SearchWord: "Caixa de Arma +13",
+	})
+	if err != nil {
+		t.Fatalf("SearchShops: %v", err)
+	}
+
+	if got := srv.Requests()[0].Query.Get("searchWord"); got != "Caixa de Arma" {
+		t.Errorf("searchWord enviado = %q, quero \"Caixa de Arma\" (o maior pedaço sem \"+\")", got)
+	}
+	if len(result.Items) != 1 || result.Items[0].ItemName != "Caixa de Arma +13" {
+		t.Fatalf("itens = %+v, quero só a \"Caixa de Arma +13\"", result.Items)
+	}
+	if result.TotalCount != 1 {
+		t.Errorf("TotalCount = %d, quero 1", result.TotalCount)
+	}
+}
+
 func TestSearchMarketPrice(t *testing.T) {
 	client, srv := newTestClient(t, gnjoytest.DemoConfig())
 

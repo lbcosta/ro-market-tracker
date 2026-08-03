@@ -357,7 +357,7 @@ func (m *Mock) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	searchWord := q.Get("searchWord")
 
-	if rejectsHyphen(w, searchWord) {
+	if rejectsSearchWord(w, searchWord) {
 		return
 	}
 
@@ -398,14 +398,14 @@ func (m *Mock) handleSearch(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "10:%s\n", payload)
 }
 
-// rejectsHyphen reproduz um defeito real do backend do GnJoy: um searchWord
-// com hífen faz o site responder 200 com o componente de erro dele no lugar
-// da lista (sem list/totalCount). O client contorna isso antes de enviar a
-// busca (ver gnjoy.splitSearchWord) — e é justamente por o mock reproduzir a
-// falha que uma regressão no contorno aparece nos testes, em vez de só na
-// mão do usuário.
-func rejectsHyphen(w http.ResponseWriter, searchWord string) bool {
-	if !strings.Contains(searchWord, "-") {
+// rejectsSearchWord reproduz um defeito real do backend do GnJoy: um
+// searchWord com hífen ou "+" faz o site responder 200 com o componente de
+// erro dele no lugar da lista (sem list/totalCount). O client contorna isso
+// antes de enviar a busca (ver gnjoy.splitSearchWord) — e é justamente por o
+// mock reproduzir a falha que uma regressão no contorno aparece nos testes,
+// em vez de só na mão do usuário.
+func rejectsSearchWord(w http.ResponseWriter, searchWord string) bool {
+	if !strings.ContainsAny(searchWord, "-+") {
 		return false
 	}
 	w.Header().Set("content-type", "text/x-component")
@@ -444,7 +444,7 @@ func (m *Mock) itemsMatching(searchWord string) []ShopListItem {
 // Flight da busca de lojas — é a mesma página em Next.js, só que outra rota.
 func (m *Mock) handleMarketPrice(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	if rejectsHyphen(w, q.Get("searchWord")) {
+	if rejectsSearchWord(w, q.Get("searchWord")) {
 		return
 	}
 	scope := MarketPriceScope{

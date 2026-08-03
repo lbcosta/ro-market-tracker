@@ -332,3 +332,44 @@ func TestWatchlistPriceItemComHifenNoNome(t *testing.T) {
 		t.Errorf("searchWord enviado ao upstream = %q, quero \"Módulo de S\" (sem hífen)", got)
 	}
 }
+
+// TestWatchlistPriceItemComMaisNoNome é a mesma regressão que
+// TestWatchlistPriceItemComHifenNoNome, para o outro caractere que o backend
+// do GnJoy recusa: "+". As caixas de refino têm o nível embutido no próprio
+// nome do item ("Caixa de Arma +13"), e era justamente esse nome canônico
+// que a watchlist mandava de volta ao consultar o preço ao vivo — o painel
+// mostrava "Indisponível" para um item que estava, de fato, à venda.
+func TestWatchlistPriceItemComMaisNoNome(t *testing.T) {
+	srv, mock := newWebServerWith(t, gnjoytest.Config{
+		Searches: map[string]gnjoytest.SearchResult{
+			// Semeado sob o termo que o client tem de enviar no lugar do nome
+			// completo. O mock recusa "+" como o site real, então um
+			// retrocesso no contorno derruba este teste.
+			"Caixa de Arma": {Items: []gnjoytest.ShopListItem{
+				{SvrId: 303, MapId: 835, SSI: "caixa-7", ItemId: 22911, ItemName: "Caixa de Arma +7", ItemPrice: 1000000, ItemCnt: 1},
+				{SvrId: 303, MapId: 835, SSI: "caixa-13", ItemId: 22917, ItemName: "Caixa de Arma +13", ItemPrice: 9000000, ItemCnt: 1},
+			}},
+		},
+	})
+
+	q := url.Values{"server": {"NIDHOGG"}, "itemId": {"22917"}, "item": {"Caixa de Arma +13"}}
+	resp, body := getHTML(t, srv, "/web/watchlist/price?"+q.Encode())
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, quero 200; corpo: %s", resp.StatusCode, body)
+	}
+
+	var view watchlistPriceResponse
+	if err := json.Unmarshal([]byte(body), &view); err != nil {
+		t.Fatalf("corpo inválido: %s", body)
+	}
+	if !view.Found {
+		t.Fatal("Found = false, quero true — o item está anunciado")
+	}
+	if view.MinPrice != 9000000 {
+		t.Errorf("MinPrice = %d, quero 9000000", view.MinPrice)
+	}
+
+	if got := mock.Requests()[0].Query.Get("searchWord"); got != "Caixa de Arma" {
+		t.Errorf("searchWord enviado ao upstream = %q, quero \"Caixa de Arma\" (sem \"+\")", got)
+	}
+}
