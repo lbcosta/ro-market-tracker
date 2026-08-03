@@ -751,3 +751,39 @@ Repare que o termo casa por trecho do nome e devolve uma linha por item —
 `totalItemCnt` é o volume negociado no período (a coluna "Vol" do site).
 `svrId`, `mapId` e `ssi` vêm de um anúncio de referência; os agregados são
 do item no servidor inteiro.
+
+## Defeito do upstream: hífen no termo de busca
+
+O backend de busca do GnJoy não aceita hífen no `searchWord`. Para QUALQUER
+termo que contenha "-" — inclusive um `a-b` — as duas páginas de busca
+(`trading` e `market-price`) respondem **200** com o componente de erro do
+próprio site no lugar da lista:
+
+````
+18:["$","div",null,{"className":"style_nodata__n770m","children":["$","b",null,{"children":"Tente novamente mais tarde."}]}]
+````
+
+Não há `list` nem `totalCount` na resposta, então não há o que interpretar.
+Verificado em 3 execuções seguidas do mesmo termo, e percent-encodar o hífen
+(`%2D`) não muda nada — o backend decodifica antes de processar.
+
+Comparação, no mesmo servidor e no mesmo minuto:
+
+| searchWord | resultado |
+| --- | --- |
+| `Módulo` | `totalCount: 115` |
+| `Módulo de S` | `totalCount: 28` |
+| `Espada Primordial` | `totalCount: 5` (espaço não é problema) |
+| `Módulo de S-Rapidez` | página de erro |
+| `S-Rapidez` | página de erro |
+| `a-b` | página de erro |
+
+Vários itens do jogo têm hífen no nome ("Módulo de S-Rapidez", "Automódulo
+de B-DEF", "Carta Peixe-Espada"), então isso não é uma curiosidade: sem
+contorno esses itens não podem ser buscados nem acompanhados na watchlist,
+que consulta o mercado pelo nome canônico do item.
+
+O contorno do client (`gnjoy.splitSearchWord`) se apoia em a busca do site
+casar por trecho do nome: envia o maior pedaço sem hífen e filtra a resposta
+pelo termo inteiro. O mock (`internal/gnjoytest`) reproduz a recusa, para que
+um retrocesso no contorno apareça nos testes em vez de na mão do usuário.

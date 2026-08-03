@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -356,12 +357,16 @@ func (m *Mock) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	searchWord := q.Get("searchWord")
 
+	if rejectsHyphen(w, searchWord) {
+		return
+	}
+
 	m.mu.Lock()
 	result, ok := m.searches[searchWord]
-	m.mu.Unlock()
 	if !ok {
-		result = SearchResult{Items: []ShopListItem{}}
+		result = SearchResult{Items: m.itemsMatching(searchWord)}
 	}
+	m.mu.Unlock()
 	total := result.TotalCount
 	if total == 0 {
 		total = len(result.Items)
@@ -393,10 +398,55 @@ func (m *Mock) handleSearch(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "10:%s\n", payload)
 }
 
+// rejectsHyphen reproduz um defeito real do backend do GnJoy: um searchWord
+// com hífen faz o site responder 200 com o componente de erro dele no lugar
+// da lista (sem list/totalCount). O client contorna isso antes de enviar a
+// busca (ver gnjoy.splitSearchWord) — e é justamente por o mock reproduzir a
+// falha que uma regressão no contorno aparece nos testes, em vez de só na
+// mão do usuário.
+func rejectsHyphen(w http.ResponseWriter, searchWord string) bool {
+	if !strings.Contains(searchWord, "-") {
+		return false
+	}
+	w.Header().Set("content-type", "text/x-component")
+	fmt.Fprintf(w, "0:{\"a\":\"$@1\",\"f\":\"\",\"b\":%q}\n", buildID)
+	fmt.Fprint(w, "18:[\"$\",\"div\",null,{\"className\":\"style_nodata__n770m\",\"children\":[\"$\",\"b\",null,{\"children\":\"Tente novamente mais tarde.\"}]}]\n")
+	return true
+}
+
+// itemsMatching casa por trecho do nome sobre tudo que está semeado, como o
+// site faz. Só entra em ação para um termo sem resultado registrado à mão:
+// é o que faz uma busca por parte do nome (o contorno do hífen manda um
+// pedaço do termo) achar o mesmo item que o termo inteiro acharia.
+func (m *Mock) itemsMatching(searchWord string) []ShopListItem {
+	if searchWord == "" {
+		return []ShopListItem{}
+	}
+	needle := strings.ToLower(searchWord)
+	seen := map[string]bool{}
+	items := []ShopListItem{}
+	for _, result := range m.searches {
+		for _, item := range result.Items {
+			if seen[item.SSI] || !strings.Contains(strings.ToLower(item.ItemName), needle) {
+				continue
+			}
+			seen[item.SSI] = true
+			items = append(items, item)
+		}
+	}
+	// A ordem de iteração de um map em Go é aleatória; sem isto, a lista
+	// mudaria de ordem a cada chamada e os testes ficariam instáveis.
+	sort.Slice(items, func(i, j int) bool { return items[i].SSI < items[j].SSI })
+	return items
+}
+
 // handleMarketPrice responde a busca de preços de mercado, no mesmo formato
 // Flight da busca de lojas — é a mesma página em Next.js, só que outra rota.
 func (m *Mock) handleMarketPrice(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	if rejectsHyphen(w, q.Get("searchWord")) {
+		return
+	}
 	scope := MarketPriceScope{
 		ServerType: q.Get("serverType"),
 		SearchWord: q.Get("searchWord"),

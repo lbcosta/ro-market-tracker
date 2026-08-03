@@ -17,6 +17,7 @@ internal/gnjoy/                 client para as rotas internas do GnJoy LATAM
   client.go, flight.go            requisições, rate limiting, parser do formato RSC Flight
   discover.go                     descoberta/auto-refresh do action id da Server Action
   refine.go, types.go             parsing de refino, tipos de dados devolvidos pelo client
+  searchword.go                   contorno do hífen, que o backend de busca recusa
 internal/api/                   API REST própria (JSON) — handlers + roteador
 internal/web/                   frontend HTMX — handlers + roteador
   templates/                      *.html.tmpl (página, fragmentos de busca/expand)

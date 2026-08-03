@@ -112,6 +112,110 @@ func TestSearchShopsSemResultados(t *testing.T) {
 	}
 }
 
+// TestBuscaComHifen cobre o contorno do defeito do upstream: o backend do
+// GnJoy responde a página de erro dele para qualquer termo com hífen, então o
+// client manda o maior pedaço sem hífen e filtra a resposta pelo termo
+// inteiro. Sem isso, itens com hífen no nome ("Módulo de S-Rapidez", "Carta
+// Peixe-Espada") são impossíveis de buscar — e o mock reproduz a falha, então
+// mandar o termo cru quebraria estes testes.
+func TestBuscaComHifen(t *testing.T) {
+	cfg := gnjoytest.Config{
+		Searches: map[string]gnjoytest.SearchResult{
+			// O termo que o client precisa enviar no lugar de "Módulo de
+			// S-Rapidez": o maior pedaço sem hífen. Casa por trecho do nome,
+			// então traz também itens que o termo inteiro não traria.
+			"Módulo de S": {Items: []gnjoytest.ShopListItem{
+				{SvrId: 303, MapId: 835, SSI: "m1", ItemId: 25690, ItemName: "Módulo de S-Rapidez", ItemPrice: 6000000, ItemCnt: 1},
+				{SvrId: 303, MapId: 835, SSI: "m2", ItemId: 25691, ItemName: "Módulo de S-Força", ItemPrice: 3000000, ItemCnt: 1},
+			}},
+		},
+		MarketPrices: map[gnjoytest.MarketPriceScope]gnjoytest.MarketPriceResult{
+			{ServerType: "NIDHOGG", SearchWord: "Módulo de S", Period: "7"}: {Items: []gnjoytest.MarketPriceItem{
+				{SvrId: 303, ItemId: 25690, ItemName: "Módulo de S-Rapidez", TotalItemCnt: 2, MinItemPrice: 5000000, AvgItemPrice: 7500000, MaxItemPrice: 10000000},
+				{SvrId: 303, ItemId: 25691, ItemName: "Módulo de S-Força", TotalItemCnt: 9, MinItemPrice: 1000000, AvgItemPrice: 2000000, MaxItemPrice: 3000000},
+			}},
+		},
+	}
+
+	t.Run("busca de lojas", func(t *testing.T) {
+		client, srv := newTestClient(t, cfg)
+
+		result, err := client.SearchShops(context.Background(), gnjoy.SearchShopsParams{
+			ServerType: "NIDHOGG", StoreType: gnjoy.StoreTypeBuy, SearchWord: "Módulo de S-Rapidez",
+		})
+		if err != nil {
+			t.Fatalf("SearchShops: %v", err)
+		}
+
+		if got := srv.Requests()[0].Query.Get("searchWord"); got != "Módulo de S" {
+			t.Errorf("searchWord enviado = %q, quero \"Módulo de S\" (o maior pedaço sem hífen)", got)
+		}
+		if len(result.Items) != 1 || result.Items[0].ItemName != "Módulo de S-Rapidez" {
+			t.Fatalf("itens = %+v, quero só o \"Módulo de S-Rapidez\"", result.Items)
+		}
+		// O total precisa acompanhar a lista filtrada; o do upstream é o da
+		// busca ampliada e mentiria sobre o que foi devolvido.
+		if result.TotalCount != 1 {
+			t.Errorf("TotalCount = %d, quero 1", result.TotalCount)
+		}
+	})
+
+	t.Run("preços de mercado", func(t *testing.T) {
+		client, srv := newTestClient(t, cfg)
+
+		result, err := client.SearchMarketPrice(context.Background(), gnjoy.MarketPriceParams{
+			ServerType: "NIDHOGG", SearchWord: "Módulo de S-Rapidez", Period: gnjoy.MarketPricePeriodWeek,
+		})
+		if err != nil {
+			t.Fatalf("SearchMarketPrice: %v", err)
+		}
+
+		if got := srv.Requests()[0].Query.Get("searchWord"); got != "Módulo de S" {
+			t.Errorf("searchWord enviado = %q, quero \"Módulo de S\"", got)
+		}
+		if len(result.Items) != 1 || result.Items[0].ItemName != "Módulo de S-Rapidez" {
+			t.Fatalf("itens = %+v, quero só o \"Módulo de S-Rapidez\"", result.Items)
+		}
+		if result.TotalCount != 1 {
+			t.Errorf("TotalCount = %d, quero 1", result.TotalCount)
+		}
+	})
+
+	// O pedaço escolhido é o maior, e não o primeiro: quanto mais específico
+	// o termo enviado, menos itens irrelevantes voltam para filtrar.
+	t.Run("escolhe o maior pedaço", func(t *testing.T) {
+		client, srv := newTestClient(t, gnjoytest.Config{})
+
+		if _, err := client.SearchShops(context.Background(), gnjoy.SearchShopsParams{
+			ServerType: "NIDHOGG", StoreType: gnjoy.StoreTypeBuy, SearchWord: "S-Rapidez",
+		}); err != nil {
+			t.Fatalf("SearchShops: %v", err)
+		}
+		if got := srv.Requests()[0].Query.Get("searchWord"); got != "Rapidez" {
+			t.Errorf("searchWord enviado = %q, quero \"Rapidez\"", got)
+		}
+	})
+
+	// Um termo só de hífens não tem pedaço nenhum a procurar, e enviar vazio
+	// devolveria o mercado inteiro — melhor nem consultar o upstream.
+	t.Run("termo só de hífens não consulta o upstream", func(t *testing.T) {
+		client, srv := newTestClient(t, gnjoytest.DemoConfig())
+
+		result, err := client.SearchShops(context.Background(), gnjoy.SearchShopsParams{
+			ServerType: "NIDHOGG", StoreType: gnjoy.StoreTypeBuy, SearchWord: "--",
+		})
+		if err != nil {
+			t.Fatalf("SearchShops: %v", err)
+		}
+		if len(result.Items) != 0 {
+			t.Errorf("itens = %+v, quero vazio", result.Items)
+		}
+		if got := srv.RequestCount(); got != 0 {
+			t.Errorf("requisições ao upstream = %d, quero 0", got)
+		}
+	})
+}
+
 func TestSearchMarketPrice(t *testing.T) {
 	client, srv := newTestClient(t, gnjoytest.DemoConfig())
 

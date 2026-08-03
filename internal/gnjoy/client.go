@@ -376,11 +376,21 @@ type SearchShopsParams struct {
 // SearchShops busca as lojas de comércio que estão comprando ou vendendo um
 // item pelo nome, em um servidor específico. Equivale a digitar um item na
 // busca da página "/intro/shop-search/trading".
+//
+// Um termo com hífen é contornado antes de ir ao upstream, que não os aceita;
+// veja splitSearchWord.
 func (c *Client) SearchShops(ctx context.Context, p SearchShopsParams) (*ShopSearchResult, error) {
+	send, filter := splitSearchWord(p.SearchWord)
+	if filter != "" && send == "" {
+		// Termo feito só de hífens: não há trecho a procurar, e mandar vazio
+		// devolveria o mercado inteiro. Nenhum item se chama assim.
+		return &ShopSearchResult{Items: []ShopListItem{}}, nil
+	}
+
 	q := url.Values{}
 	q.Set("storeType", string(p.StoreType))
 	q.Set("serverType", p.ServerType)
-	q.Set("searchWord", p.SearchWord)
+	q.Set("searchWord", send)
 
 	reqURL := c.pageURL(tradingPath) + "?" + q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
@@ -405,11 +415,24 @@ func (c *Client) SearchShops(ctx context.Context, p SearchShopsParams) (*ShopSea
 
 	obj, err := parseFlightObject(body, "list", "totalCount")
 	if err != nil {
-		return nil, fmt.Errorf("gnjoy: interpretando resposta da busca: %w", err)
+		return nil, fmt.Errorf("gnjoy: interpretando resposta da busca por %q (o site respondeu sem a lista de resultados — provavelmente a página de erro dele): %w", send, err)
 	}
 	result := &ShopSearchResult{}
 	if err := decodeInto(obj, result); err != nil {
 		return nil, err
+	}
+
+	if filter != "" {
+		// A busca enviada foi mais ampla que a pedida (ver splitSearchWord);
+		// só ficam os itens que casariam com o termo inteiro.
+		items := make([]ShopListItem, 0, len(result.Items))
+		for _, item := range result.Items {
+			if matchesSearchWord(item.ItemName, filter) {
+				items = append(items, item)
+			}
+		}
+		result.Items = items
+		result.TotalCount = len(items)
 	}
 	return result, nil
 }
@@ -445,10 +468,18 @@ type MarketPriceParams struct {
 // instante, esta busca enxerga o que já foi vendido — é o que responde
 // "quanto esse item costuma custar?" para um item que ninguém está
 // anunciando agora. Equivale a usar a página "/intro/shop-search/market-price".
+//
+// Assim como SearchShops, contorna o termo com hífen que o upstream não
+// aceita; veja splitSearchWord.
 func (c *Client) SearchMarketPrice(ctx context.Context, p MarketPriceParams) (*MarketPriceResult, error) {
+	send, filter := splitSearchWord(p.SearchWord)
+	if filter != "" && send == "" {
+		return &MarketPriceResult{Items: []MarketPriceItem{}}, nil
+	}
+
 	q := url.Values{}
 	q.Set("serverType", p.ServerType)
-	q.Set("searchWord", p.SearchWord)
+	q.Set("searchWord", send)
 	if p.Period != "" {
 		q.Set("period", p.Period)
 	}
@@ -476,11 +507,22 @@ func (c *Client) SearchMarketPrice(ctx context.Context, p MarketPriceParams) (*M
 
 	obj, err := parseFlightObject(body, "list", "totalCount")
 	if err != nil {
-		return nil, fmt.Errorf("gnjoy: interpretando resposta de preços de mercado: %w", err)
+		return nil, fmt.Errorf("gnjoy: interpretando resposta de preços de mercado para %q (o site respondeu sem a lista de resultados — provavelmente a página de erro dele): %w", send, err)
 	}
 	result := &MarketPriceResult{}
 	if err := decodeInto(obj, result); err != nil {
 		return nil, err
+	}
+
+	if filter != "" {
+		items := make([]MarketPriceItem, 0, len(result.Items))
+		for _, item := range result.Items {
+			if matchesSearchWord(item.ItemName, filter) {
+				items = append(items, item)
+			}
+		}
+		result.Items = items
+		result.TotalCount = len(items)
 	}
 	return result, nil
 }

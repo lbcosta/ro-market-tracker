@@ -291,3 +291,44 @@ func TestWatchlistPriceFiltroComCandidatoIndisponivel(t *testing.T) {
 		t.Errorf("resultado = %+v, quero o anúncio +7 (158000000) apesar de o primeiro candidato ter sumido", view)
 	}
 }
+
+// TestWatchlistPriceItemComHifenNoNome é a regressão de um item que ficava
+// impossível de acompanhar: a watchlist consulta o mercado pelo nome canônico
+// do item, e o backend do GnJoy responde a página de erro dele para qualquer
+// termo com hífen (ver gnjoy.splitSearchWord). O painel mostrava
+// "Indisponível" para sempre — o item nunca seria encontrado, mesmo estando
+// à venda.
+func TestWatchlistPriceItemComHifenNoNome(t *testing.T) {
+	srv, mock := newWebServerWith(t, gnjoytest.Config{
+		Searches: map[string]gnjoytest.SearchResult{
+			// Semeado sob o termo que o client tem de enviar no lugar do nome
+			// completo. O mock recusa hífen como o site real, então um
+			// retrocesso no contorno derruba este teste.
+			"Módulo de S": {Items: []gnjoytest.ShopListItem{
+				{SvrId: 303, MapId: 835, SSI: "mod-rapidez", ItemId: 25690, ItemName: "Módulo de S-Rapidez", ItemPrice: 6000000, ItemCnt: 1},
+				{SvrId: 303, MapId: 835, SSI: "mod-forca", ItemId: 25691, ItemName: "Módulo de S-Força", ItemPrice: 500000, ItemCnt: 1},
+			}},
+		},
+	})
+
+	q := url.Values{"server": {"NIDHOGG"}, "itemId": {"25690"}, "item": {"Módulo de S-Rapidez"}}
+	resp, body := getHTML(t, srv, "/web/watchlist/price?"+q.Encode())
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, quero 200; corpo: %s", resp.StatusCode, body)
+	}
+
+	var view watchlistPriceResponse
+	if err := json.Unmarshal([]byte(body), &view); err != nil {
+		t.Fatalf("corpo inválido: %s", body)
+	}
+	if !view.Found {
+		t.Fatal("Found = false, quero true — o item está anunciado")
+	}
+	if view.MinPrice != 6000000 {
+		t.Errorf("MinPrice = %d, quero 6000000", view.MinPrice)
+	}
+
+	if got := mock.Requests()[0].Query.Get("searchWord"); got != "Módulo de S" {
+		t.Errorf("searchWord enviado ao upstream = %q, quero \"Módulo de S\" (sem hífen)", got)
+	}
+}
