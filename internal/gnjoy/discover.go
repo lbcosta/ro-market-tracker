@@ -83,7 +83,7 @@ func (c *Client) discoverActionID(ctx context.Context) (string, error) {
 		InProgress: "Verificando se a rota da loja mudou",
 		Success:    "Rota da loja verificada",
 		Error:      "Falha ao verificar a rota da loja",
-	})
+	}, newCallConfig(nil))
 	if err != nil {
 		return "", fmt.Errorf("gnjoy: buscando página para descoberta do action id: %w", err)
 	}
@@ -108,12 +108,21 @@ func (c *Client) discoverActionID(ctx context.Context) (string, error) {
 		if err != nil {
 			continue
 		}
+		// NoRetry: um 429 no meio da varredura significa que o site está
+		// pedindo calma AGORA, e ainda haveria vários chunks pela frente —
+		// insistir chunk a chunk só atrasaria a recuperação do bloqueio. A
+		// varredura inteira é abortada; a próxima action real redispara a
+		// descoberta quando o site voltar a aceitar.
 		chunkBody, err := c.do(req, activityLabels{
 			InProgress: "Procurando a rota atualizada nos arquivos do site",
 			Success:    "Arquivo do site consultado",
 			Error:      "Falha ao consultar arquivo do site",
-		})
+		}, newCallConfig([]CallOption{NoRetry()}))
 		if err != nil {
+			var httpErr *HTTPError
+			if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusTooManyRequests {
+				return "", fmt.Errorf("gnjoy: descoberta do action id interrompida, o site está limitando requisições (429): %w", err)
+			}
 			continue
 		}
 		if m := serverActionRe.FindSubmatch(chunkBody); m != nil {
@@ -142,7 +151,10 @@ func (c *Client) WarmupActionID(ctx context.Context) error {
 		Success:    "Conexão com o mercado verificada",
 		Error:      "Falha ao verificar conexão com o mercado",
 	}
-	err := c.callAction(ctx, "store", params, nil, labels)
+	// NoRetry: o aquecimento é uma otimização de fundo; se o site estiver
+	// pedindo calma, desistir de imediato é o certo — a primeira ação real
+	// do usuário faz o mesmo papel mais tarde.
+	err := c.callAction(ctx, "store", params, nil, labels, newCallConfig([]CallOption{NoRetry()}))
 	if err == nil || errors.Is(err, ErrActionFailed) {
 		return nil
 	}

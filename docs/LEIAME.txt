@@ -113,7 +113,11 @@ O QUE DÁ PARA FAZER NA PÁGINA
 
       - Fixar um refino: para equipamentos, clique no selo "+0" ao lado do
         nome e digite o refino que você procura. A linha passa a mostrar o
-        menor preço apenas entre os anúncios naquele refino.
+        menor preço apenas entre os anúncios naquele refino. Para um item
+        com muitos anúncios, a primeira verificação pode ainda não alcançar
+        o refino procurado (o programa consulta poucas lojas por vez, para
+        não sobrecarregar o site do jogo) — as verificações seguintes
+        ampliam a busca sozinhas.
 
       - Ligar ou desligar o acompanhamento: a bolinha verde à esquerda. Verde
         significa que o item é reconsultado de tempos em tempos; vermelha,

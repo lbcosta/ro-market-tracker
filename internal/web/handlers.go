@@ -5,10 +5,12 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lbcosta/ro-market-tracker/internal/gnjoy"
 )
@@ -20,10 +22,60 @@ type Handler struct {
 	// só dispare uma vez por processo, mesmo que a página seja recarregada
 	// várias vezes.
 	warmupOnce sync.Once
+
+	// searchCache guarda resultados de busca de lojas por (servidor, termo)
+	// e marketPriceCache os resumos de preços praticados por (servidor,
+	// termo, período) — ver cachedSearchShops e history.go. São eles que
+	// impedem o tráfego redundante do navegador (abas, F5, reordenação,
+	// ciclo da watchlist) de virar requisição nova ao GnJoy.
+	searchCache      *ttlCache[*gnjoy.ShopSearchResult]
+	marketPriceCache *ttlCache[*gnjoy.MarketPriceResult]
+
+	// refineMemo memoiza o refino de cada loja por (svrId, mapId, ssi). O
+	// refino nunca muda para um mesmo ssi (a loja fechada e reaberta ganha
+	// um ssi novo), então cada loja custa no máximo UMA consulta de detalhe
+	// na vida do processo — é o que desarma o custo N+1 da watchlist com
+	// refino fixado (ver watchlist.go).
+	refineMemo *ttlCache[int]
 }
 
 func NewHandler(client *gnjoy.Client) *Handler {
-	return &Handler{client: client}
+	return &Handler{
+		client:           client,
+		searchCache:      newTTLCache[*gnjoy.ShopSearchResult](searchCacheSize),
+		marketPriceCache: newTTLCache[*gnjoy.MarketPriceResult](marketPriceCacheSize),
+		refineMemo:       newTTLCache[int](refineMemoSize),
+	}
+}
+
+// cachedSearchShops é o único caminho pelo qual o frontend busca lojas no
+// upstream: consultas idênticas (mesmo servidor e termo) dentro de maxAge
+// são servidas do cache, e as concorrentes são deduplicadas — é o que torna
+// inofensivos os multiplicadores de tráfego do navegador, que afunilam todos
+// aqui. Só busca lojas comprando o item (anúncios de venda de jogadores, o
+// que interessa a quem rastreia preços); não há seletor de tipo na UI.
+//
+// A busca compartilhada roda desacoplada do cancelamento da requisição que a
+// disparou (context.WithoutCancel): o resultado alimenta o cache e serve às
+// próximas consultas, então um F5 no meio dela não deve derrubá-la.
+func (h *Handler) cachedSearchShops(ctx context.Context, server, item string, maxAge time.Duration, opts ...gnjoy.CallOption) (*gnjoy.ShopSearchResult, error) {
+	key := cacheKey(server, string(gnjoy.StoreTypeBuy), item)
+	result, err := h.searchCache.Do(key, maxAge, func() (*gnjoy.ShopSearchResult, error) {
+		return h.client.SearchShops(context.WithoutCancel(ctx), gnjoy.SearchShopsParams{
+			ServerType: server,
+			StoreType:  gnjoy.StoreTypeBuy,
+			SearchWord: item,
+		}, opts...)
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Cópia rasa: quem chama reordena e filtra a lista à vontade sem
+	// corromper o exemplar compartilhado que continua no cache.
+	return &gnjoy.ShopSearchResult{
+		Items:      slices.Clone(result.Items),
+		TotalCount: result.TotalCount,
+	}, nil
 }
 
 func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +103,22 @@ func (h *Handler) warmupActionID() {
 			}
 		}()
 	})
+}
+
+// ResetCaches trata POST /web/cache/reset e esvazia os caches de consulta do
+// frontend (busca de lojas, preços praticados e o memo de refino).
+//
+// Existe para os testes de navegador (e2e): o servidor sobe uma vez para a
+// suíte inteira, e cada teste zera o site falso e o localStorage para
+// começar do mesmo estado — sem zerar TAMBÉM este cache, um teste enxergaria
+// o mercado que o teste anterior deixou cacheado. Fora dos testes é
+// inofensivo: o pior que a rota faz é a próxima consulta ir ao upstream de
+// verdade.
+func (h *Handler) ResetCaches(w http.ResponseWriter, r *http.Request) {
+	h.searchCache.reset()
+	h.marketPriceCache.reset()
+	h.refineMemo.reset()
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type resultsView struct {
@@ -132,14 +200,7 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		sortDir = "asc"
 	}
 
-	// O frontend só procura lojas comprando o item (ou seja, anúncios de
-	// jogadores vendendo o item, que é o que interessa para quem está
-	// rastreando preços) — não há seletor de tipo de negociação na UI.
-	result, err := h.client.SearchShops(r.Context(), gnjoy.SearchShopsParams{
-		ServerType: server,
-		StoreType:  gnjoy.StoreTypeBuy,
-		SearchWord: item,
-	})
+	result, err := h.cachedSearchShops(r.Context(), server, item, freshMaxAge)
 	if err != nil {
 		slog.Error("web: busca falhou", "error", err)
 		render(w, "results.html.tmpl", resultsView{Error: "Não foi possível buscar no mercado agora. Tente novamente em instantes."})

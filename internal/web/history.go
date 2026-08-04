@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/lbcosta/ro-market-tracker/internal/gnjoy"
 )
@@ -132,16 +133,26 @@ func mergeHistoryRows(full, recent []gnjoy.MarketPriceItem) []historyRow {
 	return rows
 }
 
+// searchMarketPrice consulta o resumo de preços praticados via cache — um
+// F5 ou uma segunda aba na mesma tela de histórico não custam outra ida ao
+// upstream (ver freshMaxAge). Assim como cachedSearchShops, a busca
+// compartilhada roda desacoplada do cancelamento de quem a disparou.
 func (h *Handler) searchMarketPrice(ctx context.Context, server, item, period string) (*gnjoy.MarketPriceResult, error) {
-	result, err := h.client.SearchMarketPrice(ctx, gnjoy.MarketPriceParams{
-		ServerType: server,
-		SearchWord: item,
-		Period:     period,
+	key := cacheKey(server, item, period)
+	result, err := h.marketPriceCache.Do(key, freshMaxAge, func() (*gnjoy.MarketPriceResult, error) {
+		return h.client.SearchMarketPrice(context.WithoutCancel(ctx), gnjoy.MarketPriceParams{
+			ServerType: server,
+			SearchWord: item,
+			Period:     period,
+		})
 	})
 	if err != nil {
 		slog.Error("web: consulta de preços praticados falhou",
 			"item", item, "servidor", server, "período", period, "error", err)
 		return nil, err
 	}
-	return result, nil
+	return &gnjoy.MarketPriceResult{
+		Items:      slices.Clone(result.Items),
+		TotalCount: result.TotalCount,
+	}, nil
 }

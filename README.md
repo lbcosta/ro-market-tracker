@@ -23,6 +23,7 @@ internal/web/                   frontend HTMX — handlers + roteador
   templates/                      *.html.tmpl (página, fragmentos de busca/expand)
   static/                         CSS, JS (app.js, watchlist.js, theme.js, activity-bar.js) e htmx.min.js vendorizado
   watchlist.go                    endpoint JSON de preço/refino ao vivo p/ a watchlist
+  cache.go                        cache TTL + deduplicação das consultas ao upstream
   history.go                      preços praticados p/ item fora do mercado (busca sem resultado)
   stats.go, navi.go               estatísticas de 7 dias, comando /navi
   activity.go                     stream SSE da atividade do client (barra de atividades)
@@ -240,12 +241,27 @@ diferentes — ver teste com "Espada", que retorna itens com itemId 600009,
 
 - Sem `refine`: pega o menor preço entre eles e, se a loja mais barata for
   equipamento, busca o refino dela via `GetStoreDetail` — só informativo.
-- Com `refine`: ordena os candidatos por preço crescente e consulta o
-  detalhe de cada um (`GetStoreDetail`), um de cada vez, até achar o
-  primeiro cujo refino bate exatamente com o pedido. Isso pode custar várias
-  chamadas ao upstream para um item com muitos anúncios — o rate limiter do
-  client já serializa tudo, então o efeito é essa checagem demorar mais
-  (a linha mostra o spinner enquanto isso), não rajadas de requisições.
+- Com `refine`: ordena os candidatos por preço crescente e procura o
+  primeiro cujo refino bate exatamente com o pedido. Como a única forma de
+  saber o refino é o detalhe da loja (`GetStoreDetail`), cada refino
+  descoberto fica **memoizado por loja** (o refino nunca muda para um mesmo
+  `ssi` — a loja fechada e reaberta ganha um `ssi` novo) e cada checagem
+  consulta **no máximo 8 lojas novas** (`maxRefineDetailFetches`): a
+  cobertura cresce a cada ciclo até abranger todos os anúncios, sem que um
+  item popular custe dezenas de chamadas em cada checagem. Enquanto a
+  unidade no refino pedido estiver além do que o memo já alcançou, a linha
+  mostra "Sem anúncios" — o ciclo seguinte amplia a busca.
+
+As consultas do frontend passam por um cache de resultados no servidor
+(`internal/web/cache.go`, TTL + deduplicação de buscas concorrentes via
+`singleflight`): a checagem automática da watchlist aceita um resultado de
+até 4 minutos (`monitorMaxAge` — menor que o ciclo, então a aba que chega
+primeiro sempre renova), e a busca/histórico interativos aceitam até 30
+segundos (`freshMaxAge` — um F5 ou um clique de ordenação não vão ao
+upstream de novo). O botão "↻" da watchlist envia `fresh=1`, que ignora o
+cache: quem apertou quer o estado de agora. É esse cache que faz várias
+abas abertas, recarregamentos de página e o ciclo de monitoramento não
+multiplicarem o tráfego contra o GnJoy.
 
 Ligar/desligar, editar o alvo, editar o refino fixado e remover um item são
 só atualizações de `localStorage` + DOM, sem chamada ao servidor (exceto
@@ -276,9 +292,12 @@ tratadas como acompanhamento de preço, que era o único comportamento.
 
 #### Monitoramento e alertas
 
-Enquanto a página estiver aberta, a cada 10 minutos
+Enquanto a página estiver aberta, a cada 5 minutos
 (`MONITOR_INTERVAL_MS` em `watchlist.js`) os itens com o indicador ligado
-(verde) têm o preço reconsultado. Se a condição que o item acompanha passar
+(verde) têm o preço reconsultado — um item por vez, em série, com 1 segundo
+de pausa entre um e o próximo (`MONITOR_ITEM_SPACING_MS`): o servidor
+enfileiraria as consultas paralelas de qualquer forma, e despejar a lista
+inteira de uma vez só atrasaria uma busca feita no meio do ciclo. Se a condição que o item acompanha passar
 a valer, o usuário é avisado de duas formas:
 
 - Um toast no canto inferior direito da página (sempre aparece, não
@@ -298,12 +317,14 @@ com o resto da entrada.
 Itens com o indicador desligado (vermelho) continuam na lista, mas não são
 reconsultados pela checagem periódica nem podem disparar aviso enquanto
 assim permanecerem — eles ainda têm o preço atualizado ao carregar a
-página ou ao serem adicionados, só não entram no ciclo de 10 minutos.
+página ou ao serem adicionados, só não entram no ciclo de 5 minutos.
 
 Como a watchlist vive só no navegador, o monitoramento também só roda
 enquanto uma aba com a página estiver aberta; fechar a aba interrompe as
 checagens até ela ser reaberta (quando o ciclo recomeça imediatamente,
-antes do primeiro intervalo de 10 minutos).
+antes do primeiro intervalo de 5 minutos). Várias abas abertas rodam cada
+uma o próprio ciclo, mas o cache do servidor absorve as checagens
+repetidas — só a primeira de cada janela vai ao upstream.
 
 O HTMX é vendorizado localmente em `internal/web/static/htmx.min.js`
 (embutido no binário via `go:embed`) — não depende de CDN em runtime.
@@ -354,6 +375,20 @@ token bucket) dentro do `gnjoy.Client`:
   tentativas esgotarem, a API própria responde `503 Service Unavailable`
   (em vez de propagar o 429) para deixar claro que é uma condição
   temporária.
+- Um `429` também estabelece uma **calmaria global** no client
+  (`extendCooldown`): até o fim do `Retry-After`, nenhuma outra chamada
+  dispara — as que já estavam na fila aguardam em vez de cada uma descobrir
+  o bloqueio tomando o próprio `429` e gastando as próprias tentativas.
+  Quando a calmaria acaba, as chamadas represadas saem espaçadas pelo
+  limiter, não todas de uma vez.
+- Chamadas de fundo com repetição própria — a checagem periódica da
+  watchlist, o aquecimento do action id — usam `gnjoy.NoRetry()`: no
+  primeiro `429` elas desistem (o ciclo seguinte refaz a consulta), em vez
+  de insistir disputando a cota com as ações que o usuário está esperando.
+  Pelo mesmo motivo, a varredura de chunks da redescoberta de action id é
+  **abortada inteira** no primeiro `429`.
+- Do lado do frontend, o cache de consultas do servidor web (ver a seção da
+  watchlist) reduz quantas requisições sequer chegam a essa fila.
 
 ## Endpoints da API REST
 

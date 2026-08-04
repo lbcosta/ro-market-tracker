@@ -65,7 +65,8 @@ const (
 	DefaultRateLimitBurst = 1
 
 	// maxTooManyRequestsRetries é quantas vezes uma requisição é refeita
-	// após um 429, antes de desistir e propagar o erro.
+	// após um 429, antes de desistir e propagar o erro. É o padrão por
+	// chamada; NoRetry desliga a insistência para chamadas de fundo.
 	maxTooManyRequestsRetries = 5
 
 	// maxRetryAfter limita o tempo de espera por tentativa mesmo que o
@@ -101,6 +102,12 @@ type Client struct {
 	// limiter, em voo, sucesso/erro) para quem quiser observar a atividade
 	// do Client em tempo real — ver Activity() e internal/web/activity.go.
 	activity *ActivityLog
+
+	// cooldownMu protege cooldownUntil: o instante até o qual TODAS as
+	// requisições seguram o disparo por causa de um 429 recente (ver
+	// extendCooldown). Zero significa "sem calmaria em vigor".
+	cooldownMu    sync.Mutex
+	cooldownUntil time.Time
 
 	actionIDMu sync.RWMutex
 	actionID   string
@@ -142,6 +149,39 @@ func WithHTTPClient(hc *http.Client) Option {
 // de até burst requisições. Veja DefaultRateLimitRPS/DefaultRateLimitBurst.
 func WithRateLimit(rps float64, burst int) Option {
 	return func(c *Client) { c.limiter = rate.NewLimiter(rate.Limit(rps), burst) }
+}
+
+// CallOption ajusta o comportamento de UMA chamada específica, sem afetar o
+// Client — o complemento por chamada das Options de construção. É aceita
+// pelos métodos públicos de consulta (SearchShops, GetStoreDetail etc.).
+type CallOption func(*callConfig)
+
+// callConfig é o comportamento efetivo de uma chamada depois de aplicadas as
+// CallOptions.
+type callConfig struct {
+	// maxRetries é quantas vezes a chamada é refeita após um 429 antes de
+	// desistir e propagar o erro.
+	maxRetries int
+}
+
+func newCallConfig(opts []CallOption) callConfig {
+	cfg := callConfig{maxRetries: maxTooManyRequestsRetries}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return cfg
+}
+
+// NoRetry faz a chamada desistir no primeiro 429, em vez de aguardar e tentar
+// de novo. É para chamadas de fundo que têm repetição própria (a checagem
+// periódica da watchlist, o aquecimento do action id): quando o site está
+// pedindo calma, insistir por elas não traz benefício — o ciclo seguinte
+// refaz a consulta de qualquer forma — e só disputa a cota com as ações que o
+// usuário está esperando. O 429 recebido ainda estabelece a calmaria global
+// (ver extendCooldown); esta opção controla apenas a insistência da própria
+// chamada.
+func NoRetry() CallOption {
+	return func(cfg *callConfig) { cfg.maxRetries = 0 }
 }
 
 // New cria um Client pronto para uso com os valores padrão, aplicando as
@@ -189,23 +229,23 @@ func (e *HTTPError) Error() string {
 // um action id desatualizado, isso não é sinal de nada errado com o id.
 var ErrActionFailed = errors.New("gnjoy: action reportou falha")
 
-// do executa req respeitando o rate limiter do Client — se necessário, a
-// chamada fica bloqueada em fila até haver "vaga" — e, caso o upstream
-// mesmo assim responda 429, aguarda o tempo indicado em "Retry-After" (ou
-// um backoff exponencial, se o cabeçalho não vier) e tenta de novo, até
-// maxTooManyRequestsRetries vezes.
+// do executa req respeitando o rate limiter e a calmaria global do Client —
+// se necessário, a chamada fica bloqueada em fila até ser a vez dela (ver
+// awaitTurn) — e, caso o upstream mesmo assim responda 429, registra a
+// calmaria para todas as chamadas (extendCooldown) e tenta de novo, até
+// cfg.maxRetries vezes.
 //
 // labels são as descrições amigáveis da chamada, uma por fase do ciclo de
 // vida (ver activityLabels) — usadas só para popular o ActivityLog do
 // Client, não afetam a requisição em si. Todo o ciclo de vida da chamada
 // (fila do rate limiter, em voo, sucesso/erro/retry) é publicado lá para
 // quem estiver observando (a barra de atividades do frontend).
-func (c *Client) do(req *http.Request, labels activityLabels) ([]byte, error) {
+func (c *Client) do(req *http.Request, labels activityLabels, cfg callConfig) ([]byte, error) {
 	req.Header.Set("user-agent", c.userAgent)
 	handle := c.activity.begin(labels)
 
 	var lastErr error
-	for attempt := 0; attempt <= maxTooManyRequestsRetries; attempt++ {
+	for attempt := 0; attempt <= cfg.maxRetries; attempt++ {
 		if attempt > 0 && req.Body != nil {
 			// Requisições sem corpo (GET) não precisam de nada aqui; as
 			// com corpo (POST) precisam recriá-lo, já que ele já foi
@@ -224,19 +264,9 @@ func (c *Client) do(req *http.Request, labels activityLabels) ([]byte, error) {
 			req.Body = io.NopCloser(body)
 		}
 
-		now := time.Now()
-		reservation := c.limiter.ReserveN(now, 1)
-		delay := reservation.DelayFrom(now)
-		if delay > 0 {
-			handle.waiting(now.Add(delay))
-			select {
-			case <-time.After(delay):
-			case <-req.Context().Done():
-				reservation.Cancel()
-				err := req.Context().Err()
-				handle.fail(err)
-				return nil, err
-			}
+		if err := c.awaitTurn(req.Context(), handle); err != nil {
+			handle.fail(err)
+			return nil, err
 		}
 
 		handle.running()
@@ -256,20 +286,19 @@ func (c *Client) do(req *http.Request, labels activityLabels) ([]byte, error) {
 
 		if resp.StatusCode == http.StatusTooManyRequests {
 			lastErr = &HTTPError{StatusCode: resp.StatusCode, Body: truncateBody(body)}
-			if attempt == maxTooManyRequestsRetries {
+			wait := retryAfterDuration(resp.Header.Get("Retry-After"), attempt)
+			// O 429 é do site inteiro, não desta chamada: a espera vira uma
+			// calmaria global, e as demais chamadas enfileiradas param de
+			// gastar as próprias tentativas contra um bloqueio já conhecido.
+			c.extendCooldown(time.Now().Add(wait))
+			if attempt == cfg.maxRetries {
 				break
 			}
-			wait := retryAfterDuration(resp.Header.Get("Retry-After"), attempt)
-			handle.waiting(time.Now().Add(wait))
 			slog.Warn("gnjoy: upstream respondeu 429, aguardando antes de tentar de novo",
 				"path", req.URL.Path, "tentativa", attempt+1, "espera", wait)
-			select {
-			case <-time.After(wait):
-			case <-req.Context().Done():
-				err := req.Context().Err()
-				handle.fail(err)
-				return nil, err
-			}
+			// A espera em si acontece em awaitTurn, na volta do laço: é lá
+			// que a calmaria recém-registrada (desta ou de qualquer outra
+			// chamada) é respeitada antes do próximo disparo.
 			continue
 		}
 
@@ -281,9 +310,71 @@ func (c *Client) do(req *http.Request, labels activityLabels) ([]byte, error) {
 		handle.succeed()
 		return body, nil
 	}
-	err := fmt.Errorf("gnjoy: upstream continuou retornando 429 após %d tentativas: %w", maxTooManyRequestsRetries+1, lastErr)
+	err := fmt.Errorf("gnjoy: upstream retornou 429 em todas as %d tentativa(s): %w", cfg.maxRetries+1, lastErr)
 	handle.fail(err)
 	return nil, err
+}
+
+// awaitTurn segura a chamada até ser a vez dela disparar: primeiro aguarda o
+// fim de qualquer calmaria global em vigor (ver extendCooldown), depois a
+// vaga no rate limiter — e reconfere a calmaria ao final, porque um 429 de
+// outra chamada pode tê-la estabelecido (ou estendido) enquanto esta esperava
+// a vaga. Nesse caso a vaga é devolvida e a espera recomeça, com uma vaga
+// nova ao final: é isso que faz as chamadas represadas saírem espaçadas pelo
+// limiter quando a calmaria acaba, em vez de todas de uma vez.
+func (c *Client) awaitTurn(ctx context.Context, handle *activityHandle) error {
+	for {
+		if wait := time.Until(c.cooldownDeadline()); wait > 0 {
+			handle.waiting(time.Now().Add(wait))
+			select {
+			case <-time.After(wait):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			continue
+		}
+
+		now := time.Now()
+		reservation := c.limiter.ReserveN(now, 1)
+		delay := reservation.DelayFrom(now)
+		if delay > 0 {
+			handle.waiting(now.Add(delay))
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				reservation.Cancel()
+				return ctx.Err()
+			}
+		}
+
+		if time.Until(c.cooldownDeadline()) > 0 {
+			reservation.Cancel()
+			continue
+		}
+		return nil
+	}
+}
+
+// cooldownDeadline devolve até quando as chamadas devem segurar o disparo por
+// causa de um 429 recente — o zero de time.Time (sempre no passado) quando
+// não há calmaria em vigor.
+func (c *Client) cooldownDeadline() time.Time {
+	c.cooldownMu.Lock()
+	defer c.cooldownMu.Unlock()
+	return c.cooldownUntil
+}
+
+// extendCooldown registra que o site pediu calma: até o instante informado,
+// nenhuma chamada dispara (todas aguardam em awaitTurn). Sem isso, cada
+// chamada já enfileirada só descobriria o bloqueio tomando o próprio 429,
+// gastando tentativas e cota exatamente enquanto o site está recusando.
+// Estender nunca encurta uma calmaria já registrada.
+func (c *Client) extendCooldown(until time.Time) {
+	c.cooldownMu.Lock()
+	if until.After(c.cooldownUntil) {
+		c.cooldownUntil = until
+	}
+	c.cooldownMu.Unlock()
 }
 
 func truncateBody(body []byte) string {
@@ -379,7 +470,7 @@ type SearchShopsParams struct {
 //
 // Um termo com hífen é contornado antes de ir ao upstream, que não os aceita;
 // veja splitSearchWord.
-func (c *Client) SearchShops(ctx context.Context, p SearchShopsParams) (*ShopSearchResult, error) {
+func (c *Client) SearchShops(ctx context.Context, p SearchShopsParams, opts ...CallOption) (*ShopSearchResult, error) {
 	send, filter := splitSearchWord(p.SearchWord)
 	if filter != "" && send == "" {
 		// Termo feito só de hífens: não há trecho a procurar, e mandar vazio
@@ -408,7 +499,7 @@ func (c *Client) SearchShops(ctx context.Context, p SearchShopsParams) (*ShopSea
 		Success:    fmt.Sprintf("Busca por %q no servidor %s concluída", p.SearchWord, p.ServerType),
 		Error:      fmt.Sprintf("Falha ao buscar %q no servidor %s", p.SearchWord, p.ServerType),
 	}
-	body, err := c.do(req, labels)
+	body, err := c.do(req, labels, newCallConfig(opts))
 	if err != nil {
 		return nil, err
 	}
@@ -471,7 +562,7 @@ type MarketPriceParams struct {
 //
 // Assim como SearchShops, contorna o termo com hífen que o upstream não
 // aceita; veja splitSearchWord.
-func (c *Client) SearchMarketPrice(ctx context.Context, p MarketPriceParams) (*MarketPriceResult, error) {
+func (c *Client) SearchMarketPrice(ctx context.Context, p MarketPriceParams, opts ...CallOption) (*MarketPriceResult, error) {
 	send, filter := splitSearchWord(p.SearchWord)
 	if filter != "" && send == "" {
 		return &MarketPriceResult{Items: []MarketPriceItem{}}, nil
@@ -500,7 +591,7 @@ func (c *Client) SearchMarketPrice(ctx context.Context, p MarketPriceParams) (*M
 		Success:    fmt.Sprintf("Preços praticados de %q no servidor %s consultados", p.SearchWord, p.ServerType),
 		Error:      fmt.Sprintf("Falha ao consultar preços praticados de %q no servidor %s", p.SearchWord, p.ServerType),
 	}
-	body, err := c.do(req, labels)
+	body, err := c.do(req, labels, newCallConfig(opts))
 	if err != nil {
 		return nil, err
 	}
@@ -545,10 +636,10 @@ type actionEnvelope struct {
 // desatualizado (o site teve um novo deploy), o id atual é redescoberto
 // automaticamente a partir dos chunks JS da página e a chamada é refeita
 // uma única vez.
-func (c *Client) callAction(ctx context.Context, actionType string, params any, out any, labels activityLabels) error {
+func (c *Client) callAction(ctx context.Context, actionType string, params any, out any, labels activityLabels, cfg callConfig) error {
 	actionID := c.currentActionID()
 
-	err := c.callActionWithID(ctx, actionType, params, out, actionID, labels)
+	err := c.callActionWithID(ctx, actionType, params, out, actionID, labels, cfg)
 	if err == nil || !isStaleActionIDErr(err) {
 		return err
 	}
@@ -562,10 +653,10 @@ func (c *Client) callAction(ctx context.Context, actionType string, params any, 
 		// a falha não era mesmo sobre o action id estar desatualizado).
 		return err
 	}
-	return c.callActionWithID(ctx, actionType, params, out, newID, labels)
+	return c.callActionWithID(ctx, actionType, params, out, newID, labels, cfg)
 }
 
-func (c *Client) callActionWithID(ctx context.Context, actionType string, params any, out any, actionID string, labels activityLabels) error {
+func (c *Client) callActionWithID(ctx context.Context, actionType string, params any, out any, actionID string, labels activityLabels, cfg callConfig) error {
 	payload, err := json.Marshal([]actionRequest{{Type: actionType, Params: params}})
 	if err != nil {
 		return fmt.Errorf("gnjoy: montando payload da action %q: %w", actionType, err)
@@ -583,7 +674,7 @@ func (c *Client) callActionWithID(ctx context.Context, actionType string, params
 	req.Header.Set("origin", c.baseURL)
 	req.Header.Set("referer", reqURL)
 
-	body, err := c.do(req, labels)
+	body, err := c.do(req, labels, cfg)
 	if err != nil {
 		return err
 	}
@@ -618,7 +709,7 @@ type StoreLocation struct {
 
 // GetStoreDetail retorna os detalhes de uma loja específica (posição no
 // mapa, nome, personagem vendedor, preço e quantidade do item anunciado).
-func (c *Client) GetStoreDetail(ctx context.Context, loc StoreLocation) (*StoreDetail, error) {
+func (c *Client) GetStoreDetail(ctx context.Context, loc StoreLocation, opts ...CallOption) (*StoreDetail, error) {
 	params := map[string]any{
 		"svrId": loc.SvrId,
 		"mapId": loc.MapId,
@@ -630,7 +721,7 @@ func (c *Client) GetStoreDetail(ctx context.Context, loc StoreLocation) (*StoreD
 		Success:    fmt.Sprintf("Detalhes da loja consultados (mapa %d)", loc.MapId),
 		Error:      fmt.Sprintf("Falha ao consultar detalhes da loja (mapa %d)", loc.MapId),
 	}
-	if err := c.callAction(ctx, "store", params, &detail, labels); err != nil {
+	if err := c.callAction(ctx, "store", params, &detail, labels, newCallConfig(opts)); err != nil {
 		return nil, err
 	}
 	return &detail, nil
@@ -639,7 +730,7 @@ func (c *Client) GetStoreDetail(ctx context.Context, loc StoreLocation) (*StoreD
 // GetItemDetail retorna os detalhes do item anunciado em uma loja
 // específica. lang segue o formato de locale usado pelo site para
 // nome/descrição do item (ex.: "en-US"); se vazio, "en-US" é usado.
-func (c *Client) GetItemDetail(ctx context.Context, loc StoreLocation, lang string) (*ItemDetail, error) {
+func (c *Client) GetItemDetail(ctx context.Context, loc StoreLocation, lang string, opts ...CallOption) (*ItemDetail, error) {
 	if lang == "" {
 		lang = "en-US"
 	}
@@ -655,7 +746,7 @@ func (c *Client) GetItemDetail(ctx context.Context, loc StoreLocation, lang stri
 		Success:    "Detalhes do item consultados",
 		Error:      "Falha ao consultar detalhes do item",
 	}
-	if err := c.callAction(ctx, "item", params, &detail, labels); err != nil {
+	if err := c.callAction(ctx, "item", params, &detail, labels, newCallConfig(opts)); err != nil {
 		return nil, err
 	}
 	return &detail, nil
@@ -678,7 +769,7 @@ type PriceHistoryParams struct {
 
 // GetPriceHistory retorna o histórico de preços (mínimo, máximo e médio,
 // por dia) pelos quais um item foi anunciado em um servidor.
-func (c *Client) GetPriceHistory(ctx context.Context, p PriceHistoryParams) (*PriceHistory, error) {
+func (c *Client) GetPriceHistory(ctx context.Context, p PriceHistoryParams, opts ...CallOption) (*PriceHistory, error) {
 	page := p.Page
 	if page == 0 {
 		page = 1
@@ -706,7 +797,7 @@ func (c *Client) GetPriceHistory(ctx context.Context, p PriceHistoryParams) (*Pr
 		Success:    fmt.Sprintf("Histórico de preço do item #%d consultado", p.ItemId),
 		Error:      fmt.Sprintf("Falha ao consultar histórico de preço do item #%d", p.ItemId),
 	}
-	if err := c.callAction(ctx, "price", params, &history, labels); err != nil {
+	if err := c.callAction(ctx, "price", params, &history, labels, newCallConfig(opts)); err != nil {
 		return nil, err
 	}
 	return &history, nil

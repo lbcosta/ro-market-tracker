@@ -17,6 +17,14 @@
 const WATCHLIST_KEY = "ro-market-tracker:watchlist";
 const MONITOR_INTERVAL_MS = 5 * 60 * 1000;
 
+// MONITOR_ITEM_SPACING_MS é a pausa entre a consulta de um item e a do
+// seguinte dentro de um mesmo ciclo de checagem. As consultas já saem em
+// série, mas emendadas elas ocupariam a fila do servidor continuamente do
+// primeiro ao último item; a pausa deixa brechas para uma busca que o
+// usuário faça no meio do ciclo — e é um espaçamento a mais de cortesia com
+// o site do jogo.
+const MONITOR_ITEM_SPACING_MS = 1000;
+
 // Uma entrada da watchlist acompanha uma de duas condições, conforme de onde
 // ela foi adicionada:
 //
@@ -378,7 +386,12 @@ function buildWatchlistRow(entry) {
   return li;
 }
 
-async function fetchLivePrice(entry) {
+// fetchLivePrice consulta o preço ao vivo de uma entrada. Por padrão o
+// servidor pode responder do cache dele (bom para o ciclo automático e para
+// recarregamentos de página — várias abas não multiplicam o tráfego ao
+// GnJoy); com fresh=true (o botão "↻"), o cache é ignorado e a consulta vai
+// ao mercado de verdade.
+async function fetchLivePrice(entry, fresh = false) {
   const row = findRow(entry.id);
   if (!row) return;
   const currentEl = row.querySelector(".watchlist-current");
@@ -390,6 +403,9 @@ async function fetchLivePrice(entry) {
       "&item=" + encodeURIComponent(entry.itemName);
     if (entry.refineFilter != null) {
       url += "&refine=" + encodeURIComponent(entry.refineFilter);
+    }
+    if (fresh) {
+      url += "&fresh=1";
     }
     const res = await fetch(url);
     if (!res.ok) throw new Error("status " + res.status);
@@ -500,35 +516,64 @@ async function notifyHit(entry, minPrice) {
   }
 }
 
+// monitorCheckRunning impede dois ciclos de checagem simultâneos (o timer
+// disparando em cima de um ciclo ainda em andamento, ou o "↻" apertado duas
+// vezes) — o segundo é simplesmente ignorado, já que o primeiro consultará
+// os mesmos itens.
+let monitorCheckRunning = false;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // runMonitoringCheck é a checagem periódica: só os itens com monitoring
 // ativado participam (é o que o "ligado/desligado" da luz da watchlist
 // significa). Itens desligados continuam na lista, só não são
 // reconsultados nem podem disparar aviso enquanto assim permanecerem.
-function runMonitoringCheck() {
-  for (const entry of loadWatchlist()) {
-    if (entry.monitoring) fetchLivePrice(entry);
+//
+// As consultas saem EM SÉRIE (um await por item), não todas de uma vez: o
+// servidor enfileiraria as paralelas de qualquer forma no rate limiter dele,
+// e despejar a lista inteira de uma vez só ocuparia a fila — atrasando
+// qualquer busca que o usuário fizesse no meio do ciclo. Entre um item e o
+// seguinte ainda há uma pausa de MONITOR_ITEM_SPACING_MS, pelo mesmo motivo.
+async function runMonitoringCheck(fresh = false) {
+  if (monitorCheckRunning) return;
+  monitorCheckRunning = true;
+  try {
+    let first = true;
+    for (const entry of loadWatchlist()) {
+      if (!entry.monitoring) continue;
+      if (!first) await sleep(MONITOR_ITEM_SPACING_MS);
+      first = false;
+      await fetchLivePrice(entry, fresh);
+    }
+  } finally {
+    monitorCheckRunning = false;
   }
 }
 
 // scheduleMonitoring (re)agenda a próxima checagem automática usando
 // setTimeout (em vez de setInterval) para que "forçar atualização agora"
 // possa cancelar a espera pendente e recomeçar a contagem do zero, sem
-// deixar uma checagem duplicada rodando em paralelo.
+// deixar uma checagem duplicada rodando em paralelo. O ciclo seguinte só é
+// agendado quando o atual termina, então um ciclo lento (muitos itens, site
+// devagar) atrasa o próximo em vez de se sobrepor a ele.
 function scheduleMonitoring(delayMs = MONITOR_INTERVAL_MS) {
   if (monitorTimerId) clearTimeout(monitorTimerId);
   nextMonitorRunAt = Date.now() + delayMs;
-  monitorTimerId = setTimeout(() => {
-    runMonitoringCheck();
+  monitorTimerId = setTimeout(async () => {
+    await runMonitoringCheck();
     scheduleMonitoring();
   }, delayMs);
   updateCountdownDisplay();
 }
 
 // forceMonitoringNow é chamado pelo botão "↻" ao lado do título da
-// watchlist: roda a checagem imediatamente e reinicia o cronômetro para um
-// novo ciclo completo de MONITOR_INTERVAL_MS.
+// watchlist: roda a checagem imediatamente — com fresh, ignorando o cache do
+// servidor, porque quem apertou quer o estado de AGORA — e reinicia o
+// cronômetro para um novo ciclo completo de MONITOR_INTERVAL_MS.
 function forceMonitoringNow() {
-  runMonitoringCheck();
+  runMonitoringCheck(true);
   scheduleMonitoring();
 }
 

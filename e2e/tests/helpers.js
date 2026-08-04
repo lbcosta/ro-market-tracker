@@ -9,6 +9,11 @@ const { MOCK_URL } = require("../config");
 async function resetPage(page, request) {
   if (request) {
     await request.post(`${MOCK_URL}/__mock/reset`);
+    // O cache de consultas do servidor também guarda estado entre testes
+    // (ver internal/web/cache.go): sem zerá-lo aqui, um teste enxergaria o
+    // mercado que o teste anterior deixou cacheado em vez de consultar o
+    // mock que ele mesmo acabou de configurar.
+    await request.post("/web/cache/reset");
   }
   await page.goto("/");
   await page.evaluate(() => localStorage.clear());
