@@ -20,6 +20,8 @@
   --danger: #a4291f;
   --activity-bar-collapsed-height: 2.75rem;
   --activity-yellow: #9c7a17;
+  --warning: #8a5a00;
+  --warning-bg: #fdf3e0;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -36,6 +38,8 @@
     --success: #3ddc73;
     --danger: #ff6b6b;
     --activity-yellow: #e0b23d;
+    --warning: #e0b23d;
+    --warning-bg: #2a2110;
   }
 }
 
@@ -55,6 +59,8 @@
   --success: #3ddc73;
   --danger: #ff6b6b;
   --activity-yellow: #e0b23d;
+  --warning: #e0b23d;
+  --warning-bg: #2a2110;
 }
 
 :root[data-theme="light"] {
@@ -70,6 +76,8 @@
   --success: #2f9e44;
   --danger: #a4291f;
   --activity-yellow: #9c7a17;
+  --warning: #8a5a00;
+  --warning-bg: #fdf3e0;
 }
 
 * {
@@ -227,6 +235,25 @@ h1 {
   border: 0;
   width: auto;
   cursor: pointer;
+}
+
+/* O custo só interessa a quem está prestes a pagá-lo: sem nenhuma caixa
+   marcada, este aviso seria mais um texto para ignorar na tela de busca. */
+.search-warning {
+  display: none;
+  flex-basis: 100%;
+  margin: 0.2rem 0 0;
+  padding: 0.5rem 0.7rem;
+  border-left: 3px solid var(--warning);
+  border-radius: 0 4px 4px 0;
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.search-options:has(input[type="checkbox"]:checked) .search-warning {
+  display: block;
 }
 
 /* Tamanho fixo e position:relative para o spinner poder se centralizar por

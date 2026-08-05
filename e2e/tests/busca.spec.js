@@ -102,6 +102,29 @@ test("o ícone que não carrega some em vez de quebrar o cabeçalho", async ({ p
   await expect(page.locator(".item-icon")).toHaveCount(0);
 });
 
+// O aviso é o que separa "o usuário pediu a varredura" de "o usuário marcou
+// uma caixa sem saber que ela custa uma consulta por anúncio". Ele aparece por
+// CSS, não por JS, para não piscar quando o navegador restaura os checkboxes
+// ao recarregar.
+test("o aviso de custo aparece só com uma das caixas marcada", async ({ page }) => {
+  const aviso = page.locator(".search-warning");
+  await expect(aviso).toBeHidden();
+
+  await page.check('input[name="refine"]');
+  await expect(aviso).toBeVisible();
+  await expect(aviso).toContainText("consulta a mais ao site");
+
+  // Com as duas marcadas continua sendo um aviso só.
+  await page.check('input[name="bonus"]');
+  await expect(aviso).toHaveCount(1);
+  await expect(aviso).toBeVisible();
+
+  await page.uncheck('input[name="refine"]');
+  await expect(aviso).toBeVisible();
+  await page.uncheck('input[name="bonus"]');
+  await expect(aviso).toBeHidden();
+});
+
 // Os três anúncios da Espada Primordial custam de 129 a 299 milhões porque são
 // +0, +7 e +10 — o que a tabela de sempre não tem como mostrar, já que a busca
 // do site não traz refino.

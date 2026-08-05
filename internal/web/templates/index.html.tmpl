@@ -68,6 +68,20 @@
           <input type="checkbox" name="bonus" value="1">
           Verificar bônus aleatórios
         </label>
+        {{/* Aparece e some só por CSS (ver .search-options:has(...)), e não
+             por JS: o navegador restaura o estado dos checkboxes ao
+             recarregar a página, e um JS em DOMContentLoaded deixaria um
+             instante com a caixa marcada e o aviso escondido. É o mesmo
+             motivo pelo qual os ícones do tema são resolvidos em CSS.
+
+             role="note", e não "alert": o leitor de tela não deve interromper
+             a leitura a cada clique no checkbox. */}}
+        <p class="search-warning" role="note">
+          Cada anúncio encontrado custa uma consulta a mais ao site — duas, com
+          as duas caixas marcadas. Uma busca com 30 anúncios pode passar de um
+          minuto e aumenta o risco de o site limitar suas consultas por um
+          tempo. A barra de atividades, no rodapé, mostra o andamento.
+        </p>
       </div>
     </form>
 
