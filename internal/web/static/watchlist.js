@@ -327,10 +327,150 @@ function startEditingRefine(span, id) {
   });
 }
 
+// --- reordenar a watchlist ---
+//
+// Pointer events, e não a API de drag and drop do HTML5: os testes de navegador
+// rodam sem repetição de propósito (ver playwright.config.js), e o DnD nativo
+// depende de o navegador sintetizar eventos a partir do mouse — a parte
+// historicamente mais instável do Playwright. pointerdown/move/up são dirigidos
+// diretamente, funcionam no toque de graça e deixam o visual sob controle do
+// CSS.
+//
+// A ordem do array no localStorage JÁ É a ordem de exibição (renderWatchlist e
+// runMonitoringCheck iteram loadWatchlist() direto), então reordenar é
+// reordenar o array — sem campo novo na entrada e sem migração das que já
+// existem.
+
+// PIXELS_ALEM_DO_CENTRO evita o tremor na fronteira entre dois itens: sem uma
+// margem, um movimento de um pixel sobre a divisa faria a linha pular de um
+// lado para o outro a cada evento.
+const PIXELS_ALEM_DO_CENTRO = 6;
+
+function buildDragHandle(li) {
+  const handle = document.createElement("button");
+  handle.type = "button";
+  handle.className = "watchlist-drag";
+  handle.textContent = "⠿";
+  handle.title = "Arraste para reordenar";
+  handle.setAttribute("aria-label", "Reordenar: arraste, ou use as setas para cima e para baixo");
+
+  // Os eventos do arraste ficam no document, e não no handle com
+  // setPointerCapture: reordenar remove e reinsere o <li>, e o handle vai
+  // junto — o que libera a captura implicitamente. Na prática, a linha
+  // trocava de lugar uma vez e parava de responder no meio do arraste.
+  handle.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault();
+    li.classList.add("dragging");
+
+    const aoMover = (mv) => moverParaPerto(li, mv.clientX, mv.clientY);
+    const aoSoltar = () => {
+      document.removeEventListener("pointermove", aoMover);
+      document.removeEventListener("pointerup", aoSoltar);
+      document.removeEventListener("pointercancel", aoSoltar);
+      li.classList.remove("dragging");
+      persistWatchlistOrder();
+    };
+
+    document.addEventListener("pointermove", aoMover);
+    document.addEventListener("pointerup", aoSoltar);
+    document.addEventListener("pointercancel", aoSoltar);
+  });
+
+  // Arrastar não é a única forma de reordenar: sem o teclado, quem não usa
+  // mouse não teria como.
+  handle.addEventListener("keydown", (ev) => {
+    if (ev.key !== "ArrowUp" && ev.key !== "ArrowDown") return;
+    ev.preventDefault();
+    const alvo = ev.key === "ArrowUp" ? li.previousElementSibling : li.nextElementSibling;
+    if (!alvo) return;
+    if (ev.key === "ArrowUp") {
+      alvo.before(li);
+    } else {
+      alvo.after(li);
+    }
+    persistWatchlistOrder();
+    handle.focus();
+  });
+
+  return handle;
+}
+
+// moverParaPerto reinsere a linha arrastada junto do irmão cujo centro está
+// mais próximo do ponteiro.
+//
+// A distância é medida nos dois eixos, e não só na vertical, porque a watchlist
+// expandida dispõe as linhas em grade — em uma coluna só o resultado é o mesmo,
+// mas em duas o eixo Y sozinho escolheria o vizinho errado.
+function moverParaPerto(arrastada, x, y) {
+  const container = arrastada.parentElement;
+  if (!container) return;
+
+  let alvo = null;
+  let menorDistancia = Infinity;
+  for (const irmao of container.querySelectorAll(".watchlist-row")) {
+    if (irmao === arrastada) continue;
+    const r = irmao.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const distancia = Math.hypot(x - cx, y - cy);
+    if (distancia < menorDistancia) {
+      menorDistancia = distancia;
+      alvo = { el: irmao, cx, cy, altura: r.height };
+    }
+  }
+  if (!alvo) return;
+
+  // Só troca depois de o ponteiro passar do centro do vizinho, com folga, e a
+  // comparação segue a ordem de leitura: o eixo X só decide quando os dois
+  // estão na mesma faixa horizontal — o que em uma coluna só nunca acontece
+  // entre linhas diferentes, e na watchlist expandida é o caso comum.
+  const depois = arrastada.compareDocumentPosition(alvo.el) & Node.DOCUMENT_POSITION_FOLLOWING;
+  const mesmaFaixa = Math.abs(y - alvo.cy) <= alvo.altura / 2;
+  const passou = depois
+    ? y > alvo.cy + PIXELS_ALEM_DO_CENTRO || (mesmaFaixa && x > alvo.cx + PIXELS_ALEM_DO_CENTRO)
+    : y < alvo.cy - PIXELS_ALEM_DO_CENTRO || (mesmaFaixa && x < alvo.cx - PIXELS_ALEM_DO_CENTRO);
+  if (!passou) return;
+
+  if (depois) {
+    alvo.el.after(arrastada);
+  } else {
+    alvo.el.before(arrastada);
+  }
+}
+
+// persistWatchlistOrder grava a ordem que está na tela.
+//
+// NÃO chama renderWatchlist: ela limpa o painel e reconsulta o preço de TODOS
+// os itens, então um arrastar custaria uma requisição por item ao site. Como
+// aqui o nó real é que foi movido, não há nada a re-renderizar.
+function persistWatchlistOrder() {
+  const container = document.getElementById("watchlist-list");
+  if (!container) return;
+
+  const ids = [...container.querySelectorAll(".watchlist-row")].map((li) => li.dataset.id);
+  const porId = new Map(loadWatchlist().map((entry) => [entry.id, entry]));
+
+  const ordenada = [];
+  for (const id of ids) {
+    const entry = porId.get(id);
+    if (entry) {
+      ordenada.push(entry);
+      porId.delete(id);
+    }
+  }
+  // O que sobrou não tinha linha na tela (não deveria acontecer) vai para o
+  // fim, nunca é descartado: um erro aqui apagaria a watchlist do usuário.
+  for (const entry of porId.values()) ordenada.push(entry);
+
+  saveWatchlist(ordenada);
+}
+
 function buildWatchlistRow(entry) {
   const li = document.createElement("li");
   li.className = "watchlist-row";
   li.dataset.id = entry.id;
+
+  li.appendChild(buildDragHandle(li));
 
   const toggle = document.createElement("button");
   toggle.type = "button";

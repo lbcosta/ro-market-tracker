@@ -752,6 +752,37 @@ h4 {
   border-radius: 6px;
 }
 
+/* touch-action: none é obrigatório, não estético: sem ele o navegador entende
+   o arrastar no toque como rolagem da página e para de mandar os pointermove,
+   e a linha simplesmente não sai do lugar no celular. */
+.watchlist-drag {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.2rem;
+  border-radius: 4px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.watchlist-drag:hover {
+  color: var(--text);
+}
+
+.watchlist-row.dragging {
+  opacity: 0.7;
+  border-color: var(--accent);
+  /* Sem isto, arrastar sobre os outros itens seleciona o texto deles. */
+  user-select: none;
+}
+
+.watchlist-row.dragging .watchlist-drag {
+  cursor: grabbing;
+}
+
 .status-toggle {
   flex-shrink: 0;
   display: flex;

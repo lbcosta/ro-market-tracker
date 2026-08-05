@@ -1,5 +1,12 @@
 const { test, expect } = require("@playwright/test");
-const { resetPage, buscar, clicarWatchlistDoItem, anunciarNoMercado } = require("./helpers");
+const {
+  resetPage,
+  buscar,
+  clicarWatchlistDoItem,
+  anunciarNoMercado,
+  contarRequisicoesAoUpstream,
+  zerarContagemDoUpstream,
+} = require("./helpers");
 
 // A consulta de preço da watchlist passa pelo rate limiter do servidor e pode
 // custar várias chamadas (uma por candidato, quando há refino fixado), então
@@ -15,6 +22,81 @@ async function adicionarEspadaPrimordial(page) {
 
 test.beforeEach(async ({ page, request }) => {
   await resetPage(page, request);
+});
+
+/** Nomes das linhas da watchlist, de cima para baixo. */
+function nomesDaWatchlist(page) {
+  return page.locator(".watchlist-row .watchlist-name-text");
+}
+
+/** Adiciona os três itens que a busca por "Espada" casa, na ordem da tabela. */
+async function adicionarTresItens(page) {
+  await buscar(page, "Espada");
+  for (const nome of ["Espada Primordial", "Espada Citadina", "Carta Peixe-Espada"]) {
+    await clicarWatchlistDoItem(page, nome);
+  }
+  await expect(nomesDaWatchlist(page)).toHaveText([
+    "Espada Primordial",
+    "Espada Citadina",
+    "Carta Peixe-Espada",
+  ]);
+}
+
+// O teclado, além de ser a única forma de reordenar para quem não usa mouse, é
+// o caminho determinístico: nada de sintetizar movimento de ponteiro.
+test("as setas reordenam a watchlist e a ordem sobrevive a recarregar", async ({ page }) => {
+  await adicionarTresItens(page);
+
+  const handleDoTerceiro = page.locator(".watchlist-row").nth(2).locator(".watchlist-drag");
+  await handleDoTerceiro.focus();
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+
+  const esperada = ["Carta Peixe-Espada", "Espada Primordial", "Espada Citadina"];
+  await expect(nomesDaWatchlist(page)).toHaveText(esperada);
+
+  await page.reload();
+  await expect(nomesDaWatchlist(page)).toHaveText(esperada);
+});
+
+test("arrastar uma linha reordena a watchlist", async ({ page }) => {
+  await adicionarTresItens(page);
+
+  const handleDoPrimeiro = page.locator(".watchlist-row").nth(0).locator(".watchlist-drag");
+  const ultimaLinha = page.locator(".watchlist-row").nth(2);
+
+  const origem = await handleDoPrimeiro.boundingBox();
+  const destino = await ultimaLinha.boundingBox();
+  await page.mouse.move(origem.x + origem.width / 2, origem.y + origem.height / 2);
+  await page.mouse.down();
+  // steps: o movimento precisa passar pelos centros dos vizinhos para a linha
+  // ser reinserida — um salto único não gera os pointermove do caminho.
+  await page.mouse.move(destino.x + destino.width / 2, destino.y + destino.height, { steps: 12 });
+  await page.mouse.up();
+
+  const esperada = ["Espada Citadina", "Carta Peixe-Espada", "Espada Primordial"];
+  await expect(nomesDaWatchlist(page)).toHaveText(esperada);
+
+  await page.reload();
+  await expect(nomesDaWatchlist(page)).toHaveText(esperada);
+});
+
+// Reordenar mexe no nó que já está na tela. Se em vez disso o painel fosse
+// reconstruído, cada arrastar custaria uma consulta ao site POR ITEM da
+// watchlist — é este teste que trava essa armadilha.
+test("reordenar não custa nenhuma consulta ao site", async ({ page, request }) => {
+  await adicionarTresItens(page);
+  await expect(page.locator(".watchlist-row").first().locator(".watchlist-current"))
+    .toContainText("z", ESPERA_PRECO);
+
+  await zerarContagemDoUpstream(request);
+
+  const handle = page.locator(".watchlist-row").nth(2).locator(".watchlist-drag");
+  await handle.focus();
+  await page.keyboard.press("ArrowUp");
+  await expect(nomesDaWatchlist(page).first()).toHaveText("Espada Primordial");
+
+  expect(await contarRequisicoesAoUpstream(request)).toBe(0);
 });
 
 test("adicionar um item mostra o menor preço anunciado", async ({ page }) => {
