@@ -130,6 +130,9 @@ func TestActivityStreamMandaAtualizacoes(t *testing.T) {
 	if ev := nextEvent(t, events); ev.Name != "snapshot" {
 		t.Fatalf("primeiro evento = %q, quero \"snapshot\"", ev.Name)
 	}
+	if ev := nextEvent(t, events); ev.Name != "suspension" {
+		t.Fatalf("segundo evento = %q, quero \"suspension\"", ev.Name)
+	}
 
 	getHTML(t, srv, "/web/search?server=NIDHOGG&item=Poring")
 
@@ -176,6 +179,7 @@ func TestActivityStreamPublicaFalhas(t *testing.T) {
 
 	events := openActivityStream(t, srv)
 	nextEvent(t, events) // snapshot
+	nextEvent(t, events) // estado de suspensão inicial
 
 	mock.QueueFailure(gnjoytest.Failure{Status: http.StatusInternalServerError}, 20)
 	getHTML(t, srv, "/web/search?server=NIDHOGG&item=Espada")

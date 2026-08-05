@@ -109,6 +109,13 @@ type Client struct {
 	cooldownMu    sync.Mutex
 	cooldownUntil time.Time
 
+	// suspension é a segunda camada de defesa contra o 429, acima da
+	// calmaria: enquanto suspensa, nenhuma chamada sai (ver suspend.go).
+	// suspendOn429 diz se um 429 chega a alimentá-la — sem a option, o
+	// Client insiste como sempre insistiu.
+	suspension   *SuspensionState
+	suspendOn429 bool
+
 	actionIDMu sync.RWMutex
 	actionID   string
 
@@ -151,6 +158,20 @@ func WithRateLimit(rps float64, burst int) Option {
 	return func(c *Client) { c.limiter = rate.NewLimiter(rate.Limit(rps), burst) }
 }
 
+// WithSuspendOn429 faz o primeiro 429 suspender TODAS as consultas até o site
+// voltar a responder (ver suspend.go), em vez de apenas registrar a calmaria e
+// insistir. A partir daí só ProbeUpstream atravessa, e é a resposta dela que
+// reabre.
+//
+// É opt-in porque muda o contrato para quem usa o pacote como biblioteca:
+// desligada, o Client continua com o retry com backoff de sempre, que é o
+// comportamento certo quando quem chama trata o erro por conta própria. O
+// binário a liga (ver cmd/server/main.go), porque lá há uma tela para avisar o
+// usuário e uma sonda para reabrir.
+func WithSuspendOn429() Option {
+	return func(c *Client) { c.suspendOn429 = true }
+}
+
 // CallOption ajusta o comportamento de UMA chamada específica, sem afetar o
 // Client — o complemento por chamada das Options de construção. É aceita
 // pelos métodos públicos de consulta (SearchShops, GetStoreDetail etc.).
@@ -162,6 +183,11 @@ type callConfig struct {
 	// maxRetries é quantas vezes a chamada é refeita após um 429 antes de
 	// desistir e propagar o erro.
 	maxRetries int
+
+	// allowWhileSuspended deixa a chamada atravessar a suspensão. Não tem
+	// CallOption pública de propósito: só ProbeUpstream o liga, porque só
+	// ela existe para descobrir se o site voltou (ver suspend.go).
+	allowWhileSuspended bool
 }
 
 func newCallConfig(opts []CallOption) callConfig {
@@ -196,6 +222,7 @@ func New(opts ...Option) *Client {
 		httpClient: &http.Client{Timeout: 15 * time.Second},
 		limiter:    rate.NewLimiter(rate.Limit(DefaultRateLimitRPS), DefaultRateLimitBurst),
 		activity:   NewActivityLog(activityLogCapacity),
+		suspension: newSuspensionState(),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -242,10 +269,30 @@ var ErrActionFailed = errors.New("gnjoy: action reportou falha")
 // quem estiver observando (a barra de atividades do frontend).
 func (c *Client) do(req *http.Request, labels activityLabels, cfg callConfig) ([]byte, error) {
 	req.Header.Set("user-agent", c.userAgent)
+
+	// Recusa antes de abrir a atividade: uma varredura de trinta anúncios
+	// contra uma porta fechada despejaria trinta linhas vermelhas na barra e
+	// evictaria o histórico útil, que é justamente onde está o 429 que
+	// explica tudo.
+	gen, err := c.suspension.admit(cfg.allowWhileSuspended)
+	if err != nil {
+		return nil, err
+	}
+
 	handle := c.activity.begin(labels)
 
 	var lastErr error
 	for attempt := 0; attempt <= cfg.maxRetries; attempt++ {
+		// De novo a cada tentativa: um 429 de outra chamada pode ter fechado
+		// a porta enquanto esta esperava para insistir, e insistir agora seria
+		// gastar cota contra um bloqueio já conhecido.
+		if attempt > 0 {
+			if gen, err = c.suspension.admit(cfg.allowWhileSuspended); err != nil {
+				handle.fail(err)
+				return nil, err
+			}
+		}
+
 		if attempt > 0 && req.Body != nil {
 			// Requisições sem corpo (GET) não precisam de nada aqui; as
 			// com corpo (POST) precisam recriá-lo, já que ele já foi
@@ -264,7 +311,7 @@ func (c *Client) do(req *http.Request, labels activityLabels, cfg callConfig) ([
 			req.Body = io.NopCloser(body)
 		}
 
-		if err := c.awaitTurn(req.Context(), handle); err != nil {
+		if err := c.awaitTurn(req.Context(), handle, cfg); err != nil {
 			handle.fail(err)
 			return nil, err
 		}
@@ -291,6 +338,12 @@ func (c *Client) do(req *http.Request, labels activityLabels, cfg callConfig) ([
 			// calmaria global, e as demais chamadas enfileiradas param de
 			// gastar as próprias tentativas contra um bloqueio já conhecido.
 			c.extendCooldown(time.Now().Add(wait))
+			if c.suspendOn429 {
+				// Além da calmaria: o 429 pode ser a cota do dia acabando, e
+				// aí o site não diz quando volta. Fecha a porta e deixa a
+				// sonda descobrir (ver suspend.go).
+				c.suspension.suspend(time.Now())
+			}
 			if attempt == cfg.maxRetries {
 				break
 			}
@@ -302,6 +355,12 @@ func (c *Client) do(req *http.Request, labels activityLabels, cfg callConfig) ([
 			continue
 		}
 
+		// O site respondeu algo que não é 429 — 200, 404, 500, tanto faz. Ele
+		// está atendendo, e é isso que a suspensão espera para reabrir. A
+		// guarda de geração impede que uma resposta admitida ANTES do 429, e
+		// que só chegou agora, desfaça uma suspensão mais nova que ela.
+		c.suspension.release(gen)
+
 		if resp.StatusCode != http.StatusOK {
 			err := &HTTPError{StatusCode: resp.StatusCode, Body: truncateBody(body)}
 			handle.fail(err)
@@ -310,7 +369,7 @@ func (c *Client) do(req *http.Request, labels activityLabels, cfg callConfig) ([
 		handle.succeed()
 		return body, nil
 	}
-	err := fmt.Errorf("gnjoy: upstream retornou 429 em todas as %d tentativa(s): %w", cfg.maxRetries+1, lastErr)
+	err = fmt.Errorf("gnjoy: upstream retornou 429 em todas as %d tentativa(s): %w", cfg.maxRetries+1, lastErr)
 	handle.fail(err)
 	return nil, err
 }
@@ -322,8 +381,16 @@ func (c *Client) do(req *http.Request, labels activityLabels, cfg callConfig) ([
 // a vaga. Nesse caso a vaga é devolvida e a espera recomeça, com uma vaga
 // nova ao final: é isso que faz as chamadas represadas saírem espaçadas pelo
 // limiter quando a calmaria acaba, em vez de todas de uma vez.
-func (c *Client) awaitTurn(ctx context.Context, handle *activityHandle) error {
+func (c *Client) awaitTurn(ctx context.Context, handle *activityHandle, cfg callConfig) error {
 	for {
+		// A suspensão é reconferida junto da calmaria, e pelo mesmo motivo:
+		// uma chamada estacionada numa calmaria de dois minutos dispararia
+		// assim que ela acabasse, mesmo já suspensa — e é exatamente esse
+		// tráfego represado que a suspensão existe para impedir.
+		if _, err := c.suspension.admit(cfg.allowWhileSuspended); err != nil {
+			return err
+		}
+
 		if wait := time.Until(c.cooldownDeadline()); wait > 0 {
 			handle.waiting(time.Now().Add(wait))
 			select {

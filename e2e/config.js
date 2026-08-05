@@ -14,4 +14,18 @@ const MOCK_URL = `http://127.0.0.1:${MOCK_PORT}`;
 const RATE_LIMIT_RPS = "2";
 const RATE_LIMIT_BURST = "1";
 
-module.exports = { APP_PORT, MOCK_PORT, APP_URL, MOCK_URL, RATE_LIMIT_RPS, RATE_LIMIT_BURST };
+// De quanto em quanto tempo o servidor verifica se o site voltou a aceitar
+// consultas depois de um 429 (o padrão são dez minutos). Curto aqui porque a
+// suspensão é global ao processo e a suíte compartilha um servidor: sem isso,
+// um teste de bloqueio deixaria todos os seguintes travados.
+const SUSPENSION_PROBE_INTERVAL = "1s";
+
+module.exports = {
+  APP_PORT,
+  MOCK_PORT,
+  APP_URL,
+  MOCK_URL,
+  RATE_LIMIT_RPS,
+  RATE_LIMIT_BURST,
+  SUSPENSION_PROBE_INTERVAL,
+};

@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -297,6 +298,14 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.cachedSearchShops(r.Context(), server, item, freshMaxAge)
 	if err != nil {
+		// "Tente de novo em instantes" seria um mau conselho quando o site
+		// está limitando as consultas: tentar de novo é justamente o que não
+		// se deve fazer, e o aviso no topo da página já diz o que está
+		// acontecendo.
+		if errors.Is(err, gnjoy.ErrSuspended) {
+			render(w, "results.html.tmpl", resultsView{Error: "As consultas estão suspensas: o site limitou o acesso. A busca volta assim que ele liberar."})
+			return
+		}
 		slog.Error("web: busca falhou", "error", err)
 		render(w, "results.html.tmpl", resultsView{Error: "Não foi possível buscar no mercado agora. Tente novamente em instantes."})
 		return

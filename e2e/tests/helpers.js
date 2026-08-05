@@ -55,8 +55,15 @@ async function zerarContagemDoUpstream(request) {
 
 // falharProximasRequisicoes faz o site falso recusar as próximas n
 // requisições, para exercitar como o frontend mostra uma falha do upstream.
-async function falharProximasRequisicoes(request, { status = 500, times = 1 } = {}) {
-  await request.post(`${MOCK_URL}/__mock/fail?status=${status}&times=${times}`);
+//
+// retryAfter vira o cabeçalho "Retry-After" da resposta. Importa nos testes de
+// 429: sem ele, o client entra numa calmaria com backoff e até a sonda de
+// recuperação fica esperando a vez, o que faria o teste medir a espera em vez
+// do comportamento.
+async function falharProximasRequisicoes(request, { status = 500, times = 1, retryAfter } = {}) {
+  const q = new URLSearchParams({ status: String(status), times: String(times) });
+  if (retryAfter !== undefined) q.set("retryAfter", String(retryAfter));
+  await request.post(`${MOCK_URL}/__mock/fail?${q}`);
 }
 
 // clicarWatchlistDoItem clica o "+ Watchlist" da seção de itemName na tabela

@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -49,12 +50,22 @@ func main() {
 	if opt, ok := rateLimitOptionFromEnv(); ok {
 		opts = append(opts, opt)
 	}
+	// Um 429 aqui não é um tropeço a insistir: é o site dizendo que a cota
+	// acabou. O programa para de falar com ele, avisa na tela e espera —
+	// insistir a partir daí só prolonga o bloqueio (ver internal/gnjoy/suspend.go).
+	opts = append(opts, gnjoy.WithSuspendOn429())
 
 	client := gnjoy.New(opts...)
 
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux, client)
 	web.RegisterRoutes(mux, client)
+
+	// Quem tira o programa da suspensão: sonda o site de tempos em tempos e
+	// libera tudo quando ele volta. context.Background() porque não há
+	// shutdown ordenado para pendurar isto — ver o comentário no http.Serve
+	// abaixo.
+	web.StartSuspensionProbe(context.Background(), client, probeIntervalFromEnv())
 
 	// Ocupa a porta antes de dar as boas-vindas: se ela estiver em uso, o
 	// usuário precisa ver o motivo, e não um endereço que não vai abrir.
@@ -66,6 +77,10 @@ func main() {
 
 	printBoasVindas(port)
 
+	// http.Serve direto, sem os timeouts de um http.Server: a ausência deles
+	// é deliberada. Um WriteTimeout mataria o stream SSE da barra de
+	// atividades, que por construção nunca termina, e cortaria a busca com a
+	// verificação de refino/bônus ligada, que pode passar de um minuto.
 	if err := http.Serve(ln, withLogging(mux)); err != nil {
 		slog.Error("servidor encerrado", "error", err)
 		os.Exit(1)
@@ -200,4 +215,22 @@ func rateLimitOptionFromEnv() (gnjoy.Option, bool) {
 		return nil, false
 	}
 	return gnjoy.WithRateLimit(rps, burst), true
+}
+
+// probeIntervalFromEnv lê de quanto em quanto tempo sondar o site enquanto as
+// consultas estiverem suspensas por um 429. Existe como variável de ambiente
+// para os testes de navegador poderem observar a recuperação sem esperar dez
+// minutos — exercitando o caminho real, em vez de uma rota de escape que só
+// existiria para eles.
+func probeIntervalFromEnv() time.Duration {
+	v := os.Getenv("GNJOY_SUSPENSION_PROBE_INTERVAL")
+	if v == "" {
+		return 0 // o padrão do pacote web
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		slog.Error("GNJOY_SUSPENSION_PROBE_INTERVAL inválido, usando padrão", "value", v, "error", err)
+		return 0
+	}
+	return d
 }

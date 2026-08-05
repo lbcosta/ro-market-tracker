@@ -3,7 +3,15 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { APP_PORT, MOCK_PORT, APP_URL, MOCK_URL, RATE_LIMIT_RPS, RATE_LIMIT_BURST } = require("./config");
+const {
+  APP_PORT,
+  MOCK_PORT,
+  APP_URL,
+  MOCK_URL,
+  RATE_LIMIT_RPS,
+  RATE_LIMIT_BURST,
+  SUSPENSION_PROBE_INTERVAL,
+} = require("./config");
 
 const repoRoot = path.resolve(__dirname, "..");
 
@@ -43,6 +51,12 @@ module.exports = async () => {
       GNJOY_ACTION_ID: actionID,
       GNJOY_RATE_LIMIT_RPS: RATE_LIMIT_RPS,
       GNJOY_RATE_LIMIT_BURST: RATE_LIMIT_BURST,
+      // O padrão são dez minutos, e a suspensão é global ao processo: um
+      // teste que a dispare deixaria todos os seguintes bloqueados (a suíte
+      // roda com um servidor só e um worker só). Encurtando aqui, a
+      // recuperação é o caminho REAL sendo exercitado — não uma rota de
+      // escape que só existiria para os testes.
+      GNJOY_SUSPENSION_PROBE_INTERVAL: SUSPENSION_PROBE_INTERVAL,
     },
   });
   pipeOnFailure(server, "server");

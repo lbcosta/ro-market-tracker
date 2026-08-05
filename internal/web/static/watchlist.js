@@ -571,12 +571,16 @@ function sleep(ms) {
 // qualquer busca que o usuário fizesse no meio do ciclo. Entre um item e o
 // seguinte ainda há uma pausa de MONITOR_ITEM_SPACING_MS, pelo mesmo motivo.
 async function runMonitoringCheck(fresh = false) {
-  if (monitorCheckRunning) return;
+  if (monitorCheckRunning || watchlistSuspended) return;
   monitorCheckRunning = true;
   try {
     let first = true;
     for (const entry of loadWatchlist()) {
       if (!entry.monitoring) continue;
+      // Reconferido a cada item: a suspensão pode chegar no meio do ciclo, e
+      // seguir consultando os restantes seria bater numa porta que o servidor
+      // já fechou.
+      if (watchlistSuspended) break;
       if (!first) await sleep(MONITOR_ITEM_SPACING_MS);
       first = false;
       await fetchLivePrice(entry, fresh);
@@ -584,6 +588,22 @@ async function runMonitoringCheck(fresh = false) {
   } finally {
     monitorCheckRunning = false;
   }
+}
+
+// watchlistSuspended espelha o estado que o servidor publica pelo stream de
+// atividade (ver activity-bar.js): enquanto o site estiver limitando as
+// consultas, o ciclo automático para de sair. O cronômetro continua correndo
+// — quando a suspensão terminar, o ciclo seguinte encontra tudo liberado e
+// segue normalmente, sem precisar de nada que o religue.
+let watchlistSuspended = false;
+
+function setWatchlistSuspended(suspended) {
+  const era = watchlistSuspended;
+  watchlistSuspended = suspended;
+  // Ao voltar ao normal, uma checagem imediata: a última pode ter sido
+  // interrompida no meio, e esperar mais cinco minutos por dados que já dá
+  // para buscar seria gratuito.
+  if (era && !suspended) forceMonitoringNow();
 }
 
 // scheduleMonitoring (re)agenda a próxima checagem automática usando

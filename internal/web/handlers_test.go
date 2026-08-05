@@ -30,17 +30,17 @@ func newWebServer(t *testing.T) (*httptest.Server, *gnjoytest.Server) {
 	return newWebServerWith(t, gnjoytest.DemoConfig())
 }
 
-func newWebServerWith(t *testing.T, cfg gnjoytest.Config) (*httptest.Server, *gnjoytest.Server) {
+func newWebServerWith(t *testing.T, cfg gnjoytest.Config, opts ...gnjoy.Option) (*httptest.Server, *gnjoytest.Server) {
 	t.Helper()
 
 	mock := gnjoytest.New(cfg)
 	t.Cleanup(mock.Close)
 
-	client := gnjoy.New(
+	client := gnjoy.New(append([]gnjoy.Option{
 		gnjoy.WithBaseURL(mock.URL),
 		gnjoy.WithActionID(mock.ActionID()),
 		gnjoy.WithRateLimit(1000, 1000),
-	)
+	}, opts...)...)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, client)

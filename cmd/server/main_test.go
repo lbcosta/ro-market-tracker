@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMain(m *testing.M) {
@@ -95,6 +96,32 @@ func TestRateLimitOptionFromEnv(t *testing.T) {
 // TestLogLevelFromEnv fixa o padrão silencioso: quem abriu o executável não
 // quer ver o registro de cada requisição passando na janela, mas quem está
 // investigando um problema precisa conseguir ligá-lo sem outro binário.
+// TestProbeIntervalFromEnv: zero significa "usa o padrão do pacote web", e é
+// para lá que um valor inválido também cai — uma variável mal digitada não pode
+// virar uma sonda a cada milissegundo contra um site que já está bloqueando.
+func TestProbeIntervalFromEnv(t *testing.T) {
+	casos := []struct {
+		nome  string
+		valor string
+		quero time.Duration
+	}{
+		{"não definida", "", 0},
+		{"duração válida", "30s", 30 * time.Second},
+		{"minutos", "2m", 2 * time.Minute},
+		{"lixo", "toda hora", 0},
+		{"zero", "0s", 0},
+		{"negativa", "-5m", 0},
+	}
+	for _, tt := range casos {
+		t.Run(tt.nome, func(t *testing.T) {
+			t.Setenv("GNJOY_SUSPENSION_PROBE_INTERVAL", tt.valor)
+			if got := probeIntervalFromEnv(); got != tt.quero {
+				t.Errorf("probeIntervalFromEnv() = %v, quero %v", got, tt.quero)
+			}
+		})
+	}
+}
+
 func TestLogLevelFromEnv(t *testing.T) {
 	tests := []struct {
 		valor string

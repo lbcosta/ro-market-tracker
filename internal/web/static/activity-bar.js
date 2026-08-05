@@ -133,6 +133,46 @@ function connectActivityStream() {
     upsertActivityEvent(JSON.parse(msg.data));
     renderActivity();
   });
+
+  // Um handler só, e não um par "estado inicial"/"mudou": o payload é sempre
+  // o estado completo, então o primeiro evento da conexão e os seguintes são
+  // tratados do mesmo jeito. É também o que faz uma reconexão do EventSource
+  // resincronizar o aviso sozinha.
+  source.addEventListener("suspension", (msg) => {
+    applySuspension(JSON.parse(msg.data));
+  });
+}
+
+// applySuspension liga e desliga o modo suspenso da página: o aviso no topo e
+// o travamento dos controles que falariam com o site.
+//
+// Travar a interface não é o que impede as requisições — quem impede é o
+// servidor, que recusa tudo na porta enquanto estiver suspenso. Aqui é para o
+// usuário não ficar clicando em coisas que não vão funcionar.
+function applySuspension(state) {
+  const suspended = Boolean(state && state.suspended);
+  document.documentElement.dataset.suspended = suspended ? "1" : "";
+
+  const banner = document.getElementById("suspension-banner");
+  if (banner) banner.hidden = !suspended;
+
+  const detail = document.getElementById("suspension-detail");
+  if (detail && suspended && state.since) {
+    const desde = new Date(state.since).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    detail.textContent =
+      "As buscas e a watchlist estão pausadas desde " + desde +
+      ". O programa verifica sozinho de tempos em tempos e volta ao normal assim que o site liberar.";
+  }
+
+  document.querySelectorAll(".search-form input, .search-form select, .search-form button")
+    .forEach((el) => { el.disabled = suspended; });
+
+  // A watchlist inteira: nada de consultar preço, editar alvo ou ligar o
+  // monitoramento de um item enquanto não há como consultar o mercado.
+  document.querySelectorAll("#watchlist-list button, #watchlist-refresh-now")
+    .forEach((el) => { el.disabled = suspended; });
+
+  if (typeof setWatchlistSuspended === "function") setWatchlistSuspended(suspended);
 }
 
 document.addEventListener("DOMContentLoaded", () => {

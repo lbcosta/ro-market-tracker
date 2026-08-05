@@ -145,7 +145,6 @@ func (c *Client) discoverActionID(ctx context.Context) (string, error) {
 // chunks JS da página: essa varredura, mais cara e mais sujeita a esbarrar
 // no rate limiter do site, só acontece quando de fato é necessária.
 func (c *Client) WarmupActionID(ctx context.Context) error {
-	params := map[string]any{"svrId": 0, "mapId": 0, "ssi": ""}
 	labels := activityLabels{
 		InProgress: "Verificando conexão com o mercado",
 		Success:    "Conexão com o mercado verificada",
@@ -154,7 +153,19 @@ func (c *Client) WarmupActionID(ctx context.Context) error {
 	// NoRetry: o aquecimento é uma otimização de fundo; se o site estiver
 	// pedindo calma, desistir de imediato é o certo — a primeira ação real
 	// do usuário faz o mesmo papel mais tarde.
-	err := c.callAction(ctx, "store", params, nil, labels, newCallConfig([]CallOption{NoRetry()}))
+	return c.pingUpstream(ctx, newCallConfig([]CallOption{NoRetry()}), labels)
+}
+
+// pingUpstream é a requisição mais barata que confirma que o site está
+// atendendo: um pedido de detalhe de loja com parâmetros que não correspondem
+// a loja nenhuma. A resposta "loja não encontrada" (ErrActionFailed) já é
+// sucesso — o que se quer saber é se o site respondeu, não o que respondeu.
+//
+// Serve ao aquecimento do action id e à sonda de recuperação da suspensão (ver
+// suspend.go), que só diferem na callConfig.
+func (c *Client) pingUpstream(ctx context.Context, cfg callConfig, labels activityLabels) error {
+	params := map[string]any{"svrId": 0, "mapId": 0, "ssi": ""}
+	err := c.callAction(ctx, "store", params, nil, labels, cfg)
 	if err == nil || errors.Is(err, ErrActionFailed) {
 		return nil
 	}

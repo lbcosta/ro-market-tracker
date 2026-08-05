@@ -115,6 +115,12 @@ func (h *Handler) scanItemFacts(ctx context.Context, items []gnjoy.ShopListItem,
 		return nil, 0
 	}
 
+	// Já suspenso antes de começar: nem a primeira consulta sai, então o
+	// caminho todo vira "não verificado" sem gastar nada.
+	if h.client.Suspension().Current().Suspended {
+		return nil, len(items)
+	}
+
 	facts := make(map[string]itemFacts, len(items))
 	naoVerificados := 0
 	abortada := false

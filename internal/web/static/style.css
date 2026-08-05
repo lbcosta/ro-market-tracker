@@ -256,6 +256,40 @@ h1 {
   display: block;
 }
 
+/* Grudado no topo: enquanto o site limita as consultas nada mais na página
+   funciona, e o motivo precisa continuar à vista ao rolar. z-index acima do
+   conteúdo e abaixo dos toasts (1000), que são efêmeros e devem aparecer
+   por cima. */
+.suspension-banner {
+  position: sticky;
+  top: 0;
+  z-index: 900;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--warning);
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+/* Sem isto o atributo "hidden" não tem efeito nenhum: a regra acima já define
+   um display com a mesma especificidade do "[hidden]" do user-agent, e CSS de
+   autor vence o do user-agent em empate — o mesmo motivo de .refine-badge[hidden]. */
+.suspension-banner[hidden] {
+  display: none;
+}
+
+/* Um controle desligado precisa parecer desligado: sem isto, a busca e a
+   watchlist continuariam convidando a cliques que não vão a lugar nenhum. */
+.search-form input:disabled,
+.search-form select:disabled,
+.search-form button:disabled,
+.watchlist-panel button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Tamanho fixo e position:relative para o spinner poder se centralizar por
    cima do ícone (ver .search-button .spinner) em vez de ao lado dele — era
    isso que descentralizava a lupa e esticava o botão: o layout reservava
