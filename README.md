@@ -18,11 +18,14 @@ internal/gnjoy/                 client para as rotas internas do GnJoy LATAM
   discover.go                     descoberta/auto-refresh do action id da Server Action
   refine.go, types.go             parsing de refino, tipos de dados devolvidos pelo client
   searchword.go                   contorno da pontuação que o backend de busca recusa
+  suspend.go                      suspensão de todas as consultas após um 429
 internal/api/                   API REST própria (JSON) — handlers + roteador
 internal/web/                   frontend HTMX — handlers + roteador
   templates/                      *.html.tmpl (página, fragmentos de busca/expand)
   static/                         CSS, JS (app.js, watchlist.js, theme.js, activity-bar.js) e htmx.min.js vendorizado
   watchlist.go                    endpoint JSON de preço/refino ao vivo p/ a watchlist
+  bonus.go                        varredura de refino/bônus por anúncio, sob demanda, memoizada
+  suspension.go                   sonda que reabre as consultas quando o site volta
   variants.go                     versões do item que existem no servidor mas não estão à venda
   cache.go                        cache TTL + deduplicação das consultas ao upstream
   history.go                      preços praticados p/ item fora do mercado (busca sem resultado)
@@ -153,7 +156,7 @@ clicar uma terceira vez reexpande mostrando os mesmos dados instantaneamente,
 sem refazer a consulta — só um `toggleRow` em `internal/web/static/app.js`
 alternando a visibilidade, nenhuma requisição nova ao upstream.
 
-### Bônus aleatórios: só no card de detalhe, de propósito
+### Separar os resultados por refino e por bônus aleatórios
 
 Bônus aleatórios são as propriedades sorteadas de uma unidade específica de um
 equipamento ("CRIT +4", "Conjuração variável -5%"). Como o refino, eles são
@@ -163,17 +166,40 @@ chapéus. São eles que explicam a maior parte da diferença de preço entre doi
 anúncios do "mesmo" item: um Selo de Loki [1] custa 135M ou 300M dependendo do
 que saiu nele.
 
-A única rota que os expõe é o detalhe do item (`randomOpt1..4`) — a busca por
-nome não os traz. É por isso que eles aparecem **apenas** no card de detalhe
-de um anúncio, onde não custam nada: o card já consulta essa rota para se
-montar.
+Nenhum dos dois vem na busca. O refino só existe no prefixo `+N` do
+`itemFullName` do detalhe da **loja**; os bônus, nos `randomOpt1..4` do detalhe
+do **item**. Descobrir qualquer um deles custa, portanto, **uma requisição por
+anúncio** — duas, para os dois.
 
-Buscar por bônus, em compensação, custaria **uma requisição por anúncio
-encontrado** — uma busca de 30 anúncios viraria 30 idas ao site. Isso foi
-tentado e desligado: na prática o GnJoy responde 429 (Too Many Requests) e
-passa a recusar as consultas seguintes, inclusive as da watchlist. Se voltar a
-ser tentado, precisa ser por um caminho que não dispare N requisições de uma
-vez.
+No card de detalhe eles saem de graça, porque o card já consulta as duas rotas
+para se montar. Na tabela de resultados, não: por isso a varredura fica atrás
+de dois checkboxes desmarcados por padrão ("Verificar refino" e "Verificar
+bônus aleatórios"), com o custo escrito ao lado assim que um deles é marcado.
+
+Com a varredura ligada, a tabela deixa de agrupar só por item e passa a abrir
+uma seção por combinação de item, refino e bônus — que é o que torna visível
+*por que* três anúncios da mesma espada custam 129, 158 e 299 milhões. O botão
+"+ Watchlist" de uma seção de refino conhecido já nasce com aquele refino
+fixado.
+
+Três coisas seguram o custo:
+
+- **Memoização por anúncio.** Refino e bônus nunca mudam para um mesmo `ssi`
+  (a loja fechada e reaberta ganha um `ssi` novo), então cada anúncio custa no
+  máximo uma consulta de cada na vida do processo. Reordenar a tabela depois
+  da varredura não custa nada.
+- **Nada de consultar o que não pode ter refino.** Carta, consumível e
+  material são pulados; numa busca ampla isso é metade dos resultados.
+- **Aborto no primeiro erro.** Numa varredura de N anúncios, um erro é o site
+  pedindo calma — insistir nos N-1 seguintes é o que transforma um tropeço em
+  bloqueio. Os anúncios que ficaram sem resposta viram seções próprias,
+  marcadas como não verificadas: "desconhecido" não é "+0", e misturá-los
+  colocaria uma +10 de 300M dentro da seção "+0".
+
+Esta feature já tinha sido tentada uma vez e desligada, justamente por bater
+em 429. O que faltava então era a rede de proteção descrita em
+[Rate limiting](#rate-limiting): hoje um 429 suspende as consultas em vez de
+gerar mais.
 
 ### Versões do mesmo item que só diferem pelos slots
 
@@ -269,6 +295,12 @@ Cada linha da watchlist mostra:
 - Uma luz verde (monitorando) ou vermelha (não monitorando), que alterna de
   estado ao clicar — é o que decide se o item participa da checagem
   periódica descrita abaixo.
+- Uma alça (`⠿`) para reordenar a lista: arrastando, ou com as setas para
+  cima e para baixo quando ela está com o foco. A ordem é a do próprio array
+  no `localStorage`, que já era a ordem de exibição — não há campo novo nem
+  migração das entradas existentes. Reordenar move o nó que já está na tela,
+  sem reconstruir o painel: reconstruí-lo custaria uma consulta ao site por
+  item a cada arrastar.
 - Nome do item e, se a loja de menor preço for uma arma ou armadura
   (`databaseType` "weapon"/"armor"), um badge com o refino dessa unidade —
   para itens sem refino (não são equipamento), nada é mostrado ali.
@@ -445,6 +477,41 @@ token bucket) dentro do `gnjoy.Client`:
   **abortada inteira** no primeiro `429`.
 - Do lado do frontend, o cache de consultas do servidor web (ver a seção da
   watchlist) reduz quantas requisições sequer chegam a essa fila.
+
+### Suspensão: quando o `429` não é um tropeço
+
+A calmaria acima resolve o `429` passageiro — ela segura as chamadas pelo tempo
+que o próprio site pediu e a vida segue. O que ela não resolve é o `429` que
+significa "sua cota acabou": aí o site recusa tudo por um tempo que ele não
+informa, e continuar mandando requisições só prolonga o bloqueio.
+
+Por isso o binário sobe com `gnjoy.WithSuspendOn429()`. Com ela, o **primeiro**
+`429` fecha a porta:
+
+- As chamadas seguintes falham na saída com `gnjoy.ErrSuspended`, sem tocar no
+  site — e o retry da chamada que tomou o `429` é cortado junto.
+- A tela mostra um aviso fixo no topo e desliga a busca e a watchlist. O
+  estado chega ao navegador pelo mesmo stream SSE da barra de atividades, como
+  estado completo (nunca diferença), então uma aba nova ou uma reconexão
+  resincronizam o aviso sozinhas.
+- Uma sonda gasta **uma** requisição a cada 10 minutos
+  (`GNJOY_SUSPENSION_PROBE_INTERVAL`) e é a única que atravessa. Quando o site
+  responde qualquer coisa que não seja `429`, tudo é liberado sozinho e a
+  watchlist faz uma checagem imediata.
+
+A option é opt-in porque muda o contrato de quem usa o pacote como biblioteca:
+sem ela, o `Client` continua insistindo com backoff, que é o certo quando quem
+chama trata o erro por conta própria.
+
+Dois detalhes da implementação que não são opcionais (ver
+`internal/gnjoy/suspend.go`):
+
+- **Contagem de gerações no release.** Uma requisição admitida *antes* do `429`
+  pode responder `200` depois dele; sem comparar a geração, essa resposta velha
+  desfaria uma suspensão recém-criada.
+- **Reconferência dentro da espera.** Uma chamada estacionada numa calmaria de
+  dois minutos dispararia assim que ela acabasse, mesmo já suspensa — que é
+  exatamente o tráfego represado que a suspensão existe para impedir.
 
 ## Endpoints da API REST
 

@@ -75,7 +75,8 @@ O QUE DÁ PARA FAZER NA PÁGINA
 
     O nome da seção mostra também os slots do item, quando houver: "Selo de
     Loki" e "Selo de Loki [1]" são itens diferentes, com preços bem
-    diferentes, e aparecem em seções separadas.
+    diferentes, e aparecem em seções separadas. Ao lado do nome aparece o
+    ícone do item, o mesmo que o site do jogo usa.
 
   Ver os bônus aleatórios de um anúncio
 
@@ -87,6 +88,35 @@ O QUE DÁ PARA FAZER NA PÁGINA
     Para vê-los, clique na linha do anúncio: eles aparecem no card de
     detalhe, junto com o refino e o resto das informações. Ali não custa
     nada, porque o programa já precisa abrir o anúncio para montar o card.
+
+  Separar os anúncios por refino e por bônus
+
+    Se você quiser ver essa diferença já na lista, sem abrir anúncio por
+    anúncio, marque "Verificar refino" e/ou "Verificar bônus aleatórios"
+    embaixo do campo de busca antes de buscar. A tabela passa a separar em
+    seções diferentes as unidades com refinos ou bônus diferentes — é o que
+    explica, de relance, por que três anúncios da mesma espada custam 129,
+    158 e 299 milhões.
+
+    Marcar a caixa mostra um aviso, e ele é para ser levado a sério: o
+    programa precisa abrir CADA anúncio encontrado, um por um, para
+    descobrir isso. Uma busca com 30 anúncios pode passar de um minuto e
+    aumenta bastante a chance de o site do jogo limitar suas consultas por
+    um tempo (ver "Quando o site limita as consultas", abaixo). Por isso as
+    caixas vêm desmarcadas.
+
+    O que o programa já descobriu ele guarda: buscar o mesmo item de novo,
+    ou reordenar a tabela, não custa nada. Cartas e consumíveis são pulados,
+    porque nunca têm refino nem bônus.
+
+    Se o site parar de responder no meio da verificação, o que já foi
+    descoberto continua na tela, e os anúncios que ficaram sem resposta
+    aparecem em seções marcadas como "refino não verificado" — nunca
+    misturados aos verificados, porque "não sei" não é a mesma coisa que
+    "+0".
+
+    Quando a tabela está separada por refino, o "+ Watchlist" da seção já
+    entra na watchlist acompanhando aquele refino.
 
   Ver as outras versões de um item
 
@@ -151,6 +181,15 @@ O QUE DÁ PARA FAZER NA PÁGINA
         significa que o item é reconsultado de tempos em tempos; vermelha,
         que ele continua na lista mas parado.
 
+      - Reordenar a lista: arraste a linha pela alça pontilhada à esquerda,
+        ou clique nela e use as setas para cima e para baixo. A ordem fica
+        salva.
+
+      - Expandir o painel: o botão "«" no topo, ao lado do cronômetro,
+        esconde os resultados da busca e faz a watchlist ocupar a página
+        inteira — útil quando você acompanha muitos itens. O "»" volta ao
+        normal. A escolha fica salva.
+
     O cronômetro no topo do painel mostra quanto falta para a próxima
     verificação automática. O botão ao lado dele verifica na hora.
 
@@ -165,6 +204,17 @@ O QUE DÁ PARA FAZER NA PÁGINA
     Se algo parecer demorado, é provavelmente ali que está a explicação: o
     programa faz as consultas devagar de propósito, uma de cada vez, para
     não sobrecarregar o site do jogo nem correr o risco de ser bloqueado.
+
+  Quando o site limita as consultas
+    Se o site do jogo responder que você fez consultas demais, um aviso
+    aparece no topo da página e o programa para de falar com ele: a busca e
+    a watchlist ficam desligadas até liberar.
+
+    Isso é proposital. Continuar tentando é justamente o que faz o bloqueio
+    durar mais. Você não precisa fazer nada: de tempos em tempos o programa
+    verifica sozinho, com uma única consulta, e assim que o site voltar a
+    responder o aviso some e tudo volta ao normal — inclusive a verificação
+    de preços da watchlist, que roda na hora.
 
 
 CONFIGURAÇÃO (OPCIONAL)
