@@ -99,6 +99,48 @@ test("reordenar não custa nenhuma consulta ao site", async ({ page, request }) 
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
 });
 
+// Quem acompanha muitos itens tem a coluna de 300px como gargalo. Expandir dá
+// a área de conteúdo inteira à watchlist, e os resultados saem do caminho.
+test("expandir a watchlist esconde os resultados e sobrevive a recarregar", async ({ page }) => {
+  await adicionarEspadaPrimordial(page);
+  await expect(page.locator(".results-table")).toBeVisible();
+
+  await page.click("#watchlist-expand");
+  await expect(page.locator("html")).toHaveAttribute("data-watchlist-expandida", "1");
+  await expect(page.locator(".results-column")).toBeHidden();
+  await expect(page.locator("#watchlist-expand")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".watchlist-row")).toBeVisible();
+
+  // O estado é aplicado antes da primeira pintura (script no <head>), então
+  // recarregar não mostra o layout de duas colunas nem por um instante.
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-watchlist-expandida", "1");
+  await expect(page.locator(".results-column")).toBeHidden();
+
+  await page.click("#watchlist-expand");
+  await expect(page.locator("html")).not.toHaveAttribute("data-watchlist-expandida", "1");
+  await expect(page.locator("#watchlist-expand")).toHaveAttribute("aria-expanded", "false");
+});
+
+// A watchlist expandida dispõe as linhas em grade, e é por isso que o alvo do
+// arraste é escolhido pelo centro mais próximo nos dois eixos — só pelo eixo
+// Y, duas linhas lado a lado seriam indistinguíveis.
+test("arrastar continua funcionando com a watchlist expandida", async ({ page }) => {
+  await adicionarTresItens(page);
+  await page.click("#watchlist-expand");
+  await expect(page.locator(".results-column")).toBeHidden();
+
+  const handle = page.locator(".watchlist-row").nth(2).locator(".watchlist-drag");
+  await handle.focus();
+  await page.keyboard.press("ArrowUp");
+
+  await expect(nomesDaWatchlist(page)).toHaveText([
+    "Espada Primordial",
+    "Carta Peixe-Espada",
+    "Espada Citadina",
+  ]);
+});
+
 test("adicionar um item mostra o menor preço anunciado", async ({ page }) => {
   const linha = await adicionarEspadaPrimordial(page);
 

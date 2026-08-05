@@ -327,6 +327,38 @@ function startEditingRefine(span, id) {
   });
 }
 
+// --- expandir a watchlist ---
+//
+// O estado vive em um atributo do <html>, e não numa classe da .page: o script
+// inline do <head> precisa aplicá-lo antes da primeira pintura (a .page ainda
+// nem existe àquela altura), senão a tela salta do layout de duas colunas para
+// o de uma a cada carregamento. Ver index.html.tmpl.
+const WATCHLIST_EXPANDIDA_KEY = "ro-market-tracker:watchlist-expandida";
+
+function watchlistExpandida() {
+  return document.documentElement.dataset.watchlistExpandida === "1";
+}
+
+function aplicarExpansaoDaWatchlist(expandida) {
+  document.documentElement.dataset.watchlistExpandida = expandida ? "1" : "";
+  try {
+    localStorage.setItem(WATCHLIST_EXPANDIDA_KEY, expandida ? "1" : "0");
+  } catch {
+    // localStorage indisponível (modo privado): a troca vale para a sessão,
+    // só não sobrevive a um recarregamento — mesmo caso do tema.
+  }
+
+  const botao = document.getElementById("watchlist-expand");
+  if (!botao) return;
+  botao.setAttribute("aria-expanded", String(expandida));
+  botao.textContent = expandida ? "»" : "«";
+  botao.title = expandida ? "Recolher" : "Expandir";
+  botao.setAttribute(
+    "aria-label",
+    expandida ? "Recolher a watchlist e mostrar os resultados" : "Expandir a watchlist sobre a área de resultados",
+  );
+}
+
 // --- reordenar a watchlist ---
 //
 // Pointer events, e não a API de drag and drop do HTML5: os testes de navegador
@@ -807,4 +839,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const refreshButton = document.getElementById("watchlist-refresh-now");
   if (refreshButton) refreshButton.addEventListener("click", forceMonitoringNow);
+
+  const expandButton = document.getElementById("watchlist-expand");
+  if (expandButton) {
+    // O atributo já veio aplicado pelo script do <head>; isto só acerta o
+    // rótulo e o aria-expanded do botão, que não existiam àquela altura.
+    aplicarExpansaoDaWatchlist(watchlistExpandida());
+    expandButton.addEventListener("click", () => aplicarExpansaoDaWatchlist(!watchlistExpandida()));
+  }
 });

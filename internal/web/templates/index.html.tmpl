@@ -16,6 +16,13 @@
         if (tema === "light" || tema === "dark") {
           document.documentElement.dataset.theme = tema;
         }
+        // Pelo mesmo motivo: a watchlist expandida reorganiza o grid da
+        // página inteira, e aplicá-la depois faria a tela saltar do layout
+        // de duas colunas para o de uma a cada carregamento. Vai no <html>
+        // porque a .page ainda não existe quando este script roda.
+        if (localStorage.getItem("ro-market-tracker:watchlist-expandida") === "1") {
+          document.documentElement.dataset.watchlistExpandida = "1";
+        }
       } catch (e) {}
     })();
   </script>
@@ -104,6 +111,7 @@
         <div class="watchlist-timer" title="Tempo até a próxima checagem automática de preços">
           <span id="watchlist-countdown">--:--</span>
           <button type="button" id="watchlist-refresh-now" aria-label="Atualizar agora e reiniciar o cronômetro" title="Atualizar agora">↻</button>
+          <button type="button" id="watchlist-expand" aria-expanded="false" aria-label="Expandir a watchlist sobre a área de resultados" title="Expandir">«</button>
         </div>
       </div>
       <ul id="watchlist-list" class="watchlist-list"></ul>
