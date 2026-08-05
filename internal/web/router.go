@@ -13,6 +13,7 @@ func RegisterRoutes(mux *http.ServeMux, client *gnjoy.Client) {
 
 	mux.HandleFunc("GET /{$}", h.Index)
 	mux.HandleFunc("GET /web/search", h.Search)
+	mux.HandleFunc("GET /web/search/variants", h.Variants)
 	mux.HandleFunc("GET /web/shops/{svrId}/{mapId}/{ssi}/expand", h.Expand)
 	mux.HandleFunc("GET /web/watchlist/price", h.WatchlistPrice)
 	mux.HandleFunc("POST /web/cache/reset", h.ResetCaches)

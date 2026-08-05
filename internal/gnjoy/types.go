@@ -10,7 +10,10 @@
 // referências de módulo/erro que não são JSON e são simplesmente ignoradas.
 package gnjoy
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // StoreType é o tipo de negociação de uma loja de comércio.
 type StoreType string
@@ -35,6 +38,22 @@ type ShopListItem struct {
 	SlotMaxCount       string `json:"slotMaxCount"`
 	StoreTypeName      string `json:"storeTypeName"`
 	ItemSellerCharName string `json:"itemSellerCharName"`
+}
+
+// DisplayName é o nome do item como ele aparece para o jogador: o nome de
+// catálogo seguido do sufixo de slots, quando o item tem cartas.
+//
+// O site devolve as duas partes separadas — ItemName vem sem os slots e
+// SlotMaxCount vem já entre colchetes ("[1]") ou vazio —, e itens que só
+// diferem nisso são itens de catálogo DIFERENTES, com ItemId próprio e preço
+// próprio: "Selo de Loki" (410232) e "Selo de Loki [1]" (410233). Mostrar só
+// ItemName faz os dois aparecerem como o mesmo nome repetido, sem nada que
+// explique a diferença de preço.
+func (i ShopListItem) DisplayName() string {
+	if i.SlotMaxCount == "" {
+		return i.ItemName
+	}
+	return i.ItemName + " " + i.SlotMaxCount
 }
 
 // ShopSearchResult é o resultado da busca de lojas por nome de item.
@@ -137,6 +156,29 @@ type ItemDetail struct {
 	HasDatabaseItem    bool    `json:"hasDatabaseItem"`
 	DatabaseImgPath    string  `json:"databaseImgPath"`
 	DatabaseType       string  `json:"databaseType"`
+}
+
+// RandomOptions são os bônus aleatórios ("BA") da unidade anunciada, na ordem
+// dos quatro campos que o site expõe e já sem os vazios. Cada um vem como uma
+// frase pronta no idioma pedido em GetItemDetail ("CRIT +4", "Conjuração
+// variável -5%").
+//
+// São uma propriedade do ANÚNCIO, não do item de catálogo: duas unidades do
+// mesmo item têm bônus diferentes, e é por eles que o preço de um equipamento
+// varia mais do que por qualquer outra coisa. Como o refino, a única rota que
+// os expõe é o detalhe — a busca por nome não os traz —, então descobri-los
+// custa uma requisição por anúncio (ver internal/web/bonus.go).
+func (d *ItemDetail) RandomOptions() []string {
+	opts := make([]string, 0, 4)
+	for _, opt := range []*string{d.RandomOpt1, d.RandomOpt2, d.RandomOpt3, d.RandomOpt4} {
+		if opt == nil {
+			continue
+		}
+		if trimmed := strings.TrimSpace(*opt); trimmed != "" {
+			opts = append(opts, trimmed)
+		}
+	}
+	return opts
 }
 
 // PriceChartPoint é um ponto do histórico de preço (série resumida, usada

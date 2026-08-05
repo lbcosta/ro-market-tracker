@@ -52,6 +52,15 @@ function isAvailabilityWatch(entry) {
   return entryMode(entry) === MODE_AVAILABILITY;
 }
 
+// entrySearchName é o termo que o servidor manda ao GnJoy para achar o item.
+// Não é o nome exibido: a busca do site casa contra o nome do item SEM o
+// sufixo de slots, então procurar por "Selo de Loki [1]" — que é o que a
+// linha mostra — não acharia anúncio nenhum. Entradas gravadas antes desta
+// distinção não têm searchName, e para elas os dois nomes coincidem.
+function entrySearchName(entry) {
+  return entry.searchName || entry.itemName;
+}
+
 // lastKnownPrice guarda, em memória (não persistido), o último preço mínimo
 // visto por item — usado para reavaliar o status de "alvo atingido" na hora
 // (sem esperar a próxima consulta) quando o usuário edita o preço alvo.
@@ -135,6 +144,7 @@ function addToWatchlist(button) {
     server,
     itemId: Number(itemId),
     itemName,
+    searchName: button.dataset.searchName || itemName,
     mode: button.dataset.mode === MODE_AVAILABILITY ? MODE_AVAILABILITY : MODE_PRICE,
     targetPrice: null,
     refineFilter: null,
@@ -400,7 +410,7 @@ async function fetchLivePrice(entry, fresh = false) {
     let url =
       "/web/watchlist/price?server=" + encodeURIComponent(entry.server) +
       "&itemId=" + encodeURIComponent(entry.itemId) +
-      "&item=" + encodeURIComponent(entry.itemName);
+      "&item=" + encodeURIComponent(entrySearchName(entry));
     if (entry.refineFilter != null) {
       url += "&refine=" + encodeURIComponent(entry.refineFilter);
     }

@@ -66,6 +66,46 @@ test("buscar um item mostra a tabela de resultados", async ({ page }) => {
   await expect(linhas.first().locator(".expand-icon")).toHaveText("▸");
 });
 
+// As duas versões chegam do site com o mesmo itemName e só se distinguem pelo
+// campo de slots — sem juntá-los, a tabela mostrava "Selo de Loki" duas vezes,
+// sem nada que explicasse a diferença de preço entre as seções.
+test("as versões com e sem slot aparecem com nomes diferentes", async ({ page }) => {
+  await buscar(page, "Selo de Loki");
+
+  const nomes = page.locator(".item-group-name");
+  await expect(nomes).toHaveCount(2);
+  await expect(nomes.nth(0)).toHaveText("Selo de Loki");
+  await expect(nomes.nth(1)).toHaveText("Selo de Loki [1]");
+
+  // Na watchlist, a versão com slot continua se identificando como tal.
+  await page.locator(".item-group-row", { hasText: "Selo de Loki [1]" }).locator(".watchlist-button").click();
+  const linha = page.locator(".watchlist-row");
+  await expect(linha.locator(".watchlist-name-text")).toHaveText("Selo de Loki [1]");
+  // E é acompanhada de verdade: o preço consultado é o da versão com slot.
+  await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 250.000.000 z");
+});
+
+// A busca acha a "+7" e para por aí: as outras versões da caixa existem no
+// servidor, mas ninguém as anuncia agora — e é justamente uma delas que quem
+// procurou pode querer acompanhar.
+test("as outras versões do item ficam a um clique de distância", async ({ page }) => {
+  await buscar(page, "Caixa de Armadura");
+
+  await expect(page.locator(".item-row")).toHaveCount(1);
+  await page.click(".variants-button");
+
+  const linhas = page.locator("#variants .history-row");
+  await expect(linhas).toHaveCount(2);
+  await expect(page.locator("#variants")).toContainText("Caixa de Armadura +13");
+  // A versão que já está na tabela acima não se repete aqui.
+  await expect(page.locator("#variants")).not.toContainText("Caixa de Armadura +7");
+
+  // E dá para colocá-la na watchlist esperando ela aparecer no mercado.
+  await page.locator("#variants .history-row", { hasText: "+13" }).locator(".watchlist-button").click();
+  await expect(page.locator(".watchlist-row")).toContainText("Caixa de Armadura +13");
+  await expect(page.locator(".watchlist-row")).toContainText("Nenhum anúncio");
+});
+
 test("uma busca sem resultados avisa em vez de mostrar uma tabela vazia", async ({ page }) => {
   await buscar(page, "item que ninguém anuncia", { esperarResultados: false });
 
@@ -171,6 +211,20 @@ test("expandir uma linha mostra refino, localização e estatísticas", async ({
   await expect(card).toContainText("829 z"); // desvio padrão
 
   await expect(linha.locator(".expand-icon")).toHaveText("▾");
+});
+
+// Os bônus aleatórios explicam boa parte da diferença de preço entre dois
+// anúncios do mesmo equipamento, e mostrá-los aqui não custa requisição
+// nenhuma: o card já consulta o detalhe do item para se montar.
+test("o card de detalhe mostra os bônus da unidade anunciada", async ({ page }) => {
+  await buscar(page, "Espada Primordial");
+
+  // Ordenada por preço crescente, a unidade +7 (158 milhões) é a segunda.
+  await page.locator(".item-row").nth(1).click();
+
+  const card = page.locator(".detail-card").first();
+  await expect(card).toContainText("Bônus aleatórios");
+  await expect(card.locator(".bonus-list li")).toHaveText(["CRIT +4", "ATQ +3%"]);
 });
 
 test("um item sem refino não ganha badge de refino", async ({ page }) => {

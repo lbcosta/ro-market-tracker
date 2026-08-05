@@ -17,12 +17,13 @@ internal/gnjoy/                 client para as rotas internas do GnJoy LATAM
   client.go, flight.go            requisições, rate limiting, parser do formato RSC Flight
   discover.go                     descoberta/auto-refresh do action id da Server Action
   refine.go, types.go             parsing de refino, tipos de dados devolvidos pelo client
-  searchword.go                   contorno do hífen e do "+", que o backend de busca recusa
+  searchword.go                   contorno da pontuação que o backend de busca recusa
 internal/api/                   API REST própria (JSON) — handlers + roteador
 internal/web/                   frontend HTMX — handlers + roteador
   templates/                      *.html.tmpl (página, fragmentos de busca/expand)
   static/                         CSS, JS (app.js, watchlist.js, theme.js, activity-bar.js) e htmx.min.js vendorizado
   watchlist.go                    endpoint JSON de preço/refino ao vivo p/ a watchlist
+  variants.go                     versões do item que existem no servidor mas não estão à venda
   cache.go                        cache TTL + deduplicação das consultas ao upstream
   history.go                      preços praticados p/ item fora do mercado (busca sem resultado)
   stats.go, navi.go               estatísticas de 7 dias, comando /navi
@@ -135,6 +136,8 @@ spinner enquanto carrega) e expande a linha em um card com:
 - Refino do equipamento (só aparece aqui — ver aviso na seção da API sobre
   por que a busca não traz essa informação).
 - Vendedor, loja e tipo do item.
+- Bônus aleatórios daquela unidade, quando houver (ver a seção abaixo). Aqui
+  eles não custam nada: o card já consulta o detalhe do item para se montar.
 - Localização como um botão com o comando `/navi <mapa>/<x>/<y>`: clicar
   copia o comando para a área de transferência.
 - Estatísticas dos últimos 7 dias (mínimo, médio, máximo, quantidade
@@ -149,6 +152,60 @@ colapsa o card (ícone volta a "▸") sem descartar o que foi carregado;
 clicar uma terceira vez reexpande mostrando os mesmos dados instantaneamente,
 sem refazer a consulta — só um `toggleRow` em `internal/web/static/app.js`
 alternando a visibilidade, nenhuma requisição nova ao upstream.
+
+### Bônus aleatórios: só no card de detalhe, de propósito
+
+Bônus aleatórios são as propriedades sorteadas de uma unidade específica de um
+equipamento ("CRIT +4", "Conjuração variável -5%"). Como o refino, eles são
+uma propriedade do **anúncio**, não do item de catálogo — e, diferente do
+refino, valem para qualquer coisa que se vista, inclusive acessórios e
+chapéus. São eles que explicam a maior parte da diferença de preço entre dois
+anúncios do "mesmo" item: um Selo de Loki [1] custa 135M ou 300M dependendo do
+que saiu nele.
+
+A única rota que os expõe é o detalhe do item (`randomOpt1..4`) — a busca por
+nome não os traz. É por isso que eles aparecem **apenas** no card de detalhe
+de um anúncio, onde não custam nada: o card já consulta essa rota para se
+montar.
+
+Buscar por bônus, em compensação, custaria **uma requisição por anúncio
+encontrado** — uma busca de 30 anúncios viraria 30 idas ao site. Isso foi
+tentado e desligado: na prática o GnJoy responde 429 (Too Many Requests) e
+passa a recusar as consultas seguintes, inclusive as da watchlist. Se voltar a
+ser tentado, precisa ser por um caminho que não dispare N requisições de uma
+vez.
+
+### Versões do mesmo item que só diferem pelos slots
+
+O site devolve o nome do item e o sufixo de slots em campos separados
+(`itemName` + `slotMaxCount`, este já entre colchetes), e itens que só diferem
+nisso são itens de catálogo **diferentes**, com `itemId` e preço próprios:
+"Selo de Loki" (410232) e "Selo de Loki [1]" (410233). A tabela mostra o nome
+completo — sem isso, as duas seções saíam com o mesmo cabeçalho repetido, sem
+nada que explicasse a diferença de preço.
+
+A watchlist guarda os dois nomes: o com slots é o que ela exibe, e o sem
+slots é o que ela manda ao GnJoy ao consultar o preço — a busca do site casa
+contra o nome cru do anúncio, então procurar por "Selo de Loki [1]" não
+acharia nada.
+
+### Outras versões do item, fora do mercado
+
+Um termo de busca costuma casar mais itens do que o mercado tem anunciado no
+momento: a "Caixa de Armadura" existe em +5, +7, +8, +9, +11, +12 e +13 no
+servidor, e é normal que só uma ou duas dessas versões estejam à venda agora.
+Quem procura justamente a +13 via a tabela com a +7 e não tinha por onde
+acompanhar a que queria — a tela de histórico, que é onde as versões fora do
+mercado aparecem com um botão de watchlist, só é mostrada quando a busca não
+acha **nada**.
+
+Abaixo da tabela de resultados há, por isso, um "Ver outras versões deste item
+fora do mercado" (`GET /web/search/variants`), que consulta os preços
+praticados de todo o histórico e lista o que casou com o termo e **não** está
+na tabela acima — cada linha com um "+ Watchlist" em modo de disponibilidade.
+É sob demanda, e não junto da busca, porque custa outra consulta ao site: o
+link já leva os `itemId` que a tabela está mostrando, para descobrir a
+diferença não exigir refazer a busca de mercado.
 
 ### Item fora do mercado atual
 
@@ -234,10 +291,9 @@ Cada linha da watchlist mostra:
 
 O preço atual (e o refino) é a única parte que depende do servidor:
 `GET /web/watchlist/price?server=...&itemId=...&item=...&refine=...`
-(`refine` é opcional) refaz a mesma busca por nome usada na página
-principal, filtra pelo `itemId` exato (uma busca por nome pode casar itens
-diferentes — ver teste com "Espada", que retorna itens com itemId 600009,
-1147 e 4089) e:
+(`refine` é opcional) refaz a mesma busca por nome usada na página principal,
+filtra pelo `itemId` exato (uma busca por nome pode casar itens diferentes —
+ver teste com "Espada", que retorna itens com itemId 600009, 1147 e 4089) e:
 
 - Sem `refine`: pega o menor preço entre eles e, se a loja mais barata for
   equipamento, busca o refino dela via `GetStoreDetail` — só informativo.
@@ -263,11 +319,11 @@ cache: quem apertou quer o estado de agora. É esse cache que faz várias
 abas abertas, recarregamentos de página e o ciclo de monitoramento não
 multiplicarem o tráfego contra o GnJoy.
 
-Ligar/desligar, editar o alvo, editar o refino fixado e remover um item são
-só atualizações de `localStorage` + DOM, sem chamada ao servidor (exceto
-editar o refino, que dispara uma nova consulta de preço — o filtro mudou, o
-preço em cache não serve mais); adicionar um item novo busca o preço só
-dele (os demais já carregados não são recarregados).
+Ligar/desligar, editar o alvo e remover um item são só atualizações de
+`localStorage` + DOM, sem chamada ao servidor. Editar o refino fixado dispara
+uma nova consulta de preço — o filtro mudou, o preço em cache não serve mais.
+Adicionar um item novo busca o preço só dele (os demais já carregados não são
+recarregados).
 
 #### Acompanhar preço ou acompanhar disponibilidade
 
@@ -429,6 +485,12 @@ para um item não refinável — o site não permite diferenciar os dois casos.
 Detalhes do item anunciado nessa loja. Aceita `?lang=` opcional (padrão
 `en-US`).
 
+É a única rota que expõe os **bônus aleatórios** da unidade anunciada, nos
+campos `randomOpt1..4` (frases prontas no idioma pedido em `lang`, ex.:
+`"CRIT +4"`; `null` nos que não existem). Como o refino, eles não aparecem na
+busca — e é por isso que o frontend só os mostra no card de detalhe de um
+anúncio, onde essa consulta já acontece de qualquer forma.
+
 ### `GET /api/v1/items/{itemId}/price-history`
 
 Histórico de preços (mínimo, máximo e médio, por dia) pelos quais um item já
@@ -462,3 +524,13 @@ navegar pela página de comércio. Em especial:
   Next.js e não documentado.
 - O site pode adicionar proteções (rate limiting, CSRF, etc.) a qualquer
   momento sem aviso.
+- O backend de busca só aceita **letras, dígitos e espaços** no termo
+  procurado. Qualquer outro caractere — hífen, "+", parênteses, colchetes,
+  ponto, apóstrofo — faz as duas páginas de busca responderem 200 com a
+  página de erro do próprio site no lugar da lista, o que deixaria itens
+  reais impossíveis de buscar e de acompanhar ("Módulo de S-Rapidez",
+  "Caixa de Arma +13", "Pedra de Mestre II (Baixo)", "[Visual] Chapéu
+  Confeitado"). O client contorna isso enviando o maior trecho aceitável do
+  termo e filtrando a resposta pelo termo inteiro
+  (`internal/gnjoy/searchword.go`); o mock reproduz a recusa, para que um
+  retrocesso no contorno apareça nos testes em vez de na mão do usuário.

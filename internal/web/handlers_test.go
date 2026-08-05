@@ -249,6 +249,32 @@ func TestSearchAgrupaItensDeNomesDiferentes(t *testing.T) {
 	}
 }
 
+// TestSearchMostraOSlotNoNomeDoItem é a regressão do cabeçalho repetido: a
+// busca por "Selo de Loki" casa dois itens de catálogo diferentes — o sem slot
+// e o com um slot —, que chegam do site com o MESMO itemName e só se
+// distinguem pelo campo slotMaxCount. Sem juntar os dois, a tabela mostrava
+// "Selo de Loki" duas vezes, sem nada que explicasse por que uma seção custa o
+// triplo da outra.
+func TestSearchMostraOSlotNoNomeDoItem(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	q := url.Values{"server": {"NIDHOGG"}, "item": {"Selo de Loki"}}
+	_, html := getHTML(t, srv, "/web/search?"+q.Encode())
+
+	wantContains(t, html,
+		`<span class="item-group-name">Selo de Loki</span>`,
+		`<span class="item-group-name">Selo de Loki [1]</span>`,
+		// A linha do anúncio também mostra a versão, não só o cabeçalho.
+		`</span>Selo de Loki [1]</td>`,
+		// A watchlist guarda os dois nomes: o com slot é o que ela mostra, e o
+		// sem slot é o que ela manda ao GnJoy — a busca do site casa contra o
+		// nome cru do anúncio, e procurar por "Selo de Loki [1]" não acharia
+		// nada.
+		`data-item-name="Selo de Loki [1]"`,
+		`data-search-name="Selo de Loki"`,
+	)
+}
+
 // TestSearchSemResultados garante que uma busca sem nenhum anúncio nunca
 // renderize a tabela de mercado vazia: ela sai do caminho da busca e passa
 // para o histórico de preços do item (ver history_test.go).
@@ -475,6 +501,34 @@ func TestExpandSemRefino(t *testing.T) {
 	wantContains(t, html, "Carta Peixe-Espada")
 	if strings.Contains(html, "refine-badge") {
 		t.Errorf("um item sem refino não deveria ter badge de refino:\n%s", html)
+	}
+}
+
+// TestExpandMostraBonus: os bônus aleatórios são a propriedade que mais
+// explica a diferença de preço entre dois anúncios do mesmo equipamento, e
+// mostrá-los aqui não custa requisição nenhuma — o card já consulta o detalhe
+// do item para se montar.
+func TestExpandMostraBonus(t *testing.T) {
+	srv, mock := newWebServer(t)
+
+	_, html := getHTML(t, srv, "/web/shops/303/835/s-primordial-158/expand")
+	// O "+" sai escapado como &#43; pelo html/template.
+	wantContains(t, html, "Bônus aleatórios", "CRIT &#43;4", "ATQ &#43;3%")
+
+	// As mesmas três chamadas de sempre (loja, item, histórico): os bônus vêm
+	// de uma delas, não de uma quarta.
+	if got := mock.RequestCount(); got != 3 {
+		t.Errorf("o card custou %d requisições, quero 3", got)
+	}
+}
+
+// TestExpandSemBonus: um item sem bônus não ganha uma seção vazia no card.
+func TestExpandSemBonus(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	_, html := getHTML(t, srv, "/web/shops/303/835/p-carta-noel/expand")
+	if strings.Contains(html, "Bônus aleatórios") {
+		t.Errorf("um item sem bônus não deveria ter a seção de bônus:\n%s", html)
 	}
 }
 

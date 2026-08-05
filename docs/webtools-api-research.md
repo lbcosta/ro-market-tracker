@@ -752,12 +752,56 @@ Repare que o termo casa por trecho do nome e devolve uma linha por item —
 `svrId`, `mapId` e `ssi` vêm de um anúncio de referência; os agregados são
 do item no servidor inteiro.
 
-## Defeito do upstream: hífen ou "+" no termo de busca
+## Bônus aleatórios e slots (capturado depois, ao investigar o preço dos equipamentos)
 
-O backend de busca do GnJoy não aceita hífen nem "+" no `searchWord`. Para
-QUALQUER termo que contenha um desses caracteres — inclusive um `a-b` — as
-duas páginas de busca (`trading` e `market-price`) respondem **200** com o
-componente de erro do próprio site no lugar da lista:
+Dois campos da resposta que a pesquisa original não explorou e que explicam
+boa parte da variação de preço entre anúncios do "mesmo" item.
+
+### `randomOpt1..4` (detalhe do item)
+
+Os bônus aleatórios da unidade anunciada, como frases prontas no idioma
+pedido em `multiLan`. Só existem no detalhe do item — a busca não os traz —,
+então descobri-los custa **uma requisição por anúncio**. Foi esse custo que
+inviabilizou uma busca por bônus: varrer os anúncios de um termo comum
+disparava dezenas de requisições e o site passava a responder 429. Hoje eles
+aparecem só no card de detalhe, onde essa consulta já acontece.
+
+Três anúncios do mesmo "Selo de Loki [1]" (itemId 410233) no mesmo minuto,
+com `multiLan: "pt-BR"`:
+
+| ssi | preço | randomOpt1 | randomOpt2 |
+| --- | --- | --- | --- |
+| 7670191238464673351 | 250.000.000 | `CRIT +4` | `CRIT +5` |
+| 7670190551269905873 | 300.000.000 | `Dano mágico todas as prop. 5%.` | `Conjuração variável -5%` |
+| 7670183228350665236 | 135.000.000 | `Pós-conjuração -4%` | `Dano mágico +3%` |
+
+Os campos não usados vêm `null`. A versão sem slot do mesmo item (410232)
+veio com os quatro nulos.
+
+Repare que as frases trazem pontuação livre (`%`, `.`, `-`, `+`): elas não
+servem como termo de busca, e qualquer separador escolhido a dedo para
+juntá-las tem chance de aparecer dentro de uma delas.
+
+### `slotMaxCount` (busca)
+
+O sufixo de slots vem **separado do nome** e já entre colchetes. Itens que só
+diferem nisso são itens de catálogo diferentes:
+
+```
+{"itemId": 410232, "itemName": "Selo de Loki", "slotMaxCount": "",    "databaseType": "armor"}
+{"itemId": 410233, "itemName": "Selo de Loki", "slotMaxCount": "[1]", "databaseType": "armor"}
+```
+
+O `databaseType` é o mesmo `"armor"` para armaduras, acessórios e chapéus —
+não há tipo separado para eles. Existe também `"costume"` (visuais). Ou seja,
+`weapon` + `armor` cobre tudo que pode ter refino ou bônus aleatórios.
+
+## Defeito do upstream: pontuação no termo de busca
+
+O backend de busca do GnJoy só aceita **letras, dígitos e espaços** no
+`searchWord`. Para QUALQUER termo que contenha outro caractere — inclusive um
+`a-b` — as duas páginas de busca (`trading` e `market-price`) respondem **200**
+com o componente de erro do próprio site no lugar da lista:
 
 ````
 18:["$","div",null,{"className":"style_nodata__n770m","children":["$","b",null,{"children":"Tente novamente mais tarde."}]}]
@@ -775,24 +819,43 @@ Comparação, no mesmo servidor e no mesmo minuto:
 | `Módulo` | `totalCount: 115` |
 | `Módulo de S` | `totalCount: 28` |
 | `Espada Primordial` | `totalCount: 5` (espaço não é problema) |
+| `Espada 1` | `totalCount: 0` (dígito não é problema) |
 | `Módulo de S-Rapidez` | página de erro |
 | `S-Rapidez` | página de erro |
 | `a-b` | página de erro |
 | `Caixa de Arma` | `totalCount: 11` |
 | `Caixa de Arma +13` | página de erro |
 | `Caixa de Armadura +7` | página de erro |
+| `Pedra de Mestre` | `totalCount: 8` |
+| `Pedra de Mestre II (Baixo)` | página de erro |
+| `[Visual] Chapéu Confeitado` | página de erro |
+| `Espada.` `Espada,` `Espada'` `Espada&` `Espada!` `Espada%` `Espada_` | página de erro |
 
-Vários itens do jogo têm hífen no nome ("Módulo de S-Rapidez", "Automódulo
-de B-DEF", "Carta Peixe-Espada"). E as caixas de refino têm o nível embutido
-no próprio nome do item de catálogo, com "+" ("Caixa de Arma +13", "Caixa de
-Armadura +7") — não é um refino de uma unidade específica (isso é uma
-propriedade do anúncio, ver `StoreDetail.Refine`), é o nome do item em si.
-Então isso não é uma curiosidade: sem contorno, itens com qualquer um desses
-caracteres no nome não podem ser buscados nem acompanhados na watchlist, que
-consulta o mercado pelo nome canônico do item.
+Ou seja: **não são dois caracteres proibidos, é uma lista de permitidos**. As
+últimas linhas foram medidas uma por requisição e distinguem os dois desfechos
+sem ambiguidade — um termo aceito que não casa nada responde `totalCount: 0`,
+não a página de erro.
 
-O contorno do client (`gnjoy.splitSearchWord`) se apoia em a busca do site
-casar por trecho do nome: envia o maior pedaço sem nenhum desses caracteres e
-filtra a resposta pelo termo inteiro. O mock (`internal/gnjoytest`) reproduz
-a recusa, para que um retrocesso no contorno apareça nos testes em vez de na
-mão do usuário.
+Isso não é uma curiosidade: sem contorno, itens com qualquer pontuação no nome
+não podem ser buscados nem acompanhados na watchlist, que consulta o mercado
+pelo nome canônico do item. E é pontuação comum no jogo:
+
+- hífen: "Módulo de S-Rapidez", "Automódulo de B-DEF", "Carta Peixe-Espada";
+- "+": as caixas de refino têm o nível embutido no próprio nome do item de
+  catálogo ("Caixa de Arma +13") — não é o refino de uma unidade (isso é uma
+  propriedade do anúncio, ver `StoreDetail.Refine`), é o nome do item em si;
+- parênteses: as pedras de encantamento ("Pedra de Mestre II (Baixo)");
+- colchetes: os visuais ("[Visual] Chapéu Confeitado").
+
+Duas outras coisas medidas junto, que valem para o contorno:
+
+- a busca casa por **trecho**, não por palavra: `spada` devolve os mesmos 37
+  resultados de `Espada`, e `Esp` devolve 90;
+- termos de **um caractere** devolvem `totalCount: 0` (`a` não casa nada), o
+  que dá a entender que há um tamanho mínimo.
+
+O contorno do client (`gnjoy.splitSearchWord`) se apoia justamente no
+casamento por trecho: envia o maior pedaço só com caracteres aceitos e filtra
+a resposta pelo termo inteiro. O mock (`internal/gnjoytest`) reproduz a
+recusa, para que um retrocesso no contorno apareça nos testes em vez de na mão
+do usuário.

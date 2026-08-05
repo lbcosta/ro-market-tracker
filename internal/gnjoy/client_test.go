@@ -255,6 +255,93 @@ func TestBuscaComMais(t *testing.T) {
 	}
 }
 
+// TestBuscaComPontuacao é a generalização de TestBuscaComHifen e
+// TestBuscaComMais: o backend do GnJoy não recusa dois caracteres em
+// particular, ele aceita SÓ letras, dígitos e espaços. Cada caso abaixo é um
+// item real que ficava impossível de buscar — e de acompanhar na watchlist,
+// que consulta o mercado pelo nome canônico do item.
+func TestBuscaComPontuacao(t *testing.T) {
+	tests := []struct {
+		name     string
+		termo    string
+		wantSend string
+	}{
+		{
+			// O caso relatado: as pedras de encantamento trazem a posição do
+			// encantamento entre parênteses no nome do item.
+			name: "parênteses", termo: "Pedra de Mestre II (Baixo)", wantSend: "Pedra de Mestre II",
+		},
+		{
+			// Os visuais têm um prefixo entre colchetes.
+			name: "colchetes", termo: "[Visual] Chapéu Confeitado", wantSend: "Chapéu Confeitado",
+		},
+		{
+			name: "ponto", termo: "Sr. Cavaleiro", wantSend: "Cavaleiro",
+		},
+		{
+			name: "apóstrofo", termo: "Asa d'Anjo Gigante", wantSend: "Anjo Gigante",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := gnjoytest.Config{
+				Searches: map[string]gnjoytest.SearchResult{
+					// Semeado sob o trecho que o client tem de enviar: o mock
+					// recusa a pontuação como o site real faz.
+					tt.wantSend: {Items: []gnjoytest.ShopListItem{
+						{SvrId: 303, MapId: 835, SSI: "achado", ItemId: 42, ItemName: tt.termo, ItemPrice: 100, ItemCnt: 1},
+						{SvrId: 303, MapId: 835, SSI: "outro", ItemId: 43, ItemName: tt.wantSend + " Comum", ItemPrice: 50, ItemCnt: 1},
+					}},
+				},
+			}
+			client, srv := newTestClient(t, cfg)
+
+			result, err := client.SearchShops(context.Background(), gnjoy.SearchShopsParams{
+				ServerType: "NIDHOGG", StoreType: gnjoy.StoreTypeBuy, SearchWord: tt.termo,
+			})
+			if err != nil {
+				t.Fatalf("SearchShops: %v", err)
+			}
+			if got := srv.Requests()[0].Query.Get("searchWord"); got != tt.wantSend {
+				t.Errorf("searchWord enviado = %q, quero %q (o maior trecho aceito pelo upstream)", got, tt.wantSend)
+			}
+			if len(result.Items) != 1 || result.Items[0].ItemName != tt.termo {
+				t.Fatalf("itens = %+v, quero só %q", result.Items, tt.termo)
+			}
+		})
+	}
+}
+
+// TestBuscaPeloNomeComSlots cobre o termo como o usuário o vê na tela: o site
+// devolve o nome do item e o sufixo de slots em campos separados, então uma
+// busca por "Selo de Loki [1]" — o nome exibido — precisa achar o anúncio
+// cujo ItemName é só "Selo de Loki" e cujo SlotMaxCount é "[1]".
+func TestBuscaPeloNomeComSlots(t *testing.T) {
+	cfg := gnjoytest.Config{
+		Searches: map[string]gnjoytest.SearchResult{
+			"Selo de Loki": {Items: []gnjoytest.ShopListItem{
+				{SvrId: 303, MapId: 835, SSI: "sem-slot", ItemId: 410232, ItemName: "Selo de Loki", ItemPrice: 79999999, ItemCnt: 1},
+				{SvrId: 303, MapId: 835, SSI: "com-slot", ItemId: 410233, ItemName: "Selo de Loki", SlotMaxCount: "[1]", ItemPrice: 250000000, ItemCnt: 1},
+			}},
+		},
+	}
+	client, _ := newTestClient(t, cfg)
+
+	result, err := client.SearchShops(context.Background(), gnjoy.SearchShopsParams{
+		ServerType: "NIDHOGG", StoreType: gnjoy.StoreTypeBuy, SearchWord: "Selo de Loki [1]",
+	})
+	if err != nil {
+		t.Fatalf("SearchShops: %v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].ItemId != 410233 {
+		t.Fatalf("itens = %+v, quero só a versão com slot (410233)", result.Items)
+	}
+	if got := result.Items[0].DisplayName(); got != "Selo de Loki [1]" {
+		t.Errorf("DisplayName = %q, quero \"Selo de Loki [1]\"", got)
+	}
+}
+
 func TestSearchMarketPrice(t *testing.T) {
 	client, srv := newTestClient(t, gnjoytest.DemoConfig())
 

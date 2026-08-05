@@ -73,6 +73,33 @@ O QUE DÁ PARA FAZER NA PÁGINA
     nome em destaque e um "+ Watchlist" ao lado — para não ter dúvida de
     qual item cada anúncio é, nem de qual deles o botão adiciona.
 
+    O nome da seção mostra também os slots do item, quando houver: "Selo de
+    Loki" e "Selo de Loki [1]" são itens diferentes, com preços bem
+    diferentes, e aparecem em seções separadas.
+
+  Ver os bônus aleatórios de um anúncio
+
+    Dois anúncios do mesmo equipamento costumam ter preços muito diferentes
+    por causa dos bônus aleatórios que saíram em cada unidade. O site do jogo
+    só mostra esses bônus ao abrir cada anúncio, um por um — então a lista de
+    resultados não tem como mostrá-los.
+
+    Para vê-los, clique na linha do anúncio: eles aparecem no card de
+    detalhe, junto com o refino e o resto das informações. Ali não custa
+    nada, porque o programa já precisa abrir o anúncio para montar o card.
+
+  Ver as outras versões de um item
+
+    Às vezes o que você procura existe em várias versões — "Caixa de Armadura
+    +5", "+7", "+13" — e só uma delas está à venda no momento. A tabela mostra
+    o que está anunciado agora, e logo abaixo dela há o botão "Ver outras
+    versões deste item fora do mercado": ele lista as demais versões que já
+    foram vendidas no servidor, cada uma com um "+ Watchlist" para você ser
+    avisado quando ela aparecer.
+
+    É um botão, e não algo automático, porque essa consulta é uma ida a mais
+    ao site do jogo.
+
   Procurar um item que ninguém está vendendo
     Se ninguém estiver anunciando o item no momento, a busca não para por
     aí: ela vai ver por quanto ele vinha sendo vendido no servidor e mostra,
@@ -96,9 +123,10 @@ O QUE DÁ PARA FAZER NA PÁGINA
 
   Ver os detalhes de um anúncio
     Clique em qualquer linha da lista para abri-la. Aparecem o refino do
-    equipamento, quem é o vendedor, um botão que copia o comando /navi para
-    ir até a loja dentro do jogo, e como o preço se comportou nos últimos
-    dias (mínimo, médio, máximo e quanto foi vendido).
+    equipamento, os bônus aleatórios daquela unidade, quem é o vendedor, um
+    botão que copia o comando /navi para ir até a loja dentro do jogo, e como
+    o preço se comportou nos últimos dias (mínimo, médio, máximo e quanto foi
+    vendido).
 
   Acompanhar itens na watchlist
     Depois de buscar um item, clique em "+ Watchlist" ao lado do nome dele

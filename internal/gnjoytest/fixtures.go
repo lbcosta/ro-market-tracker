@@ -10,7 +10,13 @@ package gnjoytest
 // crescentes e refinos +0, +7 e +10 — é o que permite exercitar a busca do
 // menor preço, o filtro por refino específico da watchlist (que precisa
 // consultar o detalhe de cada loja candidata até achar o refino pedido) e o
-// caso de refino inexistente.
+// caso de refino inexistente. Os três também têm bônus aleatórios diferentes
+// entre si, com um bônus repetido em dois deles: é o que separa "a unidade
+// com exatamente estes bônus" de "qualquer unidade que tenha este bônus".
+//
+// "Selo de Loki" existe em duas versões — sem slot (410232) e com um slot
+// (410233) —, que é o caso real em que dois itens de catálogo diferentes
+// compartilham o mesmo itemName e só o campo slotMaxCount os distingue.
 func DemoConfig() Config {
 	primordiais := []ShopListItem{
 		demoListItem("s-primordial-129", 600009, "Espada Primordial", "weapon", 129999999, "Vendinha do Zé"),
@@ -19,6 +25,13 @@ func DemoConfig() Config {
 	}
 	poring := []ShopListItem{
 		demoListItem("p-carta-noel", 4005, "Carta Poring Noel", "card", 199999, "PORINGÃO STORE"),
+	}
+	caixas := []ShopListItem{
+		demoListItem("caixa-armadura-7", 22926, "Caixa de Armadura +7", "miscellaneous", 3000000, "Refino Store"),
+	}
+	selos := []ShopListItem{
+		demoListItem("selo-simples", 410232, "Selo de Loki", "armor", 79999999, "Odin Store"),
+		withSlots(demoListItem("selo-com-slot", 410233, "Selo de Loki", "armor", 250000000, "PENETRANTE COMBO"), "[1]"),
 	}
 
 	return Config{
@@ -66,6 +79,17 @@ func DemoConfig() Config {
 
 			// "Elmo Ancestral" não é registrado em nenhum período: item que
 			// nunca foi vendido no servidor.
+
+			// As caixas de refino são o caso em que a busca ACHA alguma coisa
+			// e mesmo assim esconde o que o usuário procurava: só a "+7" está
+			// anunciada, enquanto o servidor conhece várias outras versões do
+			// mesmo item. É por isso que a tabela de resultados oferece as
+			// versões fora do mercado (ver internal/web/variants.go).
+			{ServerType: "NIDHOGG", SearchWord: "Caixa de Armadura", Period: "ALL"}: {Items: []MarketPriceItem{
+				demoMarketPrice(22926, "Caixa de Armadura +7", 12, 2500000, 3200000, 4000000),
+				demoMarketPrice(22932, "Caixa de Armadura +13", 3, 50000000, 62000000, 80000000),
+				demoMarketPrice(22924, "Caixa de Armadura +5", 20, 900000, 1100000, 1500000),
+			}},
 		},
 		Searches: map[string]SearchResult{
 			// Busca ampla: casa itens diferentes que compartilham a palavra,
@@ -76,6 +100,15 @@ func DemoConfig() Config {
 				demoListItem("s-carta-peixe", 4089, "Carta Peixe-Espada", "card", 4999999, "Cartas baratas"),
 			)},
 			"Poring": {Items: poring},
+
+			// Duas versões do mesmo nome, distinguidas só pelo slot: a busca
+			// devolve as duas juntas, e cabe ao frontend não mostrar o mesmo
+			// cabeçalho duas vezes.
+			"Selo de Loki": {Items: selos},
+
+			// Só uma das versões da caixa está à venda; as outras existem no
+			// histórico (ver MarketPrices).
+			"Caixa de Armadura": {Items: caixas},
 
 			// A watchlist não consulta pelo termo digitado, e sim pelo nome
 			// canônico do item que a busca devolveu — então esses nomes
@@ -93,14 +126,23 @@ func DemoConfig() Config {
 			"s-citadina":       demoStore("s-citadina", 1147, "Espada Citadina[2]", "weapon", 59000, "sk", "S-k8", "prt_mk.gat", "112", "178"),
 			"s-carta-peixe":    demoStore("s-carta-peixe", 4089, "Carta Peixe-Espada", "card", 4999999, "Cartas baratas", "SaynMERC", "prt_mk.gat", "100", "100"),
 			"p-carta-noel":     demoStore("p-carta-noel", 4005, "Carta Poring Noel", "card", 199999, "PORINGÃO STORE", "Ferreirinha", "prt_mk.gat", "112", "178"),
+			"selo-simples":     demoStore("selo-simples", 410232, "Selo de Loki", "armor", 79999999, "Odin Store", "Odin", "prt_mk.gat", "50", "60"),
+			"selo-com-slot":    demoStore("selo-com-slot", 410233, "Selo de Loki[1]", "armor", 250000000, "PENETRANTE COMBO", "ICE.", "prt_mk.gat", "51", "61"),
+			"caixa-armadura-7": demoStore("caixa-armadura-7", 22926, "Caixa de Armadura +7", "miscellaneous", 3000000, "Refino Store", "Refinador", "prt_mk.gat", "80", "90"),
 		},
 		Items: map[string]ItemDetail{
+			// Os bônus aleatórios distinguem os três anúncios do mesmo item: o
+			// mais barato não tem nenhum, e os outros dois compartilham o
+			// "CRIT +4" mas diferem no segundo bônus.
 			"s-primordial-129": demoItem("s-primordial-129", 600009, "Espada Primordial", "weapon", 129999999),
-			"s-primordial-158": demoItem("s-primordial-158", 600009, "Espada Primordial", "weapon", 158000000),
-			"s-primordial-299": demoItem("s-primordial-299", 600009, "Espada Primordial", "weapon", 299999999),
+			"s-primordial-158": withBonus(demoItem("s-primordial-158", 600009, "Espada Primordial", "weapon", 158000000), "CRIT +4", "ATQ +3%"),
+			"s-primordial-299": withBonus(demoItem("s-primordial-299", 600009, "Espada Primordial", "weapon", 299999999), "CRIT +4"),
 			"s-citadina":       demoItem("s-citadina", 1147, "Espada Citadina", "weapon", 59000),
 			"s-carta-peixe":    demoItem("s-carta-peixe", 4089, "Carta Peixe-Espada", "card", 4999999),
 			"p-carta-noel":     demoItem("p-carta-noel", 4005, "Carta Poring Noel", "card", 199999),
+			"selo-simples":     demoItem("selo-simples", 410232, "Selo de Loki", "armor", 79999999),
+			"selo-com-slot":    withBonus(demoItem("selo-com-slot", 410233, "Selo de Loki", "armor", 250000000), "Dano mágico +3%"),
+			"caixa-armadura-7": demoItem("caixa-armadura-7", 22926, "Caixa de Armadura +7", "miscellaneous", 3000000),
 		},
 		Prices: map[int]PriceHistory{
 			// Números escolhidos para gerar estatísticas exatas:
@@ -155,6 +197,30 @@ func demoListItem(ssi string, itemId int, name, dbType string, price int64, stor
 		StoreTypeName:      "BUY",
 		ItemSellerCharName: "Vendedor " + ssi,
 	}
+}
+
+// withSlots marca um anúncio como sendo da versão do item com cartas. O site
+// devolve o sufixo já entre colchetes e em um campo separado do nome — dois
+// itens de catálogo diferentes ("Selo de Loki" e "Selo de Loki [1]") chegam,
+// portanto, com o mesmo itemName.
+func withSlots(item ShopListItem, slots string) ShopListItem {
+	item.SlotMaxCount = slots
+	return item
+}
+
+// withBonus preenche os bônus aleatórios de um detalhe de item, nos mesmos
+// quatro campos separados que o site usa (e não em uma lista). Bônus além do
+// quarto são ignorados: o registro do site não tem onde guardá-los.
+func withBonus(item ItemDetail, options ...string) ItemDetail {
+	slots := []**string{&item.RandomOpt1, &item.RandomOpt2, &item.RandomOpt3, &item.RandomOpt4}
+	for i, opt := range options {
+		if i >= len(slots) {
+			break
+		}
+		value := opt
+		*slots[i] = &value
+	}
+	return item
 }
 
 func demoStore(ssi string, itemId int, fullName, dbType string, price int64, storeName, seller, mapName, x, y string) StoreDetail {

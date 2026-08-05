@@ -1,0 +1,36 @@
+{{if .Error}}
+<p class="error">{{.Error}}</p>
+{{else if .Message}}
+<p class="empty">{{.Message}}</p>
+{{else}}
+<p class="empty">Estas versões já foram vendidas no servidor {{.Server}}, mas ninguém está anunciando agora. Os números são de todo o histórico.</p>
+<table class="results-table history-table">
+  <thead>
+    <tr>
+      <th>Item</th>
+      <th>Mínimo</th>
+      <th>Médio</th>
+      <th>Máximo</th>
+      <th>Volume</th>
+      <th>Rastrear</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{range .Rows}}
+    <tr class="history-row">
+      <td>{{.ItemName}}</td>
+      <td>{{formatMoney .MinItemPrice}}</td>
+      <td>{{formatMoney .AvgItemPrice}}</td>
+      <td>{{formatMoney .MaxItemPrice}}</td>
+      <td>{{.TotalItemCnt}}</td>
+      <td>
+        <button type="button" class="watchlist-button"
+            data-server="{{$.Server}}" data-item-id="{{.ItemId}}" data-item-name="{{.ItemName}}"
+            data-mode="availability"
+            onclick="addToWatchlist(this)">+ Watchlist</button>
+      </td>
+    </tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}

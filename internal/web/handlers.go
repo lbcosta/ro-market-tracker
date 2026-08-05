@@ -134,6 +134,11 @@ type resultsView struct {
 	QtySortURL   string
 	PriceArrow   string
 	QtyArrow     string
+
+	// VariantsURL carrega as outras versões do item que existem no servidor
+	// mas não estão anunciadas agora (ver variants.go). É um link, e não parte
+	// desta resposta, porque descobri-las custa outra consulta ao site.
+	VariantsURL string
 }
 
 // resultsGroup é a seção da tabela de resultados com todos os anúncios de um
@@ -143,9 +148,21 @@ type resultsView struct {
 // Watchlist" no topo da tabela não tem como dizer qual desses itens ele
 // adiciona.
 type resultsGroup struct {
-	ItemID   int
+	ItemID int
+
+	// ItemName é o nome como ele aparece na tela: com o sufixo de slots,
+	// porque é ele que distingue duas seções que, sem isso, sairiam com o
+	// mesmo cabeçalho repetido — "Selo de Loki" e "Selo de Loki [1]" são
+	// itens de catálogo diferentes, com preços muito diferentes.
 	ItemName string
-	Items    []gnjoy.ShopListItem
+
+	// SearchName é o nome de catálogo, sem os slots. É o que a watchlist
+	// manda de volta ao upstream ao consultar o preço ao vivo: a busca casa
+	// contra o ItemName cru do anúncio, então procurar pelo nome de tela
+	// ("Selo de Loki [1]") não acharia anúncio nenhum.
+	SearchName string
+
+	Items []gnjoy.ShopListItem
 }
 
 // groupItems agrupa items — já ordenados pela coluna/direção escolhida — por
@@ -161,7 +178,11 @@ func groupItems(items []gnjoy.ShopListItem) []resultsGroup {
 		if !ok {
 			i = len(groups)
 			index[it.ItemId] = i
-			groups = append(groups, resultsGroup{ItemID: it.ItemId, ItemName: it.ItemName})
+			groups = append(groups, resultsGroup{
+				ItemID:     it.ItemId,
+				ItemName:   it.DisplayName(),
+				SearchName: it.ItemName,
+			})
 		}
 		groups[i].Items = append(groups[i].Items, it)
 	}
@@ -237,11 +258,13 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 			return a < b
 		})
 	}
+
 	view.Groups = groupItems(result.Items)
 	view.PriceSortURL = sortURL(server, item, "price", sortBy, sortDir)
 	view.QtySortURL = sortURL(server, item, "qty", sortBy, sortDir)
 	view.PriceArrow = sortArrow(sortBy, sortDir, "price")
 	view.QtyArrow = sortArrow(sortBy, sortDir, "qty")
+	view.VariantsURL = variantsURL(server, item, result.Items)
 	render(w, "results.html.tmpl", view)
 }
 
@@ -274,6 +297,12 @@ func sortArrow(sortBy, dir, column string) string {
 	return " ▲"
 }
 
+// itemLang é o idioma pedido ao site nos detalhes de item. Os bônus
+// aleatórios da unidade anunciada vêm como frases prontas nesse idioma
+// ("CRIT +4", "Conjuração variável -5%") e vão direto para o card de detalhe:
+// em inglês, destoariam do resto da página.
+const itemLang = "pt-BR"
+
 type expandView struct {
 	Error       string
 	Store       *gnjoy.StoreDetail
@@ -299,7 +328,10 @@ func (h *Handler) Expand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, err := h.client.GetItemDetail(r.Context(), loc, "")
+	// itemLang, e não o padrão do client: é deste detalhe que saem os bônus
+	// aleatórios mostrados no card, e eles vêm como frases prontas no idioma
+	// pedido — em inglês, destoariam do resto da página.
+	item, err := h.client.GetItemDetail(r.Context(), loc, itemLang)
 	if err != nil {
 		slog.Error("web: detalhe do item falhou", "error", err)
 		render(w, "expand.html.tmpl", expandView{Error: "Não foi possível carregar os detalhes desse item agora."})

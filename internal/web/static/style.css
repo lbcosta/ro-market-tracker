@@ -335,6 +335,40 @@ h1 {
   font-weight: 600;
 }
 
+/* O bloco das outras versões do item vem depois da tabela e não compete com
+   ela: é uma saída para quem não achou o que procurava, não o assunto
+   principal da tela. */
+.variants-block {
+  margin: 1rem 0 0;
+}
+
+.variants-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.7rem;
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.variants-button:hover {
+  border-style: solid;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.variants-button:disabled {
+  cursor: progress;
+}
+
+#variants {
+  margin-top: 0.75rem;
+}
+
 /* Discreto como o da tabela de histórico (ver .history-table
    .watchlist-button): aqui também se repete uma vez por item casado, não é
    mais o único botão da tabela. */
@@ -441,6 +475,12 @@ h1 {
 
 .detail-grid dd {
   margin: 0;
+}
+
+.bonus-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 
 .navi-copy {

@@ -30,6 +30,7 @@
           <span class="item-group-name">{{.ItemName}}</span>
           <button type="button" class="watchlist-button"
               data-server="{{$.Server}}" data-item-id="{{.ItemID}}" data-item-name="{{.ItemName}}"
+              data-search-name="{{.SearchName}}"
               onclick="addToWatchlist(this)">+ Watchlist</button>
         </div>
       </td>
@@ -40,7 +41,7 @@
         hx-target="#detail-{{.SSI}}" hx-swap="innerHTML" hx-trigger="click once"
         hx-indicator="#spinner-{{.SSI}}"
         onclick="toggleRow(this)">
-      <td><span class="expand-icon" aria-hidden="true">▸</span>{{.ItemName}}</td>
+      <td><span class="expand-icon" aria-hidden="true">▸</span>{{.DisplayName}}</td>
       <td>{{formatMoney .ItemPrice}}</td>
       <td>{{.StoreName}}</td>
       <td>{{.ItemCnt}}</td>
@@ -56,4 +57,17 @@
     {{end}}
   </tbody>
 </table>
+
+{{/* As outras versões do item (a "+13" quando só a "+7" está à venda) custam
+     outra consulta ao site, então só são buscadas se o usuário pedir — ver
+     internal/web/variants.go. */}}
+<div class="variants-block">
+  <button type="button" class="variants-button"
+      hx-get="{{.VariantsURL}}" hx-target="#variants" hx-swap="innerHTML"
+      hx-indicator="#variants-spinner" hx-disabled-elt="this">
+    Ver outras versões deste item fora do mercado
+    <span id="variants-spinner" class="htmx-indicator spinner" aria-hidden="true"></span>
+  </button>
+  <div id="variants"></div>
+</div>
 {{end}}

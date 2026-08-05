@@ -52,7 +52,7 @@ const (
 	// detecta a falha sozinho e redescobre o hash atual automaticamente
 	// (veja discover.go) — não é necessário atualizar esta constante nem
 	// reiniciar o processo.
-	DefaultActionID = "404ed8774f606f8b1eb689aac3cb179d34321adc53"
+	DefaultActionID = "40a3f7a2ade1ce8f0b65438f43a533e65968363fe9"
 
 	// DefaultRateLimitRPS e DefaultRateLimitBurst controlam o ritmo padrão
 	// de requisições enviadas ao GnJoy LATAM. O site tem um rate limiter
@@ -468,8 +468,9 @@ type SearchShopsParams struct {
 // item pelo nome, em um servidor específico. Equivale a digitar um item na
 // busca da página "/intro/shop-search/trading".
 //
-// Um termo com hífen é contornado antes de ir ao upstream, que não os aceita;
-// veja splitSearchWord.
+// Um termo com pontuação (hífen, "+", parênteses, colchetes...) é contornado
+// antes de ir ao upstream, que só aceita letras, dígitos e espaços; veja
+// splitSearchWord.
 func (c *Client) SearchShops(ctx context.Context, p SearchShopsParams, opts ...CallOption) (*ShopSearchResult, error) {
 	send, filter := splitSearchWord(p.SearchWord)
 	if filter != "" && send == "" {
@@ -518,7 +519,9 @@ func (c *Client) SearchShops(ctx context.Context, p SearchShopsParams, opts ...C
 		// só ficam os itens que casariam com o termo inteiro.
 		items := make([]ShopListItem, 0, len(result.Items))
 		for _, item := range result.Items {
-			if matchesSearchWord(item.ItemName, filter) {
+			// O nome com slots entra no casamento porque é o que o site
+			// mostra: quem procura "Selo de Loki [1]" digitou o que viu.
+			if matchesSearchWord(filter, item.ItemName, item.DisplayName()) {
 				items = append(items, item)
 			}
 		}
@@ -560,8 +563,8 @@ type MarketPriceParams struct {
 // "quanto esse item costuma custar?" para um item que ninguém está
 // anunciando agora. Equivale a usar a página "/intro/shop-search/market-price".
 //
-// Assim como SearchShops, contorna o termo com hífen que o upstream não
-// aceita; veja splitSearchWord.
+// Assim como SearchShops, contorna a pontuação que o upstream não aceita;
+// veja splitSearchWord.
 func (c *Client) SearchMarketPrice(ctx context.Context, p MarketPriceParams, opts ...CallOption) (*MarketPriceResult, error) {
 	send, filter := splitSearchWord(p.SearchWord)
 	if filter != "" && send == "" {
@@ -608,7 +611,7 @@ func (c *Client) SearchMarketPrice(ctx context.Context, p MarketPriceParams, opt
 	if filter != "" {
 		items := make([]MarketPriceItem, 0, len(result.Items))
 		for _, item := range result.Items {
-			if matchesSearchWord(item.ItemName, filter) {
+			if matchesSearchWord(filter, item.ItemName) {
 				items = append(items, item)
 			}
 		}

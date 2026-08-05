@@ -14,6 +14,17 @@
     <dt>Vendedor</dt><dd>{{.Store.ItemSellerCharName}}</dd>
     <dt>Loja</dt><dd>{{.Store.StoreName}}</dd>
     {{if .Item}}<dt>Tipo</dt><dd>{{.Item.ItemType}}</dd>{{end}}
+    {{/* Os bônus aleatórios são a propriedade que mais explica a diferença de
+         preço entre dois anúncios do mesmo equipamento. Aqui eles não custam
+         nada: o detalhe do item já é consultado para montar o card. */}}
+    {{if .Item}}{{with .Item.RandomOptions}}
+    <dt>Bônus aleatórios</dt>
+    <dd>
+      <ul class="bonus-list">
+        {{range .}}<li>{{.}}</li>{{end}}
+      </ul>
+    </dd>
+    {{end}}{{end}}
     <dt>Localização</dt>
     <dd>
       <button type="button" class="navi-copy" onclick="copyNavi(this, '{{.NaviCommand}}')">{{.NaviCommand}}</button>

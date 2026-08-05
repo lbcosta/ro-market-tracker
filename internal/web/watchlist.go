@@ -17,24 +17,37 @@ type watchlistPriceView struct {
 	Refine   *int  `json:"refine,omitempty"`
 }
 
+// isEquipment diz se o item pode ter refino. O site usa um tipo só ("armor")
+// para tudo que se veste — armaduras, acessórios e chapéus —, então esta
+// checagem cobre os três; consumíveis, cartas e materiais nunca têm refino, e
+// consultar o detalhe deles seria uma requisição jogada fora.
+func isEquipment(databaseType string) bool {
+	return databaseType == "weapon" || databaseType == "armor"
+}
+
+// storeKey identifica um anúncio no refineMemo por (svrId, mapId, ssi) — o
+// "endereço" completo da loja, o mesmo trio que as rotas de detalhe usam.
+func storeKey(item gnjoy.ShopListItem) string {
+	return cacheKey(strconv.Itoa(item.SvrId), strconv.Itoa(item.MapId), item.SSI)
+}
+
 // WatchlistPrice trata GET /web/watchlist/price e devolve, em JSON, o preço
 // atualmente anunciado para um item (identificado por itemId, já que a
 // busca por nome pode casar itens diferentes cujo nome contém a mesma
 // palavra — ver teste com "Espada").
 //
 // Sem o parâmetro opcional "refine", devolve o menor preço entre todas as
-// lojas com esse itemId e, se a mais barata for um equipamento (arma ou
-// armadura), o refino dela — só informativo, "o que está mais barato agora
-// e qual o refino dessa unidade em especial".
+// lojas com esse itemId e, se a mais barata for um equipamento, o refino
+// dela — só informativo, "o que está mais barato agora e qual o refino dessa
+// unidade em especial".
 //
 // Com "refine" informado, a busca passa a ser por uma unidade NESSE refino
-// específico: entre as lojas com esse itemId, ordenadas por preço
-// crescente, procura a mais barata cujo refino bate exatamente com o
-// pedido. Como a única forma de saber o refino de uma loja é consultando o
-// detalhe dela (a busca por nome não traz essa informação), cada refino
-// descoberto é memoizado por ssi (ver Handler.refineMemo) e uma checagem
-// consulta no máximo maxRefineDetailFetches lojas novas — ver
-// watchlistPriceForRefine.
+// específico: entre as lojas com esse itemId, ordenadas por preço crescente,
+// procura a mais barata cujo refino bate exatamente com o pedido. Como a
+// única forma de saber o refino de uma loja é consultando o detalhe dela (a
+// busca por nome não traz essa informação), cada refino descoberto é
+// memoizado por loja (ver Handler.refineMemo) e uma checagem consulta no
+// máximo maxRefineDetailFetches lojas novas — ver watchlistPriceForRefine.
 //
 // A busca em si passa pelo cache de resultados (cachedSearchShops): a
 // checagem automática aceita um resultado de até monitorMaxAge — é o que
@@ -102,17 +115,11 @@ func (h *Handler) WatchlistPrice(w http.ResponseWriter, r *http.Request) {
 
 // maxRefineDetailFetches é o orçamento de consultas de detalhe de loja que
 // UMA checagem com refino fixado pode gastar no upstream. O que já foi
-// descoberto fica no refineMemo, então o orçamento vale só para lojas
-// novas: a cada ciclo a cobertura cresce em até este tanto de lojas, sem
-// nunca custar mais que isso — um item popular com dezenas de anúncios
-// converge em poucos ciclos em vez de custar dezenas de chamadas em cada um.
+// descoberto fica no refineMemo, então o orçamento vale só para lojas novas: a
+// cada ciclo a cobertura cresce em até este tanto de lojas, sem nunca custar
+// mais que isso — um item popular com dezenas de anúncios converge em poucos
+// ciclos em vez de custar dezenas de chamadas em cada um.
 const maxRefineDetailFetches = 8
-
-// refineMemoKey identifica uma loja no refineMemo — o "endereço" completo
-// dela, o mesmo trio que GetStoreDetail usa.
-func refineMemoKey(item gnjoy.ShopListItem) string {
-	return cacheKey(strconv.Itoa(item.SvrId), strconv.Itoa(item.MapId), item.SSI)
-}
 
 // fetchStoreRefine consulta o refino de uma loja no upstream e o memoiza.
 // NoRetry: isto roda dentro de uma checagem da watchlist, que tem repetição
@@ -124,8 +131,26 @@ func (h *Handler) fetchStoreRefine(r *http.Request, item gnjoy.ShopListItem) (in
 		slog.Warn("web: watchlist: não foi possível obter o refino de um anúncio", "error", err)
 		return 0, false
 	}
-	h.refineMemo.put(refineMemoKey(item), detail.Refine)
+	h.refineMemo.put(storeKey(item), detail.Refine)
 	return detail.Refine, true
+}
+
+// lookupRefine devolve o refino de uma loja, do memo ou do upstream —
+// consumindo, neste segundo caso, uma unidade do orçamento da checagem.
+//
+// affordable falso significa "não estava no memo e o orçamento acabou": o
+// candidato não foi descartado, só ficou para um próximo ciclo. known falso
+// significa que a consulta foi feita e não deu certo.
+func (h *Handler) lookupRefine(r *http.Request, item gnjoy.ShopListItem, budget *int) (refine int, known, affordable bool) {
+	if refine, ok := h.refineMemo.peek(storeKey(item)); ok {
+		return refine, true, true
+	}
+	if *budget == 0 {
+		return 0, false, false
+	}
+	*budget--
+	refine, known = h.fetchStoreRefine(r, item)
+	return refine, known, true
 }
 
 func (h *Handler) watchlistPriceForCheapest(r *http.Request, candidates []gnjoy.ShopListItem) watchlistPriceView {
@@ -134,38 +159,36 @@ func (h *Handler) watchlistPriceForCheapest(r *http.Request, candidates []gnjoy.
 	}
 	cheapest := candidates[0]
 	view := watchlistPriceView{Found: true, MinPrice: cheapest.ItemPrice}
-	if cheapest.DatabaseType == "weapon" || cheapest.DatabaseType == "armor" {
-		refine, ok := h.refineMemo.peek(refineMemoKey(cheapest))
-		if !ok {
-			refine, ok = h.fetchStoreRefine(r, cheapest)
-		}
-		if ok {
+	if isEquipment(cheapest.DatabaseType) {
+		budget := 1
+		if refine, known, _ := h.lookupRefine(r, cheapest, &budget); known {
 			view.Refine = &refine
 		}
 	}
 	return view
 }
 
+// watchlistPriceForRefine procura o anúncio mais barato no refino que a
+// entrada da watchlist fixou.
+//
+// A varredura é por preço crescente e para no primeiro candidato que serve —
+// os mais caros nem chegam a ser consultados. O orçamento
+// (maxRefineDetailFetches) limita quantas lojas AINDA DESCONHECIDAS uma
+// checagem consulta; as demais ficam para os próximos ciclos, que encontram no
+// memo o que este descobriu.
 func (h *Handler) watchlistPriceForRefine(r *http.Request, candidates []gnjoy.ShopListItem, wantRefine int) watchlistPriceView {
 	budget := maxRefineDetailFetches
 	for _, candidate := range candidates {
-		refine, known := h.refineMemo.peek(refineMemoKey(candidate))
-		if !known {
-			if budget == 0 {
-				// Orçamento do ciclo esgotado: esta loja fica para o próximo
-				// ciclo (o memo guarda as já descobertas, então lá o orçamento
-				// avança para lojas realmente novas). A varredura continua:
-				// um candidato mais caro pode já estar memoizado de um ciclo
-				// anterior e responder a consulta agora.
-				continue
-			}
-			budget--
-			refine, known = h.fetchStoreRefine(r, candidate)
-			if !known {
-				continue
-			}
+		refine, known, affordable := h.lookupRefine(r, candidate, &budget)
+		if !affordable {
+			// Orçamento do ciclo esgotado: esta loja fica para o próximo (o
+			// memo guarda as já descobertas, então lá o orçamento avança para
+			// lojas realmente novas). A varredura continua: um candidato mais
+			// caro pode já estar memoizado de um ciclo anterior e responder a
+			// consulta agora.
+			continue
 		}
-		if refine == wantRefine {
+		if known && refine == wantRefine {
 			return watchlistPriceView{Found: true, MinPrice: candidate.ItemPrice, Refine: &refine}
 		}
 	}

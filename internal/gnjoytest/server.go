@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 const (
@@ -399,13 +400,18 @@ func (m *Mock) handleSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 // rejectsSearchWord reproduz um defeito real do backend do GnJoy: um
-// searchWord com hífen ou "+" faz o site responder 200 com o componente de
-// erro dele no lugar da lista (sem list/totalCount). O client contorna isso
-// antes de enviar a busca (ver gnjoy.splitSearchWord) — e é justamente por o
-// mock reproduzir a falha que uma regressão no contorno aparece nos testes,
-// em vez de só na mão do usuário.
+// searchWord com qualquer caractere que não seja letra, dígito ou espaço
+// (hífen, "+", parênteses, colchetes, pontuação em geral) faz o site
+// responder 200 com o componente de erro dele no lugar da lista (sem
+// list/totalCount). O client contorna isso antes de enviar a busca (ver
+// gnjoy.splitSearchWord) — e é justamente por o mock reproduzir a falha que
+// uma regressão no contorno aparece nos testes, em vez de só na mão do
+// usuário.
 func rejectsSearchWord(w http.ResponseWriter, searchWord string) bool {
-	if !strings.ContainsAny(searchWord, "-+") {
+	rejected := strings.IndexFunc(searchWord, func(r rune) bool {
+		return r != ' ' && !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	}) >= 0
+	if !rejected {
 		return false
 	}
 	w.Header().Set("content-type", "text/x-component")
