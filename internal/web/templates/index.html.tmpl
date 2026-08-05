@@ -54,6 +54,21 @@
         </svg>
         <span id="search-spinner" class="htmx-indicator spinner" aria-hidden="true"></span>
       </button>
+
+      {{/* Desmarcados por padrão, e sem hx-trigger="change": cada um custa uma
+           consulta ao site POR ANÚNCIO encontrado, então marcar a caixa não
+           pode, sozinho, disparar a varredura — ela sai junto da próxima
+           busca. Ver internal/web/bonus.go. */}}
+      <div class="search-options">
+        <label class="search-option">
+          <input type="checkbox" name="refine" value="1">
+          Verificar refino
+        </label>
+        <label class="search-option">
+          <input type="checkbox" name="bonus" value="1">
+          Verificar bônus aleatórios
+        </label>
+      </div>
     </form>
 
     <div class="results-column">

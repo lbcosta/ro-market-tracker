@@ -11,6 +11,10 @@ test.beforeEach(async ({ page, request }) => {
   await resetPage(page, request);
 });
 
+// A consulta de preço da watchlist passa pelo rate limiter do client e pode
+// custar mais de uma chamada — ver watchlist.spec.js, que usa o mesmo valor.
+const ESPERA_PRECO = { timeout: 15_000 };
+
 test("a página abre com busca, watchlist e barra de atividades", async ({ page }) => {
   await expect(page.locator("h1")).toHaveText("RO Market Tracker");
   await expect(page.locator('input[name="item"]')).toBeVisible();
@@ -96,6 +100,64 @@ test("o ícone que não carrega some em vez de quebrar o cabeçalho", async ({ p
 
   await expect(page.locator(".item-group-name").first()).toHaveText("Espada Primordial");
   await expect(page.locator(".item-icon")).toHaveCount(0);
+});
+
+// Os três anúncios da Espada Primordial custam de 129 a 299 milhões porque são
+// +0, +7 e +10 — o que a tabela de sempre não tem como mostrar, já que a busca
+// do site não traz refino.
+test("verificar refino separa os anúncios do mesmo item em seções", async ({ page }) => {
+  await buscar(page, "Espada Primordial", { refino: true });
+
+  await expect(page.locator(".item-group-row")).toHaveCount(3);
+  // A +0 não ganha etiqueta: o site não distingue "+0" de "não refinável", e
+  // escrever "+0" afirmaria o que não se sabe.
+  await expect(page.locator(".item-group-row .refine-badge")).toHaveText(["+7", "+10"]);
+});
+
+// A +7 tem "CRIT +4" e "ATQ +3%"; a +10 tem só "CRIT +4". Compartilhar um bônus
+// não pode juntá-las — é a diferença entre "uma unidade com exatamente estes
+// bônus" e "qualquer unidade com este bônus".
+test("verificar bônus separa as unidades com combinações diferentes", async ({ page }) => {
+  await buscar(page, "Espada Primordial", { bonus: true });
+
+  await expect(page.locator(".item-group-row")).toHaveCount(3);
+  await expect(page.locator(".item-group-row").nth(0).locator(".group-chip")).toHaveText("sem bônus");
+  await expect(page.locator(".item-group-row").nth(1).locator(".bonus-chip")).toHaveText(["CRIT +4", "ATQ +3%"]);
+  await expect(page.locator(".item-group-row").nth(2).locator(".bonus-chip")).toHaveText(["CRIT +4"]);
+});
+
+// O que a varredura descobre nunca muda para um mesmo anúncio, então reordenar
+// não pode custar nada — sem isso, cada clique num cabeçalho de coluna
+// repetiria a varredura inteira e a feature seria inutilizável.
+test("reordenar depois de verificar não volta ao site", async ({ page, request }) => {
+  await buscar(page, "Espada Primordial", { refino: true, bonus: true });
+
+  await zerarContagemDoUpstream(request);
+  await page.click(".sort-link >> nth=0");
+  await page.waitForSelector(".results-table");
+  await expect(page.locator(".item-group-row")).toHaveCount(3);
+
+  expect(await contarRequisicoesAoUpstream(request)).toBe(0);
+});
+
+// Com as seções separadas por refino, cada uma acompanha uma unidade
+// diferente: são duas linhas legítimas do mesmo item, e o refino já vem
+// fixado sem o usuário precisar digitá-lo.
+test("a watchlist nasce com o refino da seção já fixado", async ({ page }) => {
+  await buscar(page, "Espada Primordial", { refino: true });
+
+  const secoes = page.locator(".item-group-row");
+  await secoes.filter({ has: page.locator(".refine-badge", { hasText: "+7" }) }).locator(".watchlist-button").click();
+
+  const linhas = page.locator(".watchlist-row");
+  await expect(linhas).toHaveCount(1);
+  await expect(linhas.first().locator(".watchlist-refine")).toHaveText("+7");
+  await expect(linhas.first().locator(".watchlist-current")).toHaveText("Atual: 158.000.000 z", ESPERA_PRECO);
+
+  // A seção +10 é outra unidade: vira uma segunda linha, não um clique sem efeito.
+  await secoes.filter({ has: page.locator(".refine-badge", { hasText: "+10" }) }).locator(".watchlist-button").click();
+  await expect(linhas).toHaveCount(2);
+  await expect(linhas.nth(1).locator(".watchlist-refine")).toHaveText("+10");
 });
 
 // As duas versões chegam do site com o mesmo itemName e só se distinguem pelo

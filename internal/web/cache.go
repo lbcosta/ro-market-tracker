@@ -29,6 +29,7 @@ const (
 	searchCacheSize      = 256
 	marketPriceCacheSize = 256
 	refineMemoSize       = 2048
+	bonusMemoSize        = 2048
 )
 
 // cacheKey monta a chave de cache a partir das partes que identificam a

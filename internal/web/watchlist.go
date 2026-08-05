@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -124,15 +125,21 @@ const maxRefineDetailFetches = 8
 // fetchStoreRefine consulta o refino de uma loja no upstream e o memoiza.
 // NoRetry: isto roda dentro de uma checagem da watchlist, que tem repetição
 // própria — se o site está pedindo calma, desistir é o certo.
-func (h *Handler) fetchStoreRefine(r *http.Request, item gnjoy.ShopListItem) (int, bool) {
+//
+// O erro sai junto do valor porque a varredura da busca (ver bonus.go) precisa
+// distinguir "consultei e não deu certo" de "o site parou de responder": lá,
+// ao contrário daqui, o primeiro erro aborta o resto da varredura.
+func (h *Handler) fetchStoreRefine(ctx context.Context, item gnjoy.ShopListItem) (int, error) {
 	loc := gnjoy.StoreLocation{SvrId: item.SvrId, MapId: item.MapId, SSI: item.SSI}
-	detail, err := h.client.GetStoreDetail(r.Context(), loc, gnjoy.NoRetry())
+	detail, err := h.client.GetStoreDetail(ctx, loc, gnjoy.NoRetry())
 	if err != nil {
-		slog.Warn("web: watchlist: não foi possível obter o refino de um anúncio", "error", err)
-		return 0, false
+		// Debug, e não Warn: uma varredura de busca com o site instável
+		// geraria uma linha destas por anúncio.
+		slog.Debug("web: não foi possível obter o refino de um anúncio", "error", err)
+		return 0, err
 	}
 	h.refineMemo.put(storeKey(item), detail.Refine)
-	return detail.Refine, true
+	return detail.Refine, nil
 }
 
 // lookupRefine devolve o refino de uma loja, do memo ou do upstream —
@@ -149,8 +156,8 @@ func (h *Handler) lookupRefine(r *http.Request, item gnjoy.ShopListItem, budget 
 		return 0, false, false
 	}
 	*budget--
-	refine, known = h.fetchStoreRefine(r, item)
-	return refine, known, true
+	refine, err := h.fetchStoreRefine(r.Context(), item)
+	return refine, err == nil, true
 }
 
 func (h *Handler) watchlistPriceForCheapest(r *http.Request, candidates []gnjoy.ShopListItem) watchlistPriceView {

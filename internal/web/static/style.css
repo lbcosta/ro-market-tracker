@@ -202,6 +202,33 @@ h1 {
   min-width: 200px;
 }
 
+/* Linha inteira abaixo do campo de busca: são opções da busca, não mais um
+   controle disputando espaço com ela. */
+.search-options {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.2rem;
+}
+
+.search-option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+/* O seletor genérico acima veste os campos de texto do formulário; num
+   checkbox aquele padding vira uma caixa enorme. */
+.search-form .search-option input[type="checkbox"] {
+  padding: 0;
+  border: 0;
+  width: auto;
+  cursor: pointer;
+}
+
 /* Tamanho fixo e position:relative para o spinner poder se centralizar por
    cima do ícone (ver .search-button .spinner) em vez de ao lado dele — era
    isso que descentralizava a lupa e esticava o botão: o layout reservava
@@ -353,6 +380,46 @@ h1 {
   height: 24px;
   object-fit: contain;
   flex-shrink: 0;
+}
+
+/* O espaçamento entre nome e etiquetas vem do gap do .item-group-label; a
+   margem que .refine-badge carrega para o card de detalhe somaria a ele. */
+.item-group-label .refine-badge {
+  margin-left: 0;
+  flex-shrink: 0;
+}
+
+/* Os bônus são frases inteiras ("Dano mágico todas as prop. 5%."), então a
+   etiqueta é discreta e o cabeçalho pode quebrar em mais de uma linha. */
+.item-group-label {
+  flex-wrap: wrap;
+}
+
+.bonus-chip,
+.group-chip {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Tracejado: distingue "consultei e não tem" de "não cheguei a consultar" sem
+   depender de cor, que é justamente o que se perde em um print ou para quem
+   não distingue as duas. */
+.group-chip-desconhecido {
+  border-style: dashed;
+  font-style: italic;
+}
+
+/* Mesmo tom do texto secundário: o aviso qualifica a tabela, não compete com
+   ela. O erro, que substituiria a tabela, é que tem cor própria. */
+.results-aviso {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0 0 0.75rem;
 }
 
 /* O bloco das outras versões do item vem depois da tabela e não compete com

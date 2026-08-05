@@ -22,8 +22,15 @@ async function resetPage(page, request) {
 
 // buscar preenche o formulário e espera a tabela (ou a mensagem de vazio)
 // aparecer, para nenhum teste precisar dormir esperando o HTMX.
-async function buscar(page, item, { esperarResultados = true } = {}) {
+//
+// refino/bonus marcam os checkboxes de varredura antes de buscar. Eles custam
+// uma consulta ao site por anúncio encontrado, então a busca demora
+// visivelmente mais — o timeout padrão do waitForSelector dá conta das
+// fixtures, que têm poucos anúncios.
+async function buscar(page, item, { esperarResultados = true, refino = false, bonus = false } = {}) {
   await page.fill('input[name="item"]', item);
+  if (refino) await page.check('input[name="refine"]');
+  if (bonus) await page.check('input[name="bonus"]');
   await page.click(".search-button");
   if (esperarResultados) {
     await page.waitForSelector(".results-table");

@@ -31,12 +31,14 @@ type Handler struct {
 	searchCache      *ttlCache[*gnjoy.ShopSearchResult]
 	marketPriceCache *ttlCache[*gnjoy.MarketPriceResult]
 
-	// refineMemo memoiza o refino de cada loja por (svrId, mapId, ssi). O
-	// refino nunca muda para um mesmo ssi (a loja fechada e reaberta ganha
-	// um ssi novo), então cada loja custa no máximo UMA consulta de detalhe
-	// na vida do processo — é o que desarma o custo N+1 da watchlist com
-	// refino fixado (ver watchlist.go).
+	// refineMemo memoiza o refino de cada loja por (svrId, mapId, ssi), e
+	// bonusMemo os bônus aleatórios pela mesma chave. Nem um nem outro mudam
+	// para um mesmo ssi (a loja fechada e reaberta ganha um ssi novo), então
+	// cada loja custa no máximo UMA consulta de cada na vida do processo — é
+	// o que desarma o custo N+1 da watchlist com refino fixado (ver
+	// watchlist.go) e o da busca separada por refino/bônus (ver bonus.go).
 	refineMemo *ttlCache[int]
+	bonusMemo  *ttlCache[[]string]
 }
 
 func NewHandler(client *gnjoy.Client) *Handler {
@@ -45,6 +47,7 @@ func NewHandler(client *gnjoy.Client) *Handler {
 		searchCache:      newTTLCache[*gnjoy.ShopSearchResult](searchCacheSize),
 		marketPriceCache: newTTLCache[*gnjoy.MarketPriceResult](marketPriceCacheSize),
 		refineMemo:       newTTLCache[int](refineMemoSize),
+		bonusMemo:        newTTLCache[[]string](bonusMemoSize),
 	}
 }
 
@@ -106,7 +109,7 @@ func (h *Handler) warmupActionID() {
 }
 
 // ResetCaches trata POST /web/cache/reset e esvazia os caches de consulta do
-// frontend (busca de lojas, preços praticados e o memo de refino).
+// frontend (busca de lojas, preços praticados e os memos de refino e bônus).
 //
 // Existe para os testes de navegador (e2e): o servidor sobe uma vez para a
 // suíte inteira, e cada teste zera o site falso e o localStorage para
@@ -118,6 +121,7 @@ func (h *Handler) ResetCaches(w http.ResponseWriter, r *http.Request) {
 	h.searchCache.reset()
 	h.marketPriceCache.reset()
 	h.refineMemo.reset()
+	h.bonusMemo.reset()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -127,6 +131,17 @@ type resultsView struct {
 	Query  string
 	Items  []gnjoy.ShopListItem
 	Groups []resultsGroup
+
+	// Aviso é o que ficou faltando NESTA tabela — hoje, os anúncios que a
+	// varredura de detalhes não alcançou. É diferente de Error: a busca deu
+	// certo, e o que se mostra é verdadeiro, só incompleto.
+	Aviso string
+
+	// GroupByRefine e GroupByBonus dizem se as seções foram separadas por
+	// esses critérios. O template lê daqui, e não de cada grupo: é uma
+	// propriedade da busca inteira.
+	GroupByRefine bool
+	GroupByBonus  bool
 
 	SortBy       string
 	SortDir      string
@@ -168,28 +183,71 @@ type resultsGroup struct {
 	// CDN, fora do rate limiter do client (ver gnjoy.ShopListItem).
 	ImgPath string
 
+	// Refine e Bonus só são preenchidos quando a busca pediu a varredura de
+	// detalhes (ver bonus.go). Os campos "Known" distinguem "consultei e é
+	// +0" de "não cheguei a consultar" — sem eles a seção "+0" recolheria os
+	// anúncios não verificados, que podem ser de qualquer refino.
+	Refine      int
+	RefineKnown bool
+	Bonus       []string
+	BonusKnown  bool
+
 	Items []gnjoy.ShopListItem
 }
 
+// groupKey identifica uma seção da tabela. Com os dois checkboxes desligados
+// facts é nil e a chave colapsa em {itemID}, que é o agrupamento de sempre.
+type groupKey struct {
+	itemID      int
+	refine      int
+	refineKnown bool
+	bonus       string
+	bonusKnown  bool
+}
+
 // groupItems agrupa items — já ordenados pela coluna/direção escolhida — por
-// ItemID, preservando a ordem de primeira aparição de cada um. Como items já
-// chega ordenado e uma subsequência de uma sequência ordenada continua
-// ordenada, as linhas dentro de cada grupo saem na mesma ordem relativa que
-// teriam na tabela sem agrupamento.
-func groupItems(items []gnjoy.ShopListItem) []resultsGroup {
+// item de catálogo e, se a busca pediu, também por refino e pelos bônus
+// aleatórios de cada unidade. Preserva a ordem de primeira aparição de cada
+// grupo. Como items já chega ordenado e uma subsequência de uma sequência
+// ordenada continua ordenada, as linhas dentro de cada grupo saem na mesma
+// ordem relativa que teriam na tabela sem agrupamento.
+//
+// Os anúncios que a varredura não alcançou formam seções próprias, separadas
+// das verificadas: eles não são "+0 sem bônus", são desconhecidos.
+func groupItems(items []gnjoy.ShopListItem, facts map[string]itemFacts, byRefine, byBonus bool) []resultsGroup {
 	groups := make([]resultsGroup, 0, len(items))
-	index := make(map[int]int, len(items))
+	index := make(map[groupKey]int, len(items))
 	for _, it := range items {
-		i, ok := index[it.ItemId]
+		f := facts[storeKey(it)]
+
+		key := groupKey{itemID: it.ItemId}
+		if byRefine {
+			key.refine, key.refineKnown = f.Refine, f.RefineKnown
+		}
+		if byBonus {
+			key.bonus, key.bonusKnown = bonusKey(f.Bonus), f.BonusKnown
+		}
+
+		i, ok := index[key]
 		if !ok {
 			i = len(groups)
-			index[it.ItemId] = i
-			groups = append(groups, resultsGroup{
+			index[key] = i
+			g := resultsGroup{
 				ItemID:     it.ItemId,
 				ItemName:   it.DisplayName(),
 				SearchName: it.ItemName,
 				ImgPath:    it.DatabaseImgPath,
-			})
+			}
+			if byRefine {
+				g.Refine, g.RefineKnown = f.Refine, f.RefineKnown
+			}
+			if byBonus {
+				// Ordem original (opt1..opt4, a do site): só a CHAVE é
+				// ordenada, para a mesma combinação em ordens diferentes não
+				// virar duas seções.
+				g.Bonus, g.BonusKnown = f.Bonus, f.BonusKnown
+			}
+			groups = append(groups, g)
 		}
 		groups[i].Items = append(groups[i].Items, it)
 	}
@@ -228,6 +286,15 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		sortDir = "asc"
 	}
 
+	sq := searchQuery{
+		Server:   server,
+		Item:     item,
+		SortBy:   sortBy,
+		SortDir:  sortDir,
+		ByRefine: q.Get("refine") == "1",
+		ByBonus:  q.Get("bonus") == "1",
+	}
+
 	result, err := h.cachedSearchShops(r.Context(), server, item, freshMaxAge)
 	if err != nil {
 		slog.Error("web: busca falhou", "error", err)
@@ -249,11 +316,13 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	// resultsGroup), e não há "o" item cujo nome sirva de título — cada
 	// grupo já mostra o seu próprio nome canônico no cabeçalho da seção.
 	view := resultsView{
-		Server:  server,
-		Items:   result.Items,
-		Query:   item,
-		SortBy:  sortBy,
-		SortDir: sortDir,
+		Server:        server,
+		Items:         result.Items,
+		Query:         item,
+		SortBy:        sortBy,
+		SortDir:       sortDir,
+		GroupByRefine: sq.ByRefine,
+		GroupByBonus:  sq.ByBonus,
 	}
 
 	if key, ok := sortableColumns[sortBy]; ok {
@@ -266,30 +335,73 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	view.Groups = groupItems(result.Items)
-	view.PriceSortURL = sortURL(server, item, "price", sortBy, sortDir)
-	view.QtySortURL = sortURL(server, item, "qty", sortBy, sortDir)
+	// A varredura roda DEPOIS da ordenação e antes do agrupamento: se ela
+	// parar no meio, o que ficou verificado são os anúncios mais baratos.
+	facts, naoVerificados := h.scanItemFacts(r.Context(), result.Items, sq.ByRefine, sq.ByBonus)
+	if naoVerificados > 0 {
+		view.Aviso = avisoDeVarreduraIncompleta(naoVerificados, sq.ByRefine, sq.ByBonus)
+	}
+
+	view.Groups = groupItems(result.Items, facts, sq.ByRefine, sq.ByBonus)
+	view.PriceSortURL = sq.sortURL("price")
+	view.QtySortURL = sq.sortURL("qty")
 	view.PriceArrow = sortArrow(sortBy, sortDir, "price")
 	view.QtyArrow = sortArrow(sortBy, sortDir, "qty")
+	// As outras versões não têm seção nenhuma para separar, então os
+	// checkboxes não vão junto: seriam peso morto na URL.
 	view.VariantsURL = variantsURL(server, item, result.Items)
 	render(w, "results.html.tmpl", view)
 }
 
-// sortURL monta a URL de /web/search que reordena os resultados por column,
-// preservando servidor e termo buscado. Clicar de novo na mesma coluna já
-// ordenada inverte a direção; clicar em outra coluna começa em ordem
-// ascendente.
-func sortURL(server, item, column, currentSortBy, currentDir string) string {
-	dir := "asc"
-	if currentSortBy == column && currentDir == "asc" {
-		dir = "desc"
-	}
+// searchQuery são os parâmetros de uma busca. Existe como struct, e não como
+// lista de argumentos, porque com servidor, termo, coluna, direção e dois
+// booleanos seguidos, trocar dois deles de lugar numa chamada seria questão de
+// tempo.
+type searchQuery struct {
+	Server  string
+	Item    string
+	SortBy  string
+	SortDir string
+
+	// ByRefine e ByBonus ligam a varredura de detalhes (ver bonus.go).
+	ByRefine bool
+	ByBonus  bool
+}
+
+func (q searchQuery) values() url.Values {
 	v := url.Values{}
-	v.Set("server", server)
-	v.Set("item", item)
-	v.Set("sort", column)
-	v.Set("dir", dir)
-	return "/web/search?" + v.Encode()
+	v.Set("server", q.Server)
+	v.Set("item", q.Item)
+	v.Set("sort", q.SortBy)
+	v.Set("dir", q.SortDir)
+	if q.ByRefine {
+		v.Set("refine", "1")
+	}
+	if q.ByBonus {
+		v.Set("bonus", "1")
+	}
+	return v
+}
+
+// sortURL monta a URL de /web/search que reordena os resultados por column,
+// preservando servidor, termo buscado e a separação por refino/bônus. Clicar
+// de novo na mesma coluna já ordenada inverte a direção; clicar em outra
+// coluna começa em ordem ascendente.
+//
+// Carregar os checkboxes junto não é detalhe: o link substitui a tabela
+// inteira, e sem eles ela se desagruparia sozinha com as caixas ainda marcadas
+// na tela. E como a URL é montada a partir do que ESTA busca pediu — não do
+// estado atual do formulário —, quem marca o checkbox depois de buscar e clica
+// em "Preço" não dispara uma varredura de um minuto sem querer: para isso
+// precisa buscar de novo.
+func (q searchQuery) sortURL(column string) string {
+	next := q
+	next.SortBy = column
+	next.SortDir = "asc"
+	if q.SortBy == column && q.SortDir == "asc" {
+		next.SortDir = "desc"
+	}
+	return "/web/search?" + next.values().Encode()
 }
 
 // sortArrow devolve o indicador visual de direção para o cabeçalho de

@@ -98,8 +98,28 @@ function updateEntry(id, changes) {
   return list[idx];
 }
 
-function watchlistId(server, itemId) {
-  return server + ":" + itemId;
+// O id identifica a LINHA da watchlist, e é o que impede o mesmo clique de
+// criar duas. Quando a busca separa as seções por refino, cada seção acompanha
+// uma unidade diferente do mesmo item — a "+7" e a "+10" da mesma espada são
+// duas linhas legítimas —, então o refino entra no id.
+//
+// Sem refino fixado o id continua "server:itemId": as entradas gravadas antes
+// desta mudança seguem válidas, sem migração.
+//
+// É opaco e não muda depois de criado: editar o refino pela linha altera o
+// refineFilter, não o id.
+function watchlistId(server, itemId, refineFilter) {
+  if (refineFilter == null) return server + ":" + itemId;
+  return server + ":" + itemId + ":+" + refineFilter;
+}
+
+// parseRefineData lê o data-refine que o cabeçalho da seção emite quando a
+// busca separou os anúncios por refino. Ausente (a busca não verificou) é
+// diferente de "+0" (verificou, e a unidade não tem refino).
+function parseRefineData(raw) {
+  if (raw == null || raw === "") return null;
+  const parsed = Math.round(Number(raw));
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function cssEscape(value) {
@@ -126,16 +146,20 @@ function targetLabel(targetPrice) {
 // addToWatchlist é chamado pelo botão "+ Watchlist" das duas tabelas: a de
 // resultados da busca (results.html.tmpl) e a de histórico de um item fora do
 // mercado (history.html.tmpl). É o data-mode do botão que diz qual condição a
-// entrada vai acompanhar — ver MODE_PRICE e MODE_AVAILABILITY. O item é
-// identificado por server+itemId, então duplicar o clique não duplica a
-// entrada.
+// entrada vai acompanhar — ver MODE_PRICE e MODE_AVAILABILITY. A entrada é
+// identificada por server+itemId+refino, então duplicar o clique não duplica a
+// entrada, mas duas seções do mesmo item em refinos diferentes viram duas.
 function addToWatchlist(button) {
   const server = button.dataset.server;
   const itemId = button.dataset.itemId;
   const itemName = button.dataset.itemName;
   if (!server || !itemId || !itemName) return;
 
-  const id = watchlistId(server, itemId);
+  // Já vem fixado quando a seção representa um refino só: a linha nasce
+  // acompanhando aquela unidade, e não "a mais barata de qualquer refino".
+  const refineFilter = parseRefineData(button.dataset.refine);
+
+  const id = watchlistId(server, itemId, refineFilter);
   const list = loadWatchlist();
   if (list.some((entry) => entry.id === id)) return;
 
@@ -147,7 +171,7 @@ function addToWatchlist(button) {
     searchName: button.dataset.searchName || itemName,
     mode: button.dataset.mode === MODE_AVAILABILITY ? MODE_AVAILABILITY : MODE_PRICE,
     targetPrice: null,
-    refineFilter: null,
+    refineFilter,
     monitoring: true,
     notified: false,
   };

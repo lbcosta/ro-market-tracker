@@ -9,6 +9,10 @@
 <div class="results-header">
   <h2 class="results-title">Resultados de {{.Query}}</h2>
 </div>
+{{/* A busca deu certo e o que está na tabela é verdadeiro — só ficou
+     incompleto. Por isso um aviso, e não a mensagem de erro que substituiria
+     a tabela inteira. */}}
+{{if .Aviso}}<p class="results-aviso" role="note">{{.Aviso}}</p>{{end}}
 <table class="results-table">
   <thead>
     <tr>
@@ -37,10 +41,25 @@
                 loading="lazy" decoding="async" referrerpolicy="no-referrer"
                 onerror="this.remove()">{{end}}
             <span class="item-group-name">{{.ItemName}}</span>
+            {{if $.GroupByRefine}}
+              {{if not .RefineKnown}}<span class="group-chip group-chip-desconhecido">refino não verificado</span>
+              {{else if gt .Refine 0}}<span class="refine-badge">+{{.Refine}}</span>{{end}}
+            {{end}}
+            {{if $.GroupByBonus}}
+              {{if not .BonusKnown}}<span class="group-chip group-chip-desconhecido">bônus não verificados</span>
+              {{else if .Bonus}}{{range .Bonus}}<span class="bonus-chip">{{.}}</span>{{end}}
+              {{else}}<span class="group-chip">sem bônus</span>{{end}}
+            {{end}}
           </span>
+          {{/* data-refine só quando a seção de fato representa UM refino: é
+               ele que a watchlist passa a acompanhar, em vez de "o mais
+               barato de qualquer refino". Bônus não têm equivalente — o
+               endpoint de preço não filtra por eles, e filtrar custaria uma
+               consulta de detalhe por candidato a cada ciclo de 5 min. */}}
           <button type="button" class="watchlist-button"
               data-server="{{$.Server}}" data-item-id="{{.ItemID}}" data-item-name="{{.ItemName}}"
               data-search-name="{{.SearchName}}"
+              {{if and $.GroupByRefine .RefineKnown}}data-refine="{{.Refine}}"{{end}}
               onclick="addToWatchlist(this)">+ Watchlist</button>
         </div>
       </td>
