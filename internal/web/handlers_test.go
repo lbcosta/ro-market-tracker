@@ -275,6 +275,52 @@ func TestSearchMostraOSlotNoNomeDoItem(t *testing.T) {
 	)
 }
 
+// TestSearchMostraOIconeDoItem cobre o ícone no cabeçalho da seção. Ele sai
+// de graça: o campo já vem em cada anúncio da própria busca, e quem baixa a
+// imagem é o navegador, direto da CDN do GnJoy — nenhuma requisição a mais
+// passa pelo client (é o que o teste de custo abaixo garante).
+func TestSearchMostraOIconeDoItem(t *testing.T) {
+	srv, mock := newWebServer(t)
+
+	q := url.Values{"server": {"NIDHOGG"}, "item": {"Espada Primordial"}}
+	mock.ResetRequests()
+	_, html := getHTML(t, srv, "/web/search?"+q.Encode())
+
+	wantContains(t, html,
+		`class="item-icon"`,
+		// O ícone é o do primeiro anúncio da seção; todos são do mesmo
+		// item de catálogo, então qualquer um serviria.
+		`src="https://assets.example.invalid/s-primordial-129.png"`,
+	)
+	if got := mock.RequestCount(); got != 1 {
+		t.Errorf("busca custou %d requisições ao upstream, quero 1: o ícone não pode custar consulta", got)
+	}
+}
+
+// TestSearchSemIconeNaoRenderizaAImagem: com src vazio o navegador requisita a
+// URL do documento atual, e cada seção da tabela viraria um GET a mais na
+// própria página.
+func TestSearchSemIconeNaoRenderizaAImagem(t *testing.T) {
+	srv, mock := newWebServer(t)
+
+	// Sem DatabaseImgPath: é o caso do item que ainda não tem imagem no banco
+	// do site.
+	mock.SetSearch("Item Sem Ícone", gnjoytest.SearchResult{Items: []gnjoytest.ShopListItem{{
+		SvrId: 303, ItemId: 900001, MapId: 835, SSI: "sem-icone",
+		ItemName: "Item Sem Ícone", DatabaseType: "miscellaneous",
+		StoreName: "Vendinha do Zé", ItemPrice: 1000, ItemCnt: 1,
+		StoreTypeName: "BUY", ItemSellerCharName: "Zezinho",
+	}}})
+
+	q := url.Values{"server": {"NIDHOGG"}, "item": {"Item Sem Ícone"}}
+	_, html := getHTML(t, srv, "/web/search?"+q.Encode())
+
+	wantContains(t, html, `<span class="item-group-name">Item Sem Ícone</span>`)
+	if strings.Contains(html, "item-icon") {
+		t.Errorf("anúncio sem databaseImgPath não deveria renderizar <img>:\n%s", html)
+	}
+}
+
 // TestSearchSemResultados garante que uma busca sem nenhum anúncio nunca
 // renderize a tabela de mercado vazia: ela sai do caminho da busca e passa
 // para o histórico de preços do item (ver history_test.go).

@@ -27,7 +27,17 @@
     <tr class="item-group-row">
       <td colspan="4">
         <div class="item-group-header">
-          <span class="item-group-name">{{.ItemName}}</span>
+          <span class="item-group-label">
+            {{/* O "if" não é zelo: com src="" o navegador requisita a URL do
+                 documento atual, e cada seção da tabela viraria um GET a mais
+                 na própria página. O "onerror" cobre o item sem imagem no
+                 banco e a CDN fora do ar — sem ele sobraria o ícone quebrado
+                 empurrando o nome de lado. */}}
+            {{if .ImgPath}}<img class="item-icon" src="{{.ImgPath}}" alt="" width="24" height="24"
+                loading="lazy" decoding="async" referrerpolicy="no-referrer"
+                onerror="this.remove()">{{end}}
+            <span class="item-group-name">{{.ItemName}}</span>
+          </span>
           <button type="button" class="watchlist-button"
               data-server="{{$.Server}}" data-item-id="{{.ItemID}}" data-item-name="{{.ItemName}}"
               data-search-name="{{.SearchName}}"

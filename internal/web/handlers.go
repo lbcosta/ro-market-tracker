@@ -162,6 +162,12 @@ type resultsGroup struct {
 	// ("Selo de Loki [1]") não acharia anúncio nenhum.
 	SearchName string
 
+	// ImgPath é o ícone do item na CDN do GnJoy, que a própria busca já
+	// devolve em cada anúncio — mostrá-lo não custa requisição nenhuma a
+	// mais ao site, porque quem baixa a imagem é o navegador, direto da
+	// CDN, fora do rate limiter do client (ver gnjoy.ShopListItem).
+	ImgPath string
+
 	Items []gnjoy.ShopListItem
 }
 
@@ -182,6 +188,7 @@ func groupItems(items []gnjoy.ShopListItem) []resultsGroup {
 				ItemID:     it.ItemId,
 				ItemName:   it.DisplayName(),
 				SearchName: it.ItemName,
+				ImgPath:    it.DatabaseImgPath,
 			})
 		}
 		groups[i].Items = append(groups[i].Items, it)

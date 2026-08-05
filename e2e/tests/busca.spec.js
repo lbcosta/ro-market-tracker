@@ -66,6 +66,38 @@ test("buscar um item mostra a tabela de resultados", async ({ page }) => {
   await expect(linhas.first().locator(".expand-icon")).toHaveText("▸");
 });
 
+// O domínio das fixtures não resolve de propósito, e o ícone se remove sozinho
+// quando não carrega — então servir a imagem aqui não é conveniência, é a
+// única forma de exercitar o caminho em que ela carrega. O caso contrário tem
+// teste próprio logo abaixo.
+const PNG_1X1 = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+test("o cabeçalho de cada seção mostra o ícone do item", async ({ page }) => {
+  await page.route("**/assets.example.invalid/**", (route) =>
+    route.fulfill({ contentType: "image/png", body: PNG_1X1 }),
+  );
+
+  await buscar(page, "Espada Primordial");
+
+  const icone = page.locator(".item-group-row .item-icon");
+  await expect(icone).toBeVisible();
+  await expect(icone).toHaveAttribute("src", /assets\.example\.invalid/);
+});
+
+// Um ícone quebrado empurraria o nome do item de lado em toda seção da tabela
+// — e a URL vem do site, então basta a CDN cair para isso acontecer de verdade.
+test("o ícone que não carrega some em vez de quebrar o cabeçalho", async ({ page }) => {
+  await page.route("**/assets.example.invalid/**", (route) => route.abort());
+
+  await buscar(page, "Espada Primordial");
+
+  await expect(page.locator(".item-group-name").first()).toHaveText("Espada Primordial");
+  await expect(page.locator(".item-icon")).toHaveCount(0);
+});
+
 // As duas versões chegam do site com o mesmo itemName e só se distinguem pelo
 // campo de slots — sem juntá-los, a tabela mostrava "Selo de Loki" duas vezes,
 // sem nada que explicasse a diferença de preço entre as seções.
