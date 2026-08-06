@@ -68,6 +68,27 @@ func (l *ActivityLog) Snapshot() []ActivityEvent {
 	return out
 }
 
+// Reset limpa o histórico de atividade. Não publica nada aos assinantes já
+// conectados (o efeito é só no que uma conexão FUTURA vê no Snapshot) nem
+// mexe no contador de IDs — zerá-lo arriscaria uma chamada em voo antes do
+// reset publicar sua atualização final com um ID que já foi reusado por uma
+// chamada nova, depois do reset.
+//
+// Existe para os testes de navegador: cada teste zera o site falso e os
+// caches de consulta para começar do mesmo estado (ver ResetCaches em
+// internal/web/handlers.go) — sem isto, uma página recém-recarregada ainda
+// veria a última atividade do teste ANTERIOR como "a chamada atual" no
+// snapshot, uma fonte real de instabilidade nesses testes: se a atualização
+// da própria ação do teste atual demorasse ou se perdesse (o Subscribe
+// descarta atualizações para assinante lento — ver publish), o teste ficava
+// preso vendo esse resquício, sem como distinguir "ainda não chegou" de
+// "nunca vai chegar".
+func (l *ActivityLog) Reset() {
+	l.mu.Lock()
+	l.events = nil
+	l.mu.Unlock()
+}
+
 // Subscribe registra um canal que recebe cada atualização publicada a
 // partir de agora (não inclui o histórico — para isso, veja Snapshot). A
 // função devolvida deve ser chamada para liberar o canal quando o

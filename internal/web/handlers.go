@@ -130,7 +130,8 @@ func (h *Handler) warmupActionID() {
 }
 
 // ResetCaches trata POST /web/cache/reset e esvazia os caches de consulta do
-// frontend (busca de lojas, preços praticados e os memos de detalhe).
+// frontend (busca de lojas, preços praticados e os memos de detalhe) e o
+// histórico da barra de atividades.
 //
 // Existe para os testes de navegador (e2e): o servidor sobe uma vez para a
 // suíte inteira, e cada teste zera o site falso e o localStorage para
@@ -138,11 +139,19 @@ func (h *Handler) warmupActionID() {
 // o mercado que o teste anterior deixou cacheado. Fora dos testes é
 // inofensivo: o pior que a rota faz é a próxima consulta ir ao upstream de
 // verdade.
+//
+// A atividade entra na mesma limpeza pelo mesmo motivo: sem isto, a página
+// recém-recarregada de um teste via a última atividade do teste ANTERIOR
+// como "a chamada atual" (o ActivityLog é do processo inteiro, nunca
+// resetado sozinho) — se a atualização da própria ação do teste atual
+// demorasse ou se perdesse, ele ficava preso vendo esse resquício, sem como
+// saber se ainda ia chegar.
 func (h *Handler) ResetCaches(w http.ResponseWriter, r *http.Request) {
 	h.searchCache.reset()
 	h.marketPriceCache.reset()
 	h.storeDetailMemo.reset()
 	h.itemDetailMemo.reset()
+	h.client.Activity().Reset()
 	w.WriteHeader(http.StatusNoContent)
 }
 

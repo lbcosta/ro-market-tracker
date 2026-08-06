@@ -282,6 +282,37 @@ func TestResetCaches(t *testing.T) {
 	}
 }
 
+// TestResetCachesLimpaAAtividade cobre a mesma motivação de TestResetCaches,
+// para o histórico da barra de atividades: sem isto, uma conexão nova ao
+// stream (a de um teste de navegador seguinte, depois de recarregar a
+// página) veria a última atividade DESTE teste como "a chamada atual" — se a
+// atualização da própria ação do teste seguinte demorasse ou se perdesse,
+// ele ficaria preso vendo esse resquício.
+func TestResetCachesLimpaAAtividade(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	getHTML(t, srv, "/web/search?server=NIDHOGG&item=Espada")
+
+	resp, err := srv.Client().Post(srv.URL+"/web/cache/reset", "", nil)
+	if err != nil {
+		t.Fatalf("POST /web/cache/reset: %v", err)
+	}
+	resp.Body.Close()
+
+	events := openActivityStream(t, srv)
+	ev := nextEvent(t, events)
+	if ev.Name != "snapshot" {
+		t.Fatalf("primeiro evento = %q, quero \"snapshot\"", ev.Name)
+	}
+	var snapshot []activityEventView
+	if err := json.Unmarshal([]byte(ev.Data), &snapshot); err != nil {
+		t.Fatalf("snapshot inválido: %s", ev.Data)
+	}
+	if len(snapshot) != 0 {
+		t.Errorf("snapshot depois do reset tem %d evento(s), quero 0: a atividade de antes do reset vazou", len(snapshot))
+	}
+}
+
 // TestSearchReordenacaoServidaDoCache: clicar nos cabeçalhos de ordenação
 // refaz o GET /web/search com os mesmos servidor e termo — reordenar é
 // trabalho do processo, não motivo para outra ida ao upstream.

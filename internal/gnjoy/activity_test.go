@@ -125,6 +125,45 @@ func TestActivityLogSnapshotEhCopia(t *testing.T) {
 	}
 }
 
+// TestActivityLogReset é a garantia usada pelos testes de navegador (ver
+// ResetCaches em internal/web/handlers.go): sem isto, a página de um teste
+// via a última atividade do teste ANTERIOR como "a chamada atual" assim que
+// recarregava, uma fonte real de instabilidade.
+func TestActivityLogReset(t *testing.T) {
+	log := NewActivityLog(10)
+	log.begin(testLabels()).succeed()
+
+	log.Reset()
+
+	if got := log.Snapshot(); len(got) != 0 {
+		t.Fatalf("Snapshot após Reset = %d eventos, quero 0", len(got))
+	}
+}
+
+// TestActivityLogResetNaoReusaID: se o contador de IDs voltasse a 0, uma
+// chamada em voo ANTES do reset poderia publicar sua atualização final com
+// um ID que uma chamada NOVA, depois do reset, já tivesse tomado — e as duas
+// atualizações se misturariam num evento só.
+func TestActivityLogResetNaoReusaID(t *testing.T) {
+	log := NewActivityLog(10)
+	antiga := log.begin(testLabels()) // ID 1, ainda "em voo"
+
+	log.Reset()
+
+	nova := log.begin(testLabels()) // não pode reusar o ID 1
+	if nova.id == antiga.id {
+		t.Fatalf("chamada nova reusou o ID %d de uma chamada ainda em voo antes do reset", antiga.id)
+	}
+
+	antiga.succeed()
+	nova.succeed()
+
+	events := log.Snapshot()
+	if len(events) != 2 {
+		t.Fatalf("Snapshot = %d eventos, quero 2 (a antiga publica seu próprio ID, mesmo após o reset)", len(events))
+	}
+}
+
 func TestActivityLogSubscribe(t *testing.T) {
 	log := NewActivityLog(10)
 
