@@ -25,6 +25,25 @@ const MONITOR_INTERVAL_MS = 5 * 60 * 1000;
 // o site do jogo.
 const MONITOR_ITEM_SPACING_MS = 1000;
 
+// WATCHLIST_MAX_ITEMS é o teto de itens que a watchlist aceita.
+//
+// Cada item custa em geral UMA requisição por ciclo (a busca do preço; o
+// refino, quando fixado, fica memoizado no servidor depois da primeira vez e
+// não se repete — ver internal/web/watchlist.go). O ciclo consulta os itens
+// em série, espaçados por MONITOR_ITEM_SPACING_MS — de propósito, no mesmo
+// ritmo do rate limit padrão do site (1 req/s), para o cliente nunca
+// enfileirar mais rápido do que o servidor já pacifica sozinho.
+//
+// Uma watchlist grande o bastante para ocupar o CICLO INTEIRO (5 min) não
+// deixaria brecha nenhuma para o resto — uma busca, expandir uma linha, a
+// varredura de refino/bônus — sem ficar em fila atrás dela, ciclo após
+// ciclo, para sempre. O teto reserva para a watchlist só uma fração do
+// ciclo (1/6), o bastante para acompanhar uma lista grande sem virar o
+// consumo dominante da cota:
+//
+//   (MONITOR_INTERVAL_MS / 6) / MONITOR_ITEM_SPACING_MS = 50000 / 1000 = 50
+const WATCHLIST_MAX_ITEMS = 50;
+
 // Uma entrada da watchlist acompanha uma de duas condições, conforme de onde
 // ela foi adicionada:
 //
@@ -162,6 +181,16 @@ function addToWatchlist(button) {
   const id = watchlistId(server, itemId, refineFilter);
   const list = loadWatchlist();
   if (list.some((entry) => entry.id === id)) return;
+
+  // O teto existe para a watchlist nunca virar, sozinha, o consumo dominante
+  // da cota de consultas ao site (ver WATCHLIST_MAX_ITEMS) — e precisa de um
+  // aviso, não um clique silenciosamente ignorado: ao contrário do duplicado
+  // acima, aqui não há nenhuma linha já na tela que explique por que nada
+  // aconteceu.
+  if (list.length >= WATCHLIST_MAX_ITEMS) {
+    showToast("A watchlist já tem o máximo de " + WATCHLIST_MAX_ITEMS + " itens. Remova algum para adicionar outro.");
+    return;
+  }
 
   const entry = {
     id,

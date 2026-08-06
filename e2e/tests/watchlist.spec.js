@@ -223,6 +223,62 @@ test("arrastar continua funcionando com a watchlist expandida", async ({ page })
   ]);
 });
 
+// semearWatchlistCheia grava N entradas sintéticas direto no localStorage e
+// monta as linhas na tela à mão — não há 50 itens de catálogo distintos nas
+// fixtures do mock para chegar nesse estado clicando de verdade em cada um,
+// e recarregar a página faria renderWatchlist() sair buscando o preço das N
+// entradas sintéticas (uma por uma, no ritmo do rate limiter do ambiente de
+// teste), levando dezenas de segundos só para montar o cenário. O teste
+// quer exercitar o TETO, não o preço de itens que não existem.
+async function semearWatchlistCheia(page, quantidade) {
+  await page.evaluate((n) => {
+    const entradas = Array.from({ length: n }, (_, i) => ({
+      id: "NIDHOGG:" + (900000 + i),
+      server: "NIDHOGG",
+      itemId: 900000 + i,
+      itemName: "Item ficticio " + i,
+      searchName: "Item ficticio " + i,
+      mode: "price",
+      targetPrice: null,
+      refineFilter: null,
+      monitoring: false,
+      notified: false,
+    }));
+    localStorage.setItem("ro-market-tracker:watchlist", JSON.stringify(entradas));
+
+    const container = document.getElementById("watchlist-list");
+    container.innerHTML = "";
+    for (const entrada of entradas) container.appendChild(buildWatchlistRow(entrada));
+    updateEmptyState();
+  }, quantidade);
+}
+
+// O teto existe para a watchlist nunca virar, sozinha, o consumo dominante da
+// cota de consultas ao site — ver WATCHLIST_MAX_ITEMS em watchlist.js.
+test("a watchlist recusa passar de 50 itens, com aviso", async ({ page }) => {
+  await semearWatchlistCheia(page, 50);
+  await expect(page.locator(".watchlist-row")).toHaveCount(50);
+
+  await buscar(page, "Espada Primordial");
+  await clicarWatchlistDoItem(page, "Espada Primordial");
+
+  await expect(page.locator(".toast")).toContainText("máximo de 50 itens");
+  await expect(page.locator(".watchlist-row")).toHaveCount(50);
+});
+
+// Um item a menos que o teto: ainda cabe, e o quinquagésimo entra sem aviso
+// nenhum — a mensagem é só para quem esbarra no limite de verdade.
+test("o quinquagésimo item entra normalmente, sem aviso", async ({ page }) => {
+  await semearWatchlistCheia(page, 49);
+  await expect(page.locator(".watchlist-row")).toHaveCount(49);
+
+  await buscar(page, "Espada Primordial");
+  await clicarWatchlistDoItem(page, "Espada Primordial");
+
+  await expect(page.locator(".watchlist-row")).toHaveCount(50);
+  await expect(page.locator(".toast")).toHaveCount(0);
+});
+
 test("adicionar um item mostra o menor preço anunciado", async ({ page }) => {
   const linha = await adicionarEspadaPrimordial(page);
 

@@ -196,6 +196,13 @@ O QUE DÁ PARA FAZER NA PÁGINA
     O cronômetro no topo do painel mostra quanto falta para a próxima
     verificação automática. O botão ao lado dele verifica na hora.
 
+    A watchlist aceita no máximo 50 itens. É um limite de segurança: cada
+    item monitorado custa uma consulta ao site de tempos em tempos, e uma
+    lista grande demais faria essa checagem de fundo sozinha disputar boa
+    parte da cota de consultas com o que você está fazendo na hora — buscar,
+    abrir um anúncio. Ao chegar no limite, um aviso explica e nada é
+    adicionado; remova algum item para abrir espaço para outro.
+
     Importante: a watchlist fica salva no seu navegador, não em uma conta.
     Ela continua lá se você fechar e abrir de novo, mas é só nesse navegador
     e nesse computador. E os avisos só chegam com a página aberta.

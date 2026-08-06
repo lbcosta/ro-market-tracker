@@ -357,6 +357,17 @@ uma nova consulta de preço — o filtro mudou, o preço em cache não serve mai
 Adicionar um item novo busca o preço só dele (os demais já carregados não são
 recarregados).
 
+**Limite de 50 itens.** Cada item monitorado custa em geral uma requisição
+por ciclo (a busca do preço; o refino, uma vez descoberto, fica memoizado no
+servidor e não se repete). O ciclo consulta os itens em série, espaçados por
+`MONITOR_ITEM_SPACING_MS` (1s) — de propósito, no mesmo ritmo do rate limit
+padrão do site. Uma watchlist grande o bastante para ocupar o ciclo inteiro
+(5 min) não deixaria brecha para o resto — uma busca, expandir uma linha, a
+varredura de refino/bônus — sem enfileirar atrás dela, ciclo após ciclo. O
+teto reserva para a watchlist só 1/6 do ciclo: `(MONITOR_INTERVAL_MS / 6) /
+MONITOR_ITEM_SPACING_MS = 50`. Ao esbarrar nele, um toast explica e nada é
+adicionado.
+
 **Expandir o painel.** O botão "«"/"»" no cabeçalho (ao lado do cronômetro)
 esconde a coluna de resultados e faz a watchlist ocupar a largura inteira da
 página — útil para quem acompanha muitos itens; a grade de cartões
