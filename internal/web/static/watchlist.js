@@ -333,20 +333,28 @@ function startEditingRefine(span, id) {
 // inline do <head> precisa aplicá-lo antes da primeira pintura (a .page ainda
 // nem existe àquela altura), senão a tela salta do layout de duas colunas para
 // o de uma a cada carregamento. Ver index.html.tmpl.
+//
+// Duas fontes decidem esse atributo, com prioridades diferentes:
+//   1. Preferência salva (localStorage) — o usuário já clicou em "«"/"»"
+//      alguma vez. Vale sempre, até ele clicar de novo.
+//   2. Sem preferência salva, o padrão é expandida — o script do <head> já
+//      aplica isso, porque #results sempre começa vazio num carregamento
+//      novo. Recolhe sozinha assim que a primeira busca é enviada.
+// A distinção entre as duas é o que "não trava nele" quer dizer: o padrão
+// nunca é GRAVADO, então nunca vira uma preferência de verdade — só a
+// escolha explícita do botão é.
 const WATCHLIST_EXPANDIDA_KEY = "ro-market-tracker:watchlist-expandida";
 
 function watchlistExpandida() {
   return document.documentElement.dataset.watchlistExpandida === "1";
 }
 
-function aplicarExpansaoDaWatchlist(expandida) {
+// aplicarVisualExpansaoDaWatchlist muda a aparência (o atributo que o CSS lê,
+// e o rótulo/estado do botão) SEM gravar nada — nem o padrão de "sem
+// resultados ainda", nem o recolhimento automático ao buscar, viram
+// preferência.
+function aplicarVisualExpansaoDaWatchlist(expandida) {
   document.documentElement.dataset.watchlistExpandida = expandida ? "1" : "";
-  try {
-    localStorage.setItem(WATCHLIST_EXPANDIDA_KEY, expandida ? "1" : "0");
-  } catch {
-    // localStorage indisponível (modo privado): a troca vale para a sessão,
-    // só não sobrevive a um recarregamento — mesmo caso do tema.
-  }
 
   const botao = document.getElementById("watchlist-expand");
   if (!botao) return;
@@ -357,6 +365,54 @@ function aplicarExpansaoDaWatchlist(expandida) {
     "aria-label",
     expandida ? "Recolher a watchlist e mostrar os resultados" : "Expandir a watchlist sobre a área de resultados",
   );
+}
+
+// dispararAnimacaoDeTrocaDeLayout reinicia a animação de fade dos painéis que
+// trocam de lugar (ver .watchlist-layout-mudando no CSS). Só é chamada nas
+// trocas de verdade (clique manual, recolhimento automático ao buscar) — a
+// aplicação inicial no carregamento da página (DOMContentLoaded) usa
+// aplicarVisualExpansaoDaWatchlist sozinha, sem isto, para não fazer a tela
+// piscar num fade logo na primeira pintura, onde não há "troca" nenhuma.
+function dispararAnimacaoDeTrocaDeLayout() {
+  const page = document.querySelector(".page");
+  if (!page) return;
+  // Remove e força reflow antes de recolocar: sem isto, alternar duas vezes
+  // rápido (a classe já presente da vez anterior) não reinicia a animação —
+  // o navegador vê a mesma classe "adicionada" de novo e não dispara nada.
+  page.classList.remove("watchlist-layout-mudando");
+  void page.offsetWidth;
+  page.classList.add("watchlist-layout-mudando");
+}
+
+// aplicarExpansaoDaWatchlist é o clique manual no botão "«"/"»": muda a
+// aparência e GRAVA a escolha, que passa a valer em qualquer carregamento
+// futuro da página até o usuário clicar de novo (ver o comentário acima).
+function aplicarExpansaoDaWatchlist(expandida) {
+  aplicarVisualExpansaoDaWatchlist(expandida);
+  dispararAnimacaoDeTrocaDeLayout();
+  try {
+    localStorage.setItem(WATCHLIST_EXPANDIDA_KEY, expandida ? "1" : "0");
+  } catch {
+    // localStorage indisponível (modo privado): a troca vale para a sessão,
+    // só não sobrevive a um recarregamento — mesmo caso do tema.
+  }
+}
+
+// colapsarWatchlistParaNovaBusca recolhe a watchlist quando uma nova busca é
+// enviada, se ela estiver expandida — para dar espaço ao resultado. Chamada
+// pelo "htmx:beforeRequest" do formulário de busca, e não por um "submit"
+// comum: é o evento do próprio htmx, que dispara de forma confiável tanto
+// pelo clique na lupa quanto por Enter no campo, sem depender da ordem de
+// registro entre os dois listeners do mesmo elemento.
+//
+// NUNCA grava em localStorage — de propósito. Isto é uma reação a "agora tem
+// busca para mostrar", não uma escolha do usuário: se não houver preferência
+// salva, o próximo carregamento da página volta a mostrar a watchlist
+// expandida por padrão (ver o script do <head>).
+function colapsarWatchlistParaNovaBusca() {
+  if (!watchlistExpandida()) return;
+  aplicarVisualExpansaoDaWatchlist(false);
+  dispararAnimacaoDeTrocaDeLayout();
 }
 
 // --- reordenar a watchlist ---
@@ -867,9 +923,28 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const expandButton = document.getElementById("watchlist-expand");
   if (expandButton) {
-    // O atributo já veio aplicado pelo script do <head>; isto só acerta o
-    // rótulo e o aria-expanded do botão, que não existiam àquela altura.
-    aplicarExpansaoDaWatchlist(watchlistExpandida());
+    // Visual, não persistente: o atributo já veio aplicado pelo script do
+    // <head> (preferência salva, ou o padrão expandido de "sem resultados
+    // ainda" — ver o comentário acima de WATCHLIST_EXPANDIDA_KEY), e isto só
+    // acerta o rótulo e o aria-expanded do botão, que não existiam àquela
+    // altura. Usar a versão que GRAVA aqui transformaria o padrão em
+    // preferência permanente no primeiro carregamento de todo mundo.
+    aplicarVisualExpansaoDaWatchlist(watchlistExpandida());
     expandButton.addEventListener("click", () => aplicarExpansaoDaWatchlist(!watchlistExpandida()));
   }
+
+  // Uma nova busca precisa do espaço que a watchlist expandida está usando.
+  // Ver colapsarWatchlistParaNovaBusca.
+  const searchForm = document.querySelector(".search-form");
+  if (searchForm) searchForm.addEventListener("htmx:beforeRequest", colapsarWatchlistParaNovaBusca);
+
+  // Tira a classe da animação de troca de layout assim que ela termina — ver
+  // dispararAnimacaoDeTrocaDeLayout. Sem isto ela não atrapalharia nada (é só
+  // a presença da classe que dispara o @keyframes, remover e recolocar é o
+  // que reinicia), mas deixar a classe presa no elemento seria sujeira.
+  document.querySelector(".page")?.addEventListener("animationend", (ev) => {
+    if (ev.animationName === "watchlist-layout-fade") {
+      ev.currentTarget.classList.remove("watchlist-layout-mudando");
+    }
+  });
 });

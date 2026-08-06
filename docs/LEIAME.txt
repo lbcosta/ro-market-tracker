@@ -188,7 +188,10 @@ O QUE DÁ PARA FAZER NA PÁGINA
       - Expandir o painel: o botão "«" no topo, ao lado do cronômetro,
         esconde os resultados da busca e faz a watchlist ocupar a página
         inteira — útil quando você acompanha muitos itens. O "»" volta ao
-        normal. A escolha fica salva.
+        normal. A escolha fica salva; enquanto você não clica em nenhum dos
+        dois, o painel já aparece expandido sempre que ainda não há nenhum
+        resultado de busca na tela, e recolhe sozinho assim que você busca
+        algo.
 
     O cronômetro no topo do painel mostra quanto falta para a próxima
     verificação automática. O botão ao lado dele verifica na hora.

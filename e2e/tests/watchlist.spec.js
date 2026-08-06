@@ -99,6 +99,42 @@ test("reordenar não custa nenhuma consulta ao site", async ({ page, request }) 
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
 });
 
+// Sem nenhuma busca ainda, não há por que reservar a coluna de resultados —
+// ela está vazia. A watchlist aparece expandida por padrão, sem que ninguém
+// precise clicar em nada.
+test("sem busca ainda, a watchlist aparece expandida por padrão", async ({ page }) => {
+  await expect(page.locator("html")).toHaveAttribute("data-watchlist-expandida", "1");
+  await expect(page.locator(".results-column")).toBeHidden();
+  await expect(page.locator("#watchlist-expand")).toHaveAttribute("aria-expanded", "true");
+});
+
+// "Não trava nele": o padrão nunca é gravado. Buscar recolhe a watchlist para
+// mostrar o resultado, e um NOVO carregamento (sem localStorage) volta ao
+// padrão expandido de novo — não veio a virar uma preferência permanente.
+test("buscar recolhe a watchlist expandida por padrão, e o padrão não gruda", async ({ page }) => {
+  await expect(page.locator("html")).toHaveAttribute("data-watchlist-expandida", "1");
+
+  await buscar(page, "Espada Primordial");
+  await expect(page.locator("html")).not.toHaveAttribute("data-watchlist-expandida", "1");
+  await expect(page.locator(".results-table")).toBeVisible();
+
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("data-watchlist-expandida", "1");
+});
+
+// Uma preferência explícita (o usuário já clicou no botão) vale sobre o
+// padrão de "sem resultados ainda" — diferente do padrão, ela sobrevive a
+// qualquer recarregamento, resultado ou não.
+test("recolher manualmente persiste mesmo sem nenhuma busca", async ({ page }) => {
+  await expect(page.locator("html")).toHaveAttribute("data-watchlist-expandida", "1");
+
+  await page.click("#watchlist-expand");
+  await expect(page.locator("html")).not.toHaveAttribute("data-watchlist-expandida", "1");
+
+  await page.reload();
+  await expect(page.locator("html")).not.toHaveAttribute("data-watchlist-expandida", "1");
+});
+
 // Quem acompanha muitos itens tem a coluna de 300px como gargalo. Expandir dá
 // a área de conteúdo inteira à watchlist, e os resultados saem do caminho.
 test("expandir a watchlist esconde os resultados e sobrevive a recarregar", async ({ page }) => {
@@ -120,6 +156,52 @@ test("expandir a watchlist esconde os resultados e sobrevive a recarregar", asyn
   await page.click("#watchlist-expand");
   await expect(page.locator("html")).not.toHaveAttribute("data-watchlist-expandida", "1");
   await expect(page.locator("#watchlist-expand")).toHaveAttribute("aria-expanded", "false");
+});
+
+// grid-template-areas não pode ser interpolado por nenhum navegador — a troca
+// de layout é sempre um corte seco. A animação é um fade nos painéis,
+// disparado por uma classe transitória em .page; sem isso alternar rápido dá
+// a impressão de "pulo" na tela.
+test("expandir/recolher dispara a animação de troca e limpa a classe sozinha", async ({ page }) => {
+  await adicionarEspadaPrimordial(page); // buscar() já recolhe: termina com a watchlist comprimida
+
+  const pagina = page.locator(".page");
+  const html = page.locator("html");
+  await expect(pagina).not.toHaveClass(/watchlist-layout-mudando/);
+  await expect(html).not.toHaveAttribute("data-watchlist-expandida", "1");
+
+  // Expandir manualmente dispara a animação...
+  await page.click("#watchlist-expand");
+  await expect(pagina).toHaveClass(/watchlist-layout-mudando/);
+  // ...e ela some sozinha quando termina (ver o "animationend" em
+  // watchlist.js), sem precisar de mais nenhuma interação.
+  await expect(pagina).not.toHaveClass(/watchlist-layout-mudando/, { timeout: 2_000 });
+  await expect(html).toHaveAttribute("data-watchlist-expandida", "1");
+
+  // Com a watchlist expandida, uma nova busca a recolhe automaticamente — e
+  // essa troca também anima. A checagem vem ANTES de esperar a resposta
+  // chegar: a viagem até o mock (mesmo local) já é mais longa que os 180ms da
+  // animação, e por essa altura a classe já teria sumido sozinha.
+  await page.fill('input[name="item"]', "Espada Primordial");
+  await page.click(".search-button");
+  await expect(pagina).toHaveClass(/watchlist-layout-mudando/);
+
+  await page.waitForSelector(".results-table");
+  await expect(pagina).not.toHaveClass(/watchlist-layout-mudando/, { timeout: 2_000 });
+  await expect(html).not.toHaveAttribute("data-watchlist-expandida", "1");
+});
+
+// Quem pediu menos movimento ao sistema operacional não pediu para ver menos
+// informação — só para não ver ela se mexendo.
+test("a animação de troca respeita prefers-reduced-motion", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await adicionarEspadaPrimordial(page);
+
+  await page.click("#watchlist-expand");
+  const nomeDaAnimacao = await page
+    .locator(".watchlist-panel")
+    .evaluate((el) => getComputedStyle(el).animationName);
+  expect(nomeDaAnimacao).toBe("none");
 });
 
 // A watchlist expandida dispõe as linhas em grade, e é por isso que o alvo do

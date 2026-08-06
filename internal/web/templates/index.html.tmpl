@@ -20,7 +20,16 @@
         // página inteira, e aplicá-la depois faria a tela saltar do layout
         // de duas colunas para o de uma a cada carregamento. Vai no <html>
         // porque a .page ainda não existe quando este script roda.
-        if (localStorage.getItem("ro-market-tracker:watchlist-expandida") === "1") {
+        //
+        // Sem preferência salva, o padrão é expandida: um carregamento novo
+        // da página sempre começa com #results vazio (nenhuma busca ainda
+        // foi enviada nesta instância), então não há por que reservar aquele
+        // espaço para uma tabela que ainda não existe. Isso NÃO é gravado
+        // aqui — é só o padrão até a primeira busca, que recolhe a watchlist
+        // sozinha (ver watchlist.js); uma preferência explícita (o usuário já
+        // clicou no botão "«"/"»" alguma vez) sempre vale sobre esse padrão.
+        var watchlistPref = localStorage.getItem("ro-market-tracker:watchlist-expandida");
+        if (watchlistPref === "1" || watchlistPref === null) {
           document.documentElement.dataset.watchlistExpandida = "1";
         }
       } catch (e) {}

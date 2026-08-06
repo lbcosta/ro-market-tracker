@@ -153,6 +153,42 @@ body {
   display: none;
 }
 
+/* Anima a troca entre os dois layouts (expandido ↔ comprimido). O que muda de
+   verdade é grid-template-areas, e nenhum navegador interpola nomes de área —
+   é tudo ou nada, de um frame para o outro. Por isso a animação não é do grid
+   em si: é um fade com um leve deslocamento nos DOIS painéis que trocam de
+   lugar (.results-column ao recolher, .watchlist-panel sempre), disparado
+   pelo JS bem no instante em que o atributo muda (ver
+   dispararAnimacaoDeTrocaDeLayout em watchlist.js). Sem isso, alternar rápido
+   dava a impressão de "pulo" na tela — é o oposto do que "leve" pede aqui:
+   pesado seria animar o grid inteiro tentando disfarçar um corte que o
+   navegador não sabe suavizar. */
+@keyframes watchlist-layout-fade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.watchlist-layout-mudando .results-column,
+.watchlist-layout-mudando .watchlist-panel {
+  animation: watchlist-layout-fade 0.18s ease-out;
+}
+
+/* Quem pediu menos movimento no sistema operacional não pediu para ver menos
+   informação — só para não ver ela se mexendo. A troca continua instantânea,
+   só sem a transição visual. */
+@media (prefers-reduced-motion: reduce) {
+  .watchlist-layout-mudando .results-column,
+  .watchlist-layout-mudando .watchlist-panel {
+    animation: none;
+  }
+}
+
 .page-header {
   grid-area: title;
   display: flex;

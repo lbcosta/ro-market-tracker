@@ -357,6 +357,29 @@ uma nova consulta de preço — o filtro mudou, o preço em cache não serve mai
 Adicionar um item novo busca o preço só dele (os demais já carregados não são
 recarregados).
 
+**Expandir o painel.** O botão "«"/"»" no cabeçalho (ao lado do cronômetro)
+esconde a coluna de resultados e faz a watchlist ocupar a largura inteira da
+página — útil para quem acompanha muitos itens; a grade de cartões
+resultante usa o espaço bem melhor que uma coluna de 300px. A escolha fica
+salva em `localStorage` e é reaplicada antes da primeira pintura (o mesmo
+truque do tema, para não saltar de layout a cada carregamento).
+
+Sem nenhuma escolha salva ainda, o painel aparece expandido por padrão
+sempre que a área de resultados está vazia (todo carregamento novo da
+página começa assim, já que nenhuma busca foi enviada ainda) — não há por
+que reservar espaço para uma tabela que não existe. Isso não é uma
+preferência gravada, só um padrão: a primeira busca enviada recolhe a
+watchlist sozinha (via o evento `htmx:beforeRequest` do formulário), e um
+próximo carregamento sem busca volta a mostrar o painel expandido. Uma
+preferência explícita (o usuário já clicou no botão alguma vez) sempre vale
+sobre esse padrão, buscas ou não.
+
+Como a troca de layout reorganiza `grid-template-areas` — algo que nenhum
+navegador sabe interpolar entre um estado e outro —, a transição entre os
+dois modos ganha um fade curto (0.18s) nos painéis que trocam de lugar, via
+uma classe transitória (`watchlist-layout-mudando`) que o próprio evento
+`animationend` remove ao final; respeita `prefers-reduced-motion`.
+
 #### Acompanhar preço ou acompanhar disponibilidade
 
 Uma entrada acompanha uma de duas condições, conforme de qual tabela ela foi
