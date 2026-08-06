@@ -26,10 +26,18 @@ func isEquipment(databaseType string) bool {
 	return databaseType == "weapon" || databaseType == "armor"
 }
 
-// storeKey identifica um anúncio no refineMemo por (svrId, mapId, ssi) — o
-// "endereço" completo da loja, o mesmo trio que as rotas de detalhe usam.
+// locationKey identifica um anúncio nos memos de detalhe (storeDetailMemo,
+// itemDetailMemo) por (svrId, mapId, ssi) — o "endereço" completo da loja, o
+// mesmo trio que as rotas de detalhe usam.
+func locationKey(loc gnjoy.StoreLocation) string {
+	return cacheKey(strconv.Itoa(loc.SvrId), strconv.Itoa(loc.MapId), loc.SSI)
+}
+
+// storeKey é locationKey a partir de um ShopListItem já em mãos (o formato em
+// que a busca e a watchlist carregam um anúncio), sem precisar montar um
+// StoreLocation à parte.
 func storeKey(item gnjoy.ShopListItem) string {
-	return cacheKey(strconv.Itoa(item.SvrId), strconv.Itoa(item.MapId), item.SSI)
+	return locationKey(gnjoy.StoreLocation{SvrId: item.SvrId, MapId: item.MapId, SSI: item.SSI})
 }
 
 // WatchlistPrice trata GET /web/watchlist/price e devolve, em JSON, o preço
@@ -122,23 +130,23 @@ func (h *Handler) WatchlistPrice(w http.ResponseWriter, r *http.Request) {
 // ciclos em vez de custar dezenas de chamadas em cada um.
 const maxRefineDetailFetches = 8
 
-// fetchStoreRefine consulta o refino de uma loja no upstream e o memoiza.
-// NoRetry: isto roda dentro de uma checagem da watchlist, que tem repetição
-// própria — se o site está pedindo calma, desistir é o certo.
+// fetchStoreRefine consulta o detalhe de uma loja — do memo compartilhado ou
+// do upstream (ver Handler.storeDetail) — e devolve o refino. NoRetry: isto
+// roda dentro de uma checagem da watchlist, que tem repetição própria — se o
+// site está pedindo calma, desistir é o certo.
 //
 // O erro sai junto do valor porque a varredura da busca (ver bonus.go) precisa
 // distinguir "consultei e não deu certo" de "o site parou de responder": lá,
 // ao contrário daqui, o primeiro erro aborta o resto da varredura.
 func (h *Handler) fetchStoreRefine(ctx context.Context, item gnjoy.ShopListItem) (int, error) {
 	loc := gnjoy.StoreLocation{SvrId: item.SvrId, MapId: item.MapId, SSI: item.SSI}
-	detail, err := h.client.GetStoreDetail(ctx, loc, gnjoy.NoRetry())
+	detail, err := h.storeDetail(ctx, loc, gnjoy.NoRetry())
 	if err != nil {
 		// Debug, e não Warn: uma varredura de busca com o site instável
 		// geraria uma linha destas por anúncio.
 		slog.Debug("web: não foi possível obter o refino de um anúncio", "error", err)
 		return 0, err
 	}
-	h.refineMemo.put(storeKey(item), detail.Refine)
 	return detail.Refine, nil
 }
 
@@ -149,8 +157,8 @@ func (h *Handler) fetchStoreRefine(ctx context.Context, item gnjoy.ShopListItem)
 // candidato não foi descartado, só ficou para um próximo ciclo. known falso
 // significa que a consulta foi feita e não deu certo.
 func (h *Handler) lookupRefine(r *http.Request, item gnjoy.ShopListItem, budget *int) (refine int, known, affordable bool) {
-	if refine, ok := h.refineMemo.peek(storeKey(item)); ok {
-		return refine, true, true
+	if detail, ok := h.storeDetailMemo.peek(storeKey(item)); ok {
+		return detail.Refine, true, true
 	}
 	if *budget == 0 {
 		return 0, false, false

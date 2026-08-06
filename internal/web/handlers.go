@@ -32,14 +32,21 @@ type Handler struct {
 	searchCache      *ttlCache[*gnjoy.ShopSearchResult]
 	marketPriceCache *ttlCache[*gnjoy.MarketPriceResult]
 
-	// refineMemo memoiza o refino de cada loja por (svrId, mapId, ssi), e
-	// bonusMemo os bônus aleatórios pela mesma chave. Nem um nem outro mudam
-	// para um mesmo ssi (a loja fechada e reaberta ganha um ssi novo), então
-	// cada loja custa no máximo UMA consulta de cada na vida do processo — é
-	// o que desarma o custo N+1 da watchlist com refino fixado (ver
-	// watchlist.go) e o da busca separada por refino/bônus (ver bonus.go).
-	refineMemo *ttlCache[int]
-	bonusMemo  *ttlCache[[]string]
+	// storeDetailMemo e itemDetailMemo cacheiam o detalhe COMPLETO de um
+	// anúncio por (svrId, mapId, ssi) — não só o refino ou os bônus extraídos
+	// dele. O detalhe nunca muda para um mesmo ssi (a loja fechada e reaberta
+	// ganha um ssi novo), então cada anúncio custa no máximo UMA consulta de
+	// cada na vida do processo, e essa consulta é COMPARTILHADA entre todo
+	// caminho que precisa dela: a varredura de refino/bônus da busca
+	// (bonus.go), o orçamento da watchlist (watchlist.go) e o card de
+	// detalhe ao expandir uma linha (Expand, abaixo). Antes de existirem
+	// estes dois memos, cada um desses três caminhos guardava só o valor
+	// derivado (o int do refino, a lista de bônus) em caches separados — e
+	// clicar para expandir uma linha já verificada pela varredura refazia as
+	// duas consultas do zero, porque não havia onde procurar o detalhe
+	// completo que o Expand precisa (nome da loja, vendedor, localização...).
+	storeDetailMemo *ttlCache[*gnjoy.StoreDetail]
+	itemDetailMemo  *ttlCache[*gnjoy.ItemDetail]
 }
 
 func NewHandler(client *gnjoy.Client) *Handler {
@@ -47,8 +54,8 @@ func NewHandler(client *gnjoy.Client) *Handler {
 		client:           client,
 		searchCache:      newTTLCache[*gnjoy.ShopSearchResult](searchCacheSize),
 		marketPriceCache: newTTLCache[*gnjoy.MarketPriceResult](marketPriceCacheSize),
-		refineMemo:       newTTLCache[int](refineMemoSize),
-		bonusMemo:        newTTLCache[[]string](bonusMemoSize),
+		storeDetailMemo:  newTTLCache[*gnjoy.StoreDetail](storeDetailMemoSize),
+		itemDetailMemo:   newTTLCache[*gnjoy.ItemDetail](itemDetailMemoSize),
 	}
 }
 
@@ -110,7 +117,7 @@ func (h *Handler) warmupActionID() {
 }
 
 // ResetCaches trata POST /web/cache/reset e esvazia os caches de consulta do
-// frontend (busca de lojas, preços praticados e os memos de refino e bônus).
+// frontend (busca de lojas, preços praticados e os memos de detalhe).
 //
 // Existe para os testes de navegador (e2e): o servidor sobe uma vez para a
 // suíte inteira, e cada teste zera o site falso e o localStorage para
@@ -121,8 +128,8 @@ func (h *Handler) warmupActionID() {
 func (h *Handler) ResetCaches(w http.ResponseWriter, r *http.Request) {
 	h.searchCache.reset()
 	h.marketPriceCache.reset()
-	h.refineMemo.reset()
-	h.bonusMemo.reset()
+	h.storeDetailMemo.reset()
+	h.itemDetailMemo.reset()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -439,27 +446,68 @@ type expandView struct {
 	Stats       sevenDayStats
 }
 
+// storeDetail devolve o detalhe completo de um anúncio, do memo ou do
+// upstream — e o memoiza para os PRÓXIMOS caminhos que precisarem dele,
+// venham eles de onde vierem. É o que faz uma loja já verificada pela
+// varredura de refino da busca (bonus.go) ou pelo orçamento da watchlist
+// (watchlist.go) não custar uma segunda consulta quando a mesma linha é
+// expandida logo em seguida — e vice-versa.
+func (h *Handler) storeDetail(ctx context.Context, loc gnjoy.StoreLocation, opts ...gnjoy.CallOption) (*gnjoy.StoreDetail, error) {
+	key := locationKey(loc)
+	if detail, ok := h.storeDetailMemo.peek(key); ok {
+		return detail, nil
+	}
+	detail, err := h.client.GetStoreDetail(ctx, loc, opts...)
+	if err != nil {
+		return nil, err
+	}
+	h.storeDetailMemo.put(key, detail)
+	return detail, nil
+}
+
+// itemDetail é o equivalente de storeDetail para o detalhe do item — sempre
+// no idioma itemLang, porque é dele que saem os bônus aleatórios mostrados no
+// card de detalhe, como frases prontas; em outro idioma, destoariam do resto
+// da página.
+func (h *Handler) itemDetail(ctx context.Context, loc gnjoy.StoreLocation, opts ...gnjoy.CallOption) (*gnjoy.ItemDetail, error) {
+	key := locationKey(loc)
+	if detail, ok := h.itemDetailMemo.peek(key); ok {
+		return detail, nil
+	}
+	detail, err := h.client.GetItemDetail(ctx, loc, itemLang, opts...)
+	if err != nil {
+		return nil, err
+	}
+	h.itemDetailMemo.put(key, detail)
+	return detail, nil
+}
+
 // Expand trata GET /web/shops/{svrId}/{mapId}/{ssi}/expand: busca o detalhe
 // da loja, o detalhe do item e os últimos 7 dias de histórico de preço, e
 // devolve o card HTML que o HTMX encaixa na linha de detalhe abaixo do item
 // clicado.
+//
+// Loja e item passam por storeDetail/itemDetail (memoizados), não por uma
+// chamada direta ao client: se a busca já tiver verificado refino e/ou bônus
+// desse anúncio (checkboxes "Verificar refino"/"Verificar bônus aleatórios"),
+// as duas consultas já aconteceram, e expandir a linha reaproveita o que já
+// foi pago em vez de refazê-las. O histórico de preço continua sempre fresco
+// — não há como esse dado ficar desatualizado de propósito, e ele nunca é
+// buscado por nenhum outro caminho.
 func (h *Handler) Expand(w http.ResponseWriter, r *http.Request) {
 	loc, ok := parseLocation(w, r)
 	if !ok {
 		return
 	}
 
-	store, err := h.client.GetStoreDetail(r.Context(), loc)
+	store, err := h.storeDetail(r.Context(), loc)
 	if err != nil {
 		slog.Error("web: detalhe da loja falhou", "error", err)
 		render(w, "expand.html.tmpl", expandView{Error: "Não foi possível carregar os detalhes dessa loja agora."})
 		return
 	}
 
-	// itemLang, e não o padrão do client: é deste detalhe que saem os bônus
-	// aleatórios mostrados no card, e eles vêm como frases prontas no idioma
-	// pedido — em inglês, destoariam do resto da página.
-	item, err := h.client.GetItemDetail(r.Context(), loc, itemLang)
+	item, err := h.itemDetail(r.Context(), loc)
 	if err != nil {
 		slog.Error("web: detalhe do item falhou", "error", err)
 		render(w, "expand.html.tmpl", expandView{Error: "Não foi possível carregar os detalhes desse item agora."})

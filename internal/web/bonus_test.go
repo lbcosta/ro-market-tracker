@@ -146,6 +146,58 @@ func TestVarreduraReusaOsMemos(t *testing.T) {
 	}
 }
 
+// TestExpandirReusaODetalheJaVerificadoPelaVarredura é a garantia de que a
+// varredura e o card de detalhe não pagam duas vezes pelo mesmo anúncio: com
+// os checkboxes ligados, GetStoreDetail e GetItemDetail de cada anúncio já
+// foram consultados durante a busca — expandir a linha em seguida só falta
+// buscar o histórico de preço, que nenhum outro caminho busca.
+func TestExpandirReusaODetalheJaVerificadoPelaVarredura(t *testing.T) {
+	srv, mock := newWebServer(t)
+
+	buscarComVarredura(t, srv, "Espada Primordial", true, true)
+
+	mock.ResetRequests()
+	_, html := getHTML(t, srv, "/web/shops/303/835/s-primordial-158/expand")
+
+	wantContains(t, html, `class="refine-badge">+7`, "CRIT &#43;4", "ATQ &#43;3%")
+	if got := mock.RequestCount(); got != 1 {
+		t.Errorf("expandir custou %d requisições, quero 1 (só o histórico de preço): loja e item já tinham sido verificados pela varredura", got)
+	}
+}
+
+// TestExpandirSemVarreduraContinuaCustandoAsTres garante que a memoização não
+// vira um atalho: sem a varredura ter passado por ali, expandir uma linha
+// pela primeira vez continua fazendo as três consultas de sempre.
+func TestExpandirSemVarreduraContinuaCustandoAsTres(t *testing.T) {
+	srv, mock := newWebServer(t)
+
+	mock.ResetRequests()
+	_, html := getHTML(t, srv, "/web/shops/303/835/s-primordial-158/expand")
+
+	wantContains(t, html, `class="refine-badge">+7`)
+	if got := mock.RequestCount(); got != 3 {
+		t.Errorf("expandir custou %d requisições, quero 3 (loja, item, histórico)", got)
+	}
+}
+
+// TestWatchlistReusaODetalheAoExpandir: o orçamento da watchlist com refino
+// fixado também alimenta o memo compartilhado — expandir uma linha que a
+// watchlist já consultou não deveria refazer a parte de loja/item.
+func TestWatchlistReusaODetalheAoExpandir(t *testing.T) {
+	srv, mock := newWebServer(t)
+
+	q := url.Values{"server": {"NIDHOGG"}, "item": {"Espada Primordial"}, "itemId": {"600009"}, "refine": {"7"}}
+	getHTML(t, srv, "/web/watchlist/price?"+q.Encode())
+
+	mock.ResetRequests()
+	_, html := getHTML(t, srv, "/web/shops/303/835/s-primordial-158/expand")
+
+	wantContains(t, html, `class="refine-badge">+7`)
+	if got := mock.RequestCount(); got != 2 {
+		t.Errorf("expandir custou %d requisições, quero 2 (item + histórico: a watchlist só verifica refino, não bônus)", got)
+	}
+}
+
 // TestVarreduraPulaOQueNuncaTemRefino: carta, consumível e material nunca têm
 // refino nem bônus. Numa busca ampla isso é metade dos resultados, e cada
 // consulta poupada é uma a menos contra o limite do site.

@@ -379,6 +379,25 @@ test("recolher e reexpandir não refaz a consulta ao mercado", async ({ page, re
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
 });
 
+// Com "Verificar refino"/"Verificar bônus aleatórios" marcados, a busca já
+// pagou a consulta de loja e de item de cada anúncio — expandir a linha em
+// seguida só falta buscar o histórico de preço, que nenhum outro caminho
+// busca.
+test("expandir uma linha já verificada pela varredura não refaz loja nem item", async ({ page, request }) => {
+  await buscar(page, "Espada Primordial", { refino: true, bonus: true });
+
+  const linha = page.locator(".item-row").nth(1); // a +7, 158 milhões
+  await zerarContagemDoUpstream(request);
+  await linha.click();
+
+  const card = page.locator(".detail-card").first();
+  await expect(card).toContainText("Bônus aleatórios");
+  await expect(card.locator(".refine-badge")).toHaveText("+7");
+
+  // Só a consulta de histórico, que a varredura nunca faz.
+  expect(await contarRequisicoesAoUpstream(request)).toBe(1);
+});
+
 test("o botão de localização copia o comando /navi", async ({ page }) => {
   await buscar(page, "Espada");
   await page.locator(".item-row").first().click();

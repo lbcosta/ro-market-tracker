@@ -64,38 +64,24 @@ func bonusKey(bonus []string) string {
 	return strings.Join(ordenados, "\x1f")
 }
 
-// lookupBonus devolve os bônus aleatórios de um anúncio, do memo ou do
-// upstream. Como o refino, eles nunca mudam para um mesmo ssi (a loja fechada e
-// reaberta ganha um ssi novo), então cada anúncio custa no máximo UMA consulta
-// na vida do processo.
+// lookupBonus devolve os bônus aleatórios de um anúncio — do memo
+// compartilhado ou do upstream (ver Handler.itemDetail). Como o refino, eles
+// nunca mudam para um mesmo ssi (a loja fechada e reaberta ganha um ssi
+// novo), então cada anúncio custa no máximo UMA consulta na vida do processo,
+// dividida com o card de detalhe caso a linha seja expandida depois.
 func (h *Handler) lookupBonus(ctx context.Context, item gnjoy.ShopListItem) ([]string, error) {
-	if bonus, ok := h.bonusMemo.peek(storeKey(item)); ok {
-		// Clone: peek devolve a fatia guardada, e quem chama a repassa ao
-		// template — o mesmo cuidado que cachedSearchShops toma com a lista
-		// de anúncios.
-		return slices.Clone(bonus), nil
-	}
 	loc := gnjoy.StoreLocation{SvrId: item.SvrId, MapId: item.MapId, SSI: item.SSI}
-	// itemLang: os bônus vêm como frases prontas no idioma pedido, e são elas
-	// que aparecem no cabeçalho da seção (ver handlers.go).
-	detail, err := h.client.GetItemDetail(ctx, loc, itemLang, gnjoy.NoRetry())
+	// NoRetry: isto roda dentro da varredura da busca, que aborta no primeiro
+	// erro em vez de insistir (ver scanItemFacts).
+	detail, err := h.itemDetail(ctx, loc, gnjoy.NoRetry())
 	if err != nil {
 		slog.Debug("web: não foi possível obter os bônus de um anúncio", "error", err)
 		return nil, err
 	}
-	bonus := detail.RandomOptions()
-	h.bonusMemo.put(storeKey(item), bonus)
-	return slices.Clone(bonus), nil
-}
-
-// lookupRefineFact devolve o refino de um anúncio, do memo ou do upstream. É o
-// caminho da busca, sem o orçamento por ciclo que a watchlist usa: aqui quem
-// ligou o checkbox pediu a varredura inteira (ver o aviso na tela de busca).
-func (h *Handler) lookupRefineFact(ctx context.Context, item gnjoy.ShopListItem) (int, error) {
-	if refine, ok := h.refineMemo.peek(storeKey(item)); ok {
-		return refine, nil
-	}
-	return h.fetchStoreRefine(ctx, item)
+	// RandomOptions monta uma fatia nova a cada chamada a partir dos
+	// ponteiros já decodificados no ItemDetail — não há nada compartilhado
+	// para clonar aqui, ao contrário de quando o memo guardava só a fatia.
+	return detail.RandomOptions(), nil
 }
 
 // scanItemFacts descobre refino e/ou bônus de cada anúncio, conforme os
@@ -149,7 +135,7 @@ func (h *Handler) scanItemFacts(ctx context.Context, items []gnjoy.ShopListItem,
 		if wantRefine {
 			if !equipamento {
 				f.RefineKnown = true
-			} else if refine, err := h.lookupRefineFact(ctx, it); err == nil {
+			} else if refine, err := h.fetchStoreRefine(ctx, it); err == nil {
 				f.Refine, f.RefineKnown = refine, true
 			} else {
 				abortada = true
