@@ -490,8 +490,12 @@ Por isso o binário sobe com `gnjoy.WithSuspendOn429()`. Com ela, o **primeiro**
 
 - As chamadas seguintes falham na saída com `gnjoy.ErrSuspended`, sem tocar no
   site — e o retry da chamada que tomou o `429` é cortado junto.
-- A tela mostra um aviso fixo no topo e desliga a busca e a watchlist. O
-  estado chega ao navegador pelo mesmo stream SSE da barra de atividades, como
+- A tela mostra um aviso fixo no topo e desliga a busca e a watchlist —
+  inclusive o cronômetro dela, que some (`--:--`) em vez de continuar
+  contando: um cronômetro correndo normalmente durante o bloqueio dava a
+  falsa impressão de que a checagem automática seguia rodando, quando cada
+  disparo dela era só recusado pelo servidor sem custar nada. O estado
+  chega ao navegador pelo mesmo stream SSE da barra de atividades, como
   estado completo (nunca diferença), então uma aba nova ou uma reconexão
   resincronizam o aviso sozinhas.
 - Uma sonda gasta **uma** requisição a cada 10 minutos

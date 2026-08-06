@@ -59,6 +59,31 @@ test("enquanto suspenso, nenhuma busca chega ao site", async ({ page, request })
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
 });
 
+// O cronômetro contando normalmente durante uma suspensão dava a impressão de
+// que a checagem automática continuava rodando — quando na verdade cada
+// disparo dela era recusado pelo servidor sem custar nada, e o cronômetro só
+// se reagendava para outro ciclo igualmente inútil.
+test("o cronômetro da watchlist pausa durante a suspensão e retoma depois", async ({ page, request }) => {
+  const contador = page.locator("#watchlist-countdown");
+  await expect(contador).not.toHaveText("--:--");
+
+  // Mais de uma falha: a sonda de recuperação já roda a 1s de intervalo neste
+  // ambiente de teste (ver GNJOY_SUSPENSION_PROBE_INTERVAL no global-setup) —
+  // com só uma falha ela se recuperaria rápido demais para o teste observar a
+  // pausa continuando "pausada" e não só num instante de transição.
+  await falharProximasRequisicoes(request, { status: 429, times: 4, retryAfter: 0 });
+  await buscar(page, "Espada Primordial", { esperarResultados: false });
+  await expect(page.locator(banner)).toBeVisible();
+
+  await expect(contador).toHaveText("--:--");
+  // Não é só um instante de transição: continua parado.
+  await page.waitForTimeout(1_500);
+  await expect(contador).toHaveText("--:--");
+
+  await expect(page.locator(banner)).toBeHidden({ timeout: 15_000 });
+  await expect(contador).not.toHaveText("--:--");
+});
+
 test("o aviso some sozinho quando o site volta a responder", async ({ page, request }) => {
   await falharProximasRequisicoes(request, { status: 429, times: 1, retryAfter: 0 });
   await buscar(page, "Espada Primordial", { esperarResultados: false });

@@ -764,18 +764,36 @@ async function runMonitoringCheck(fresh = false) {
 
 // watchlistSuspended espelha o estado que o servidor publica pelo stream de
 // atividade (ver activity-bar.js): enquanto o site estiver limitando as
-// consultas, o ciclo automático para de sair. O cronômetro continua correndo
-// — quando a suspensão terminar, o ciclo seguinte encontra tudo liberado e
-// segue normalmente, sem precisar de nada que o religue.
+// consultas, o ciclo automático para de sair.
 let watchlistSuspended = false;
 
 function setWatchlistSuspended(suspended) {
   const era = watchlistSuspended;
   watchlistSuspended = suspended;
+
+  const timer = document.getElementById("watchlist-timer");
+
+  if (suspended) {
+    // Sem cancelar o setTimeout pendente, ele dispara mesmo assim: encontra
+    // runMonitoringCheck recusando (correto, sem custo — ver acima), mas
+    // reagenda outro ciclo completo de qualquer forma, e o cronômetro volta
+    // a contar como se a checagem automática continuasse rodando
+    // normalmente. É exatamente essa contagem fantasma que confundia quem
+    // olhava a watchlist durante um bloqueio.
+    if (monitorTimerId) clearTimeout(monitorTimerId);
+    monitorTimerId = null;
+    nextMonitorRunAt = null;
+    updateCountdownDisplay();
+    if (timer) timer.title = "Pausado: o site está limitando as consultas";
+    return;
+  }
+
+  if (timer) timer.title = "Tempo até a próxima checagem automática de preços";
   // Ao voltar ao normal, uma checagem imediata: a última pode ter sido
   // interrompida no meio, e esperar mais cinco minutos por dados que já dá
-  // para buscar seria gratuito.
-  if (era && !suspended) forceMonitoringNow();
+  // para buscar seria gratuito. Também é o que tira o cronômetro do "--:--"
+  // e volta a contar.
+  if (era) forceMonitoringNow();
 }
 
 // scheduleMonitoring (re)agenda a próxima checagem automática usando
@@ -805,7 +823,14 @@ function forceMonitoringNow() {
 
 function updateCountdownDisplay() {
   const el = document.getElementById("watchlist-countdown");
-  if (!el || nextMonitorRunAt == null) return;
+  if (!el) return;
+  if (nextMonitorRunAt == null) {
+    // Sem ciclo agendado — nem antes do primeiro (ver DOMContentLoaded), nem
+    // durante uma suspensão (ver setWatchlistSuspended). Mesmo texto dos dois
+    // casos: não há nada de fato contando.
+    el.textContent = "--:--";
+    return;
+  }
   const remainingMs = Math.max(0, nextMonitorRunAt - Date.now());
   const totalSeconds = Math.ceil(remainingMs / 1000);
   const minutes = Math.floor(totalSeconds / 60);
