@@ -1070,11 +1070,33 @@ h4 {
 }
 
 .activity-history li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
   padding: 0.15rem 0;
   font-size: 0.8rem;
-  white-space: nowrap;
+}
+
+.activity-history-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Compartilhado pela linha atual (cabeçalho) e pelas linhas do histórico: o
+   horário em que a chamada foi disparada, sempre grudado na ponta direita —
+   a barra ocupa a largura inteira da tela, então "ponta direita da linha" e
+   "ponta direita da tela" são a mesma coisa aqui. flex-shrink:0 para o
+   horário nunca ser ele quem cede espaço quando o texto ao lado for
+   comprido — é sempre o texto que trunca (ver o ellipsis acima e em
+   #activity-current-label). */
+.activity-time {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .activity-bar-header {

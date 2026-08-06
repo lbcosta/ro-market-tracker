@@ -55,10 +55,25 @@ function activityLineText(ev) {
   return suffix ? ev.label + " " + suffix : ev.label;
 }
 
+// formatTime mostra o horário local de startedAt (HH:MM:SS) — o mesmo
+// instante nas três fases de uma chamada (aguardando/em voo/concluída, ver
+// StartedAt em internal/gnjoy/activity.go), então o horário de uma linha não
+// muda enquanto ela avança de status. Segundos entram porque o rate limiter
+// padrão dispara cerca de uma chamada por segundo — sem eles, várias linhas
+// seguidas mostrariam o mesmo minuto.
+function formatTime(ms) {
+  return new Date(ms).toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
 function renderCurrentLine() {
   const labelEl = document.getElementById("activity-current-label");
   const spinnerEl = document.getElementById("activity-spinner");
-  if (!labelEl || !spinnerEl) return;
+  const timeEl = document.getElementById("activity-current-time");
+  if (!labelEl || !spinnerEl || !timeEl) return;
 
   const current = activityEvents[activityEvents.length - 1];
   labelEl.classList.remove(
@@ -72,12 +87,14 @@ function renderCurrentLine() {
     labelEl.textContent = "Nenhuma atividade ainda.";
     labelEl.title = "";
     spinnerEl.hidden = true;
+    timeEl.textContent = "";
     return;
   }
 
   labelEl.textContent = activityLineText(current);
   labelEl.classList.add(activityStatusClass(current.status));
   labelEl.title = current.status === "error" && current.error ? current.error : "";
+  timeEl.textContent = formatTime(current.startedAt);
 
   spinnerEl.hidden = !(current.status === "waiting" || current.status === "running");
 }
@@ -95,9 +112,19 @@ function renderHistory() {
   const history = activityEvents.slice(0, -1);
   for (const ev of history) {
     const li = document.createElement("li");
-    li.textContent = activityLineText(ev);
     li.className = activityStatusClass(ev.status);
     if (ev.status === "error" && ev.error) li.title = ev.error;
+
+    const textEl = document.createElement("span");
+    textEl.className = "activity-history-text";
+    textEl.textContent = activityLineText(ev);
+    li.appendChild(textEl);
+
+    const timeEl = document.createElement("span");
+    timeEl.className = "activity-time";
+    timeEl.textContent = formatTime(ev.startedAt);
+    li.appendChild(timeEl);
+
     list.appendChild(li);
   }
 
