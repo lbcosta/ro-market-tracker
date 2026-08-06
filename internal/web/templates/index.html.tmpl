@@ -139,5 +139,18 @@
       <span class="activity-bar-icon" aria-hidden="true">▲</span>
     </div>
   </div>
+
+  {{/* Canto discreto de propósito: pointer-events:none no CSS tira até o
+       cursor de "isto é clicável" da versão em si — só o link de
+       atualização (que o JS revela) volta a responder ao mouse. Fica acima
+       do "activity-bar" e longe do "toast-container" (que usa o canto
+       oposto), os dois únicos outros elementos fixos da tela. */}}
+  <div id="version-badge" class="version-badge" title="Versão em uso">
+    <span id="version-current">{{.Version}}</span>
+    <a id="version-update-link" class="version-update-link"
+        href="https://github.com/lbcosta/ro-market-tracker/releases/latest"
+        target="_blank" rel="noopener" hidden>· atualização disponível</a>
+  </div>
+  <script src="/static/version.js" defer></script>
 </body>
 </html>

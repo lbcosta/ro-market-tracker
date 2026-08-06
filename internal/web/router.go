@@ -7,9 +7,11 @@ import (
 )
 
 // RegisterRoutes registra as rotas do frontend HTMX (página, busca, expand
-// e assets estáticos) no mux informado.
-func RegisterRoutes(mux *http.ServeMux, client *gnjoy.Client) {
-	h := NewHandler(client)
+// e assets estáticos) no mux informado. version é a versão do binário (ver
+// main.version em cmd/server) — mostrada num canto discreto da página, é o
+// que o navegador compara com a última release do GitHub.
+func RegisterRoutes(mux *http.ServeMux, client *gnjoy.Client, version string) {
+	h := NewHandler(client, version)
 
 	mux.HandleFunc("GET /{$}", h.Index)
 	mux.HandleFunc("GET /web/search", h.Search)

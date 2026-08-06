@@ -32,7 +32,7 @@ func newWebServerSuspendendo(t *testing.T) (*httptest.Server, *gnjoytest.Server,
 	)
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, client)
+	RegisterRoutes(mux, client, "test")
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 

@@ -213,7 +213,7 @@ func TestActivityStreamPublicaFalhas(t *testing.T) {
 func TestActivityStreamSemSuporteAStreaming(t *testing.T) {
 	mock := gnjoytest.New(gnjoytest.DemoConfig())
 	defer mock.Close()
-	h := NewHandler(gnjoy.New(gnjoy.WithBaseURL(mock.URL)))
+	h := NewHandler(gnjoy.New(gnjoy.WithBaseURL(mock.URL)), "test")
 
 	req := httptest.NewRequest(http.MethodGet, "/web/activity/stream", nil)
 	rec := httptest.NewRecorder()

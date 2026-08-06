@@ -313,7 +313,7 @@ func TestWatchlistPriceFreshIgnoraOCache(t *testing.T) {
 		gnjoy.WithActionID(mock.ActionID()),
 		gnjoy.WithRateLimit(1000, 1000),
 	)
-	h := NewHandler(client)
+	h := NewHandler(client, "test")
 	clock := &fakeClock{t: time.Now()}
 	h.searchCache.now = clock.Now
 

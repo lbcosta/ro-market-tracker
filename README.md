@@ -22,7 +22,7 @@ internal/gnjoy/                 client para as rotas internas do GnJoy LATAM
 internal/api/                   API REST própria (JSON) — handlers + roteador
 internal/web/                   frontend HTMX — handlers + roteador
   templates/                      *.html.tmpl (página, fragmentos de busca/expand)
-  static/                         CSS, JS (app.js, watchlist.js, theme.js, activity-bar.js) e htmx.min.js vendorizado
+  static/                         CSS, JS (app.js, watchlist.js, theme.js, activity-bar.js, version.js) e htmx.min.js vendorizado
   watchlist.go                    endpoint JSON de preço/refino ao vivo p/ a watchlist
   bonus.go                        varredura de refino/bônus por anúncio, sob demanda, memoizada
   suspension.go                   sonda que reabre as consultas quando o site volta
@@ -464,16 +464,34 @@ fora desse bloco de tokens, propositalmente: foi assim que uma cor "só do
 modo claro" (`--bg-card`) acabou vazando para o modo escuro antes desta
 seção existir, apagando o texto de cima dela.
 
+### Versão em execução
+
+Um canto discreto da tela (`internal/web/static/version.js`) mostra a
+versão do binário — o mesmo valor de `main.version`, injetado em tempo de
+build (ver [CI/CD](#cicd)) e "dev" em builds locais. Ao carregar a página, o
+navegador consulta, direto do lado do cliente, a API pública do GitHub
+(`GET /repos/lbcosta/ro-market-tracker/releases/latest`) e mostra um link
+para a release quando ela é mais nova que a versão em uso.
+
+A consulta não passa pelo servidor Go nem pelo rate limiter do
+`gnjoy.Client` — não tem nada a ver com o site do jogo — e fica em cache no
+`localStorage` por 6 horas, para recarregar a página com frequência não
+gastar a cota anônima da API do GitHub (60 requisições/hora por IP). Uma
+build "dev" (sem tag) não tem com o que comparar e nunca mostra o aviso;
+qualquer falha na consulta (sem internet, GitHub fora do ar, cota
+esgotada) é silenciosa — é só um aviso de conveniência.
+
 Variáveis de ambiente (todas opcionais):
 
-| Variável                 | Padrão                                | Descrição                                          |
-|--------------------------|----------------------------------------|-----------------------------------------------------|
-| `PORT`                   | `8080`                                 | Porta HTTP do servidor                               |
-| `GNJOY_BASE_URL`         | `https://ro.gnjoylatam.com`            | Domínio base do site do GnJoy LATAM                  |
-| `GNJOY_LOCALE`           | `pt`                                   | Locale usado nas rotas (`pt`, `en` ou `es`)          |
-| `GNJOY_ACTION_ID`        | ver `gnjoy.DefaultActionID` no código  | Hash da Next.js Server Action (ver aviso abaixo)     |
-| `GNJOY_RATE_LIMIT_RPS`   | `1` (`gnjoy.DefaultRateLimitRPS`)      | Requisições por segundo permitidas ao upstream       |
-| `GNJOY_RATE_LIMIT_BURST` | `1` (`gnjoy.DefaultRateLimitBurst`)    | Rajada inicial permitida acima do ritmo sustentado   |
+| Variável                             | Padrão                                | Descrição                                          |
+|---------------------------------------|----------------------------------------|-----------------------------------------------------|
+| `PORT`                                | `8080`                                 | Porta HTTP do servidor                               |
+| `GNJOY_BASE_URL`                      | `https://ro.gnjoylatam.com`            | Domínio base do site do GnJoy LATAM                  |
+| `GNJOY_LOCALE`                        | `pt`                                   | Locale usado nas rotas (`pt`, `en` ou `es`)          |
+| `GNJOY_ACTION_ID`                     | ver `gnjoy.DefaultActionID` no código  | Hash da Next.js Server Action (ver aviso abaixo)     |
+| `GNJOY_RATE_LIMIT_RPS`                | `1` (`gnjoy.DefaultRateLimitRPS`)      | Requisições por segundo permitidas ao upstream       |
+| `GNJOY_RATE_LIMIT_BURST`              | `1` (`gnjoy.DefaultRateLimitBurst`)    | Rajada inicial permitida acima do ritmo sustentado   |
+| `GNJOY_SUSPENSION_PROBE_INTERVAL`     | `10m`                                  | Intervalo da sonda de recuperação após um `429` (ver [Suspensão](#suspensão-quando-o-429-não-é-um-tropeço)) |
 
 ## Rate limiting
 

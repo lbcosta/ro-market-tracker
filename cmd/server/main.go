@@ -59,7 +59,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux, client)
-	web.RegisterRoutes(mux, client)
+	web.RegisterRoutes(mux, client, version)
 
 	// Quem tira o programa da suspensão: sonda o site de tempos em tempos e
 	// libera tudo quando ele volta. context.Background() porque não há

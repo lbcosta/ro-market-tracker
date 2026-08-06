@@ -1005,6 +1005,41 @@ h4 {
   transform: translateY(0);
 }
 
+/* Canto oposto ao do toast-container, e com folga da barra de atividades —
+   os dois outros elementos fixos da tela. z-index abaixo dos dois (900+): a
+   versão é a informação menos urgente na tela, nunca deveria competir com
+   nada. pointer-events:none tira até o cursor de "isto é clicável" do texto
+   em si; só o link de atualização, quando o JS o revela, volta a
+   responder ao mouse (ver .version-update-link). */
+.version-badge {
+  position: fixed;
+  left: 1rem;
+  bottom: calc(var(--activity-bar-collapsed-height) + 0.75rem);
+  z-index: 500;
+  font-size: 0.7rem;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+.version-update-link {
+  pointer-events: auto;
+  margin-left: 0.3rem;
+  color: var(--warning);
+  text-decoration: none;
+}
+
+.version-update-link:hover {
+  text-decoration: underline;
+}
+
+/* Mesmo motivo de .refine-badge[hidden]/.suspension-banner[hidden]: a regra
+   acima já dá ao link um "display" com a mesma especificidade do "[hidden]"
+   do user-agent, e CSS de autor vence esse empate — sem isto o link
+   continuaria ocupando espaço (embora sem texto clicável) mesmo escondido. */
+.version-update-link[hidden] {
+  display: none;
+}
+
 .activity-bar {
   position: fixed;
   left: 0;

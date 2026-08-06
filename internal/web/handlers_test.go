@@ -43,7 +43,7 @@ func newWebServerWith(t *testing.T, cfg gnjoytest.Config, opts ...gnjoy.Option) 
 	}, opts...)...)
 
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, client)
+	RegisterRoutes(mux, client, "test")
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 
@@ -93,6 +93,10 @@ func TestIndex(t *testing.T) {
 		`id="activity-bar"`,
 		`id="activity-history"`,
 		`id="watchlist-countdown"`,
+		// A versão vem do parâmetro de RegisterRoutes (ver newWebServerWith),
+		// não de um valor fixo no template.
+		`id="version-current">test<`,
+		`id="version-update-link"`,
 	)
 
 	// Abrir a página dispara, em segundo plano, o aquecimento do action id
@@ -452,7 +456,7 @@ func TestSearchOrdenaPorQuantidade(t *testing.T) {
 
 	client := gnjoy.New(gnjoy.WithBaseURL(mock.URL), gnjoy.WithRateLimit(1000, 1000))
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, client)
+	RegisterRoutes(mux, client, "test")
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
@@ -496,7 +500,7 @@ func TestSearchEscapaHTML(t *testing.T) {
 
 	client := gnjoy.New(gnjoy.WithBaseURL(mock.URL), gnjoy.WithRateLimit(1000, 1000))
 	mux := http.NewServeMux()
-	RegisterRoutes(mux, client)
+	RegisterRoutes(mux, client, "test")
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 

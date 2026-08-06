@@ -19,6 +19,12 @@ import (
 type Handler struct {
 	client *gnjoy.Client
 
+	// version é a versão do binário (ver main.version em cmd/server),
+	// mostrada num canto discreto da página — é o que o navegador compara
+	// com a última release do GitHub para avisar quando está desatualizada
+	// (ver static/version.js). "dev" fora de um binário de release.
+	version string
+
 	// warmupOnce garante que o aquecimento do action id (ver warmupActionID)
 	// só dispare uma vez por processo, mesmo que a página seja recarregada
 	// várias vezes.
@@ -49,9 +55,10 @@ type Handler struct {
 	itemDetailMemo  *ttlCache[*gnjoy.ItemDetail]
 }
 
-func NewHandler(client *gnjoy.Client) *Handler {
+func NewHandler(client *gnjoy.Client, version string) *Handler {
 	return &Handler{
 		client:           client,
+		version:          version,
 		searchCache:      newTTLCache[*gnjoy.ShopSearchResult](searchCacheSize),
 		marketPriceCache: newTTLCache[*gnjoy.MarketPriceResult](marketPriceCacheSize),
 		storeDetailMemo:  newTTLCache[*gnjoy.StoreDetail](storeDetailMemoSize),
@@ -89,9 +96,15 @@ func (h *Handler) cachedSearchShops(ctx context.Context, server, item string, ma
 	}, nil
 }
 
+type indexView struct {
+	// Version é a versão do binário rodando agora — ver o comentário do
+	// campo homônimo em Handler.
+	Version string
+}
+
 func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
 	h.warmupActionID()
-	render(w, "index.html.tmpl", nil)
+	render(w, "index.html.tmpl", indexView{Version: h.version})
 }
 
 // warmupActionID testa o action id da Server Action do Next.js em segundo
