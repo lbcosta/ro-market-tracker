@@ -479,11 +479,12 @@ func (h *Handler) storeDetail(ctx context.Context, loc gnjoy.StoreLocation, opts
 	if detail, ok := h.storeDetailMemo.peek(key); ok {
 		return detail, nil
 	}
+	gen := h.storeDetailMemo.generation()
 	detail, err := h.client.GetStoreDetail(ctx, loc, opts...)
 	if err != nil {
 		return nil, err
 	}
-	h.storeDetailMemo.put(key, detail)
+	h.storeDetailMemo.putIfCurrent(gen, key, detail)
 	return detail, nil
 }
 
@@ -496,11 +497,12 @@ func (h *Handler) itemDetail(ctx context.Context, loc gnjoy.StoreLocation, opts 
 	if detail, ok := h.itemDetailMemo.peek(key); ok {
 		return detail, nil
 	}
+	gen := h.itemDetailMemo.generation()
 	detail, err := h.client.GetItemDetail(ctx, loc, itemLang, opts...)
 	if err != nil {
 		return nil, err
 	}
-	h.itemDetailMemo.put(key, detail)
+	h.itemDetailMemo.putIfCurrent(gen, key, detail)
 	return detail, nil
 }
 

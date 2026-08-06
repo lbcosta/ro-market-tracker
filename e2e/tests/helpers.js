@@ -20,18 +20,33 @@ async function resetPage(page, request) {
   await page.reload();
 }
 
-// buscar preenche o formulário e espera a tabela (ou a mensagem de vazio)
-// aparecer, para nenhum teste precisar dormir esperando o HTMX.
+// buscar preenche o formulário e espera a resposta desta busca (e a tabela,
+// ou a mensagem de vazio, aparecer), para nenhum teste precisar dormir
+// esperando o HTMX.
+//
+// Esperar a RESPOSTA, e não só o seletor, é o que torna a espera real na
+// segunda busca de um teste: a tabela da primeira ainda está na tela, então o
+// waitForSelector passaria de imediato e o teste seguiria — e terminaria —
+// com a busca nova em voo. Uma busca que sobrevive ao teste que a disparou
+// atrapalha o seguinte (o servidor não a cancela junto com a conexão, de
+// propósito: ver cachedSearchShops).
 //
 // refino/bonus marcam os checkboxes de varredura antes de buscar. Eles custam
 // uma consulta ao site por anúncio encontrado, então a busca demora
-// visivelmente mais — o timeout padrão do waitForSelector dá conta das
+// visivelmente mais — o timeout padrão do waitForResponse dá conta das
 // fixtures, que têm poucos anúncios.
 async function buscar(page, item, { esperarResultados = true, refino = false, bonus = false } = {}) {
   await page.fill('input[name="item"]', item);
   if (refino) await page.check('input[name="refine"]');
   if (bonus) await page.check('input[name="bonus"]');
+
+  const resposta = page.waitForResponse((r) => {
+    const url = new URL(r.url());
+    return url.pathname === "/web/search" && url.searchParams.get("item") === item;
+  });
   await page.click(".search-button");
+  await resposta;
+
   if (esperarResultados) {
     await page.waitForSelector(".results-table");
   } else {

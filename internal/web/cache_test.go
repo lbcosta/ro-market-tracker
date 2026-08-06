@@ -3,6 +3,7 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -100,16 +101,52 @@ func TestTTLCacheValidadePorLeitura(t *testing.T) {
 	}
 }
 
+// TestTTLCacheResetDescartaBuscaEmVoo: uma busca disparada ANTES do reset só
+// termina depois dele, e o resultado dela não pode reaparecer num cache que
+// acabou de ser esvaziado — quem pediu o reset ficaria com um dado de antes,
+// com a idade zerada, válido por mais um TTL inteiro.
+func TestTTLCacheResetDescartaBuscaEmVoo(t *testing.T) {
+	cache := newTTLCache[int](8)
+
+	buscando := make(chan struct{})
+	liberar := make(chan struct{})
+	buscas := 0
+
+	pronta := make(chan struct{})
+	go func() {
+		defer close(pronta)
+		cache.Do("k", time.Minute, func() (int, error) {
+			buscas++
+			close(buscando)
+			<-liberar
+			return 1, nil
+		})
+	}()
+
+	<-buscando
+	cache.reset()
+	close(liberar)
+	<-pronta
+
+	if v, _ := cache.Do("k", time.Minute, func() (int, error) { buscas++; return 2, nil }); v != 2 {
+		t.Errorf("leitura depois do reset = %d, quero 2 (rebuscada): a busca em voo repovoou o cache", v)
+	}
+	if buscas != 2 {
+		t.Errorf("houve %d buscas, quero 2 (a de antes do reset e a de depois)", buscas)
+	}
+}
+
 func TestTTLCacheDescartaAMaisAntiga(t *testing.T) {
 	clock := &fakeClock{t: time.Now()}
 	cache := newTTLCache[string](2)
 	cache.now = clock.Now
 
-	cache.put("a", "primeiro")
+	gen := cache.generation()
+	cache.putIfCurrent(gen, "a", "primeiro")
 	clock.Advance(time.Second)
-	cache.put("b", "segundo")
+	cache.putIfCurrent(gen, "b", "segundo")
 	clock.Advance(time.Second)
-	cache.put("c", "terceiro") // estoura o tamanho: "a" (o mais antigo) sai
+	cache.putIfCurrent(gen, "c", "terceiro") // estoura o tamanho: "a" (o mais antigo) sai
 
 	if _, ok := cache.peek("a"); ok {
 		t.Error("\"a\" ainda está no cache, quero que a entrada mais antiga tenha sido descartada")
@@ -280,6 +317,63 @@ func TestResetCaches(t *testing.T) {
 	if got := mock.RequestCount(); got != 2 {
 		t.Errorf("depois do reset: %d requisições, quero 2 (o cache foi esvaziado)", got)
 	}
+}
+
+// TestResetCachesDescartaBuscaEmVoo é a mesma garantia de TestResetCaches
+// para a consulta que o reset pega no meio do caminho. Foi a corrida que
+// deixou os testes de navegador instáveis: um teste que termina logo depois
+// de disparar uma busca a deixa em voo (o servidor não a cancela junto com a
+// conexão, de propósito — ver cachedSearchShops), e ela guardava o resultado
+// DEPOIS do reset do teste seguinte. Esse teste então recebia a resposta do
+// cache, sem chamada nenhuma ao upstream — e ficava esperando para sempre a
+// atividade que só uma chamada de verdade publicaria.
+func TestResetCachesDescartaBuscaEmVoo(t *testing.T) {
+	srv, mock := newWebServer(t)
+	path := "/web/search?server=NIDHOGG&item=Espada"
+
+	// Segura a resposta do upstream o bastante para o reset acontecer com a
+	// busca ainda em voo, sem depender de acertar uma janela de milissegundos.
+	mock.QueueFailure(gnjoytest.Failure{Passthrough: true, Delay: 300 * time.Millisecond}, 1)
+
+	terminou := make(chan struct{})
+	go func() {
+		defer close(terminou)
+		resp, err := srv.Client().Get(srv.URL + path)
+		if err != nil {
+			t.Errorf("GET %s: %v", path, err)
+			return
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+	}()
+
+	esperarRequisicaoNoMock(t, mock, 1)
+	resp, err := srv.Client().Post(srv.URL+"/web/cache/reset", "", nil)
+	if err != nil {
+		t.Fatalf("POST /web/cache/reset: %v", err)
+	}
+	resp.Body.Close()
+	<-terminou
+
+	getHTML(t, srv, path)
+	if got := mock.RequestCount(); got != 2 {
+		t.Errorf("depois do reset: %d requisições, quero 2 (a busca em voo não pode repovoar o cache)", got)
+	}
+}
+
+// esperarRequisicaoNoMock bloqueia até o mock ter recebido n requisições. O
+// mock as registra ao recebê-las, antes de responder, então isto é o gancho
+// para agir com uma chamada ainda em voo.
+func esperarRequisicaoNoMock(t *testing.T, mock *gnjoytest.Server, n int) {
+	t.Helper()
+	prazo := time.Now().Add(5 * time.Second)
+	for time.Now().Before(prazo) {
+		if mock.RequestCount() >= n {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("o mock recebeu %d requisições em 5s, esperava %d", mock.RequestCount(), n)
 }
 
 // TestResetCachesLimpaAAtividade cobre a mesma motivação de TestResetCaches,

@@ -54,6 +54,11 @@ type ttlCache[V any] struct {
 	entries map[string]cacheEntry[V]
 	maxSize int
 
+	// gen conta os resets já feitos. Quem vai ao upstream captura a geração
+	// ANTES da busca e a devolve no putIfCurrent, que descarta o resultado
+	// se um reset tiver acontecido no meio — ver reset.
+	gen int64
+
 	// now existe para os testes controlarem o relógio.
 	now func() time.Time
 }
@@ -86,11 +91,12 @@ func (c *ttlCache[V]) Do(key string, maxAge time.Duration, fetch func() (V, erro
 		if v, ok := c.peekFresh(key, maxAge); ok {
 			return v, nil
 		}
+		gen := c.generation()
 		v, err := fetch()
 		if err != nil {
 			return nil, err
 		}
-		c.put(key, v)
+		c.putIfCurrent(gen, key, v)
 		return v, nil
 	})
 	if err != nil {
@@ -126,11 +132,25 @@ func (c *ttlCache[V]) peek(key string) (V, bool) {
 	return e.value, true
 }
 
-// put guarda um valor buscado por quem chama (o caminho do peek); Do guarda
-// sozinho. Ao atingir maxSize, a entrada buscada há mais tempo é descartada.
-func (c *ttlCache[V]) put(key string, value V) {
+// generation identifica a "era" atual do cache, que muda a cada reset. Vale
+// junto com putIfCurrent: capture a geração antes de ir ao upstream e a
+// devolva ao guardar o resultado.
+func (c *ttlCache[V]) generation() int64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	return c.gen
+}
+
+// putIfCurrent guarda um valor buscado por quem chama (o caminho do peek); Do
+// guarda sozinho. O valor é descartado — em vez de guardado — se o cache
+// tiver sido resetado desde gen, porque então ele é dado de antes do reset
+// (ver reset). Ao atingir maxSize, a entrada buscada há mais tempo sai.
+func (c *ttlCache[V]) putIfCurrent(gen int64, key string, value V) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.gen != gen {
+		return
+	}
 	if _, exists := c.entries[key]; !exists && len(c.entries) >= c.maxSize {
 		c.evictOldestLocked()
 	}
@@ -138,9 +158,20 @@ func (c *ttlCache[V]) put(key string, value V) {
 }
 
 // reset esvazia o cache — ver Handler.ResetCaches.
+//
+// Esvaziar o mapa não basta: uma busca ao upstream disparada ANTES do reset
+// só guarda o resultado quando termina, o que pode ser depois dele — e a
+// entrada reapareceria, com a idade zerada, num cache que deveria estar
+// vazio. Quem pede o reset ficaria com um dado de antes dele, servido por
+// mais um TTL inteiro. Por isso o reset também troca a geração: os
+// resultados em voo agora são de uma era passada e o putIfCurrent os
+// descarta. Foi exatamente essa corrida que deixou os testes de navegador
+// instáveis — o teste seguinte recebia do cache o resultado que o anterior
+// tinha pedido, sem chamada nenhuma ao upstream.
 func (c *ttlCache[V]) reset() {
 	c.mu.Lock()
 	c.entries = make(map[string]cacheEntry[V])
+	c.gen++
 	c.mu.Unlock()
 }
 
