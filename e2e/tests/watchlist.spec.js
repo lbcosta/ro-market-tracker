@@ -407,6 +407,11 @@ test("um alvo acima do preço atual dispara o aviso", async ({ page }) => {
   const linha = await adicionarEspadaPrimordial(page);
   await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 129.999.999 z", ESPERA_PRECO);
 
+  // Antes do alvo ser atingido, a localização (que o servidor já manda desde
+  // a primeira consulta — ver internal/web/watchlist.go) ainda não aparece:
+  // só faz sentido ir comprar quando o alvo valer.
+  await expect(linha.locator(".watchlist-location")).toBeHidden();
+
   await linha.locator(".watchlist-target").click();
   await linha.locator(".watchlist-target-input").fill("200000000");
   await linha.locator(".watchlist-target-input").press("Enter");
@@ -415,11 +420,44 @@ test("um alvo acima do preço atual dispara o aviso", async ({ page }) => {
   await expect(linha.locator(".watchlist-hit-badge")).toHaveText("🎯 Alvo atingido");
   await expect(linha).toHaveClass(/target-hit/);
 
+  // A localização da loja mais barata aparece junto do badge.
+  await expect(linha.locator(".watchlist-location")).toHaveText("/navi prt_mk.gat 114/180");
+
   // O toast aparece sempre, sem depender de permissão do navegador.
   const toast = page.locator(".toast").first();
   await expect(toast).toBeVisible();
   await expect(toast).toContainText("Espada Primordial");
   await expect(toast).toContainText("129.999.999 z");
+
+  // Baixar o alvo de novo (deixa de valer) esconde a localização junto com
+  // o badge — não é uma foto tirada só no instante do aviso.
+  await linha.locator(".watchlist-target").click();
+  await linha.locator(".watchlist-target-input").fill("1");
+  await linha.locator(".watchlist-target-input").press("Enter");
+  await expect(linha.locator(".watchlist-hit-badge")).toBeHidden();
+  await expect(linha.locator(".watchlist-location")).toBeHidden();
+});
+
+// Mesmo botão/classe (.navi-copy) e mesma função (copyNavi) da tabela de
+// busca — ver e2e/tests/busca.spec.js "o botão de localização copia o
+// comando /navi".
+test("o botão de localização da watchlist copia o comando /navi", async ({ page }) => {
+  const linha = await adicionarEspadaPrimordial(page);
+  await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 129.999.999 z", ESPERA_PRECO);
+
+  await linha.locator(".watchlist-target").click();
+  await linha.locator(".watchlist-target-input").fill("200000000");
+  await linha.locator(".watchlist-target-input").press("Enter");
+
+  const botao = linha.locator(".watchlist-location");
+  await expect(botao).toHaveText("/navi prt_mk.gat 114/180");
+  await botao.click();
+
+  await expect(botao).toHaveText("Copiado!");
+  const areaDeTransferencia = await page.evaluate(() => navigator.clipboard.readText());
+  expect(areaDeTransferencia).toBe("/navi prt_mk.gat 114/180");
+
+  await expect(botao).toHaveText("/navi prt_mk.gat 114/180", { timeout: 3000 });
 });
 
 // Fixar um refino muda o que a linha acompanha: passa a ser o menor preço

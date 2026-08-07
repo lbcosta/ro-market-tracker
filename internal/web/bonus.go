@@ -135,8 +135,8 @@ func (h *Handler) scanItemFacts(ctx context.Context, items []gnjoy.ShopListItem,
 		if wantRefine {
 			if !equipamento {
 				f.RefineKnown = true
-			} else if refine, err := h.fetchStoreRefine(ctx, it); err == nil {
-				f.Refine, f.RefineKnown = refine, true
+			} else if detail, err := h.fetchStoreDetail(ctx, it); err == nil {
+				f.Refine, f.RefineKnown = detail.Refine, true
 			} else {
 				abortada = true
 			}

@@ -298,10 +298,13 @@ func TestResetCaches(t *testing.T) {
 	q := url.Values{"server": {"NIDHOGG"}, "itemId": {"4089"}, "item": {"Espada"}}
 	path := "/web/watchlist/price?" + q.Encode()
 
+	// Cada checagem custa busca + detalhe da loja mais barata (a localização
+	// — ver watchlistPriceForCheapest); a segunda chamada, idêntica, vem
+	// inteira do cache/memo.
 	getHTML(t, srv, path)
 	getHTML(t, srv, path)
-	if got := mock.RequestCount(); got != 1 {
-		t.Fatalf("antes do reset: %d requisições, quero 1 (a segunda vem do cache)", got)
+	if got := mock.RequestCount(); got != 2 {
+		t.Fatalf("antes do reset: %d requisições, quero 2 (a segunda vem do cache)", got)
 	}
 
 	resp, err := srv.Client().Post(srv.URL+"/web/cache/reset", "", nil)
@@ -314,8 +317,8 @@ func TestResetCaches(t *testing.T) {
 	}
 
 	getHTML(t, srv, path)
-	if got := mock.RequestCount(); got != 2 {
-		t.Errorf("depois do reset: %d requisições, quero 2 (o cache foi esvaziado)", got)
+	if got := mock.RequestCount(); got != 4 {
+		t.Errorf("depois do reset: %d requisições, quero 4 (o cache e o memo de detalhe foram esvaziados)", got)
 	}
 }
 
@@ -445,33 +448,39 @@ func TestWatchlistPriceFreshIgnoraOCache(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(h.WatchlistPrice))
 	t.Cleanup(srv.Close)
 
-	// Item que não é equipamento: cada consulta custa exatamente 1 busca.
+	// Item que não é equipamento: a busca some sozinha (fresh=1 só afeta ELA
+	// — ver maxAge em WatchlistPrice), mas o detalhe da loja mais barata é
+	// sempre consultado (para a localização — ver watchlistPriceForCheapest)
+	// e, uma vez memoizado por SSI, nunca mais custa de novo nesta loja.
 	q := url.Values{"server": {"NIDHOGG"}, "itemId": {"4089"}, "item": {"Espada"}}
 	path := "/web/watchlist/price?" + q.Encode()
 
 	getHTML(t, srv, path)
-	if got := mock.RequestCount(); got != 1 {
-		t.Fatalf("primeira checagem custou %d requisições, quero 1", got)
+	if got := mock.RequestCount(); got != 2 {
+		t.Fatalf("primeira checagem custou %d requisições, quero 2 (busca + detalhe)", got)
 	}
 
 	// 2 minutos depois (menos que monitorMaxAge): o ciclo automático aceita
-	// o cache...
+	// o cache da busca, e o detalhe já está memoizado — nenhuma requisição
+	// nova.
 	clock.Advance(2 * time.Minute)
 	getHTML(t, srv, path)
-	if got := mock.RequestCount(); got != 1 {
-		t.Errorf("checagem automática custou %d requisições novas, quero 0 (dentro de monitorMaxAge)", got-1)
-	}
-
-	// ...mas o "atualizar agora" não.
-	getHTML(t, srv, path+"&fresh=1")
 	if got := mock.RequestCount(); got != 2 {
-		t.Errorf("fresh=1 custou %d requisições novas, quero 1 (o cache não vale para quem pediu agora)", got-1)
+		t.Errorf("checagem automática custou %d requisições novas, quero 0 (dentro de monitorMaxAge)", got-2)
 	}
 
-	// E passado o monitorMaxAge, até o ciclo automático rebusca.
+	// ...mas o "atualizar agora" ignora o cache da busca (o detalhe continua
+	// memoizado, então o custo extra é só a busca).
+	getHTML(t, srv, path+"&fresh=1")
+	if got := mock.RequestCount(); got != 3 {
+		t.Errorf("fresh=1 custou %d requisições novas, quero 1 (só a busca — o detalhe segue memoizado)", got-2)
+	}
+
+	// E passado o monitorMaxAge, até o ciclo automático rebusca a busca —
+	// mas o detalhe, de novo, já está memoizado.
 	clock.Advance(monitorMaxAge + time.Second)
 	getHTML(t, srv, path)
-	if got := mock.RequestCount(); got != 3 {
-		t.Errorf("checagem após monitorMaxAge custou %d requisições novas, quero 1", got-2)
+	if got := mock.RequestCount(); got != 4 {
+		t.Errorf("checagem após monitorMaxAge custou %d requisições novas, quero 1", got-3)
 	}
 }

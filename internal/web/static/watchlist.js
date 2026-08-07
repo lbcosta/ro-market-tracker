@@ -276,7 +276,10 @@ function startEditingTarget(span, id) {
     span.textContent = targetLabel(updated.targetPrice);
 
     const row = findRow(id);
-    if (row) updateHitState(row, updated, lastKnownPrice.has(id) ? lastKnownPrice.get(id) : null);
+    if (row) {
+      const naviCommand = updated.lastResult ? updated.lastResult.naviCommand : null;
+      updateHitState(row, updated, lastKnownPrice.has(id) ? lastKnownPrice.get(id) : null, naviCommand);
+    }
   };
 
   input.addEventListener("keydown", (ev) => {
@@ -654,6 +657,18 @@ function buildWatchlistRow(entry) {
   hitBadge.textContent = isAvailabilityWatch(entry) ? "🎯 Disponível" : "🎯 Alvo atingido";
   hitBadge.hidden = true;
 
+  // A localização (comando "/navi ...") do vendedor mais barato — mesmo
+  // botão/classe da tabela de busca (.navi-copy, copyNavi em app.js), só
+  // aparece junto do badge acima, quando a condição que a linha acompanha
+  // está valendo (ver updateHitState): é a hora de saber pra onde ir
+  // comprar, não em toda checagem sem alvo atingido ainda.
+  const location = document.createElement("button");
+  location.type = "button";
+  location.className = "navi-copy watchlist-location";
+  location.title = "Clique para copiar o comando de localização";
+  location.hidden = true;
+  location.addEventListener("click", () => copyNavi(location, location.dataset.command || ""));
+
   // Único jeito de forçar uma consulta agora, desde que o "↻" global saiu: só
   // atualiza ESTA linha, sem tocar no cronômetro nem no item que o rodízio
   // automático escolheria a seguir (ver forceEntryUpdate).
@@ -667,6 +682,7 @@ function buildWatchlistRow(entry) {
 
   pricesRow.appendChild(current);
   pricesRow.appendChild(hitBadge);
+  pricesRow.appendChild(location);
   pricesRow.appendChild(refreshNow);
   info.appendChild(nameRow);
   info.appendChild(pricesRow);
@@ -716,14 +732,14 @@ function applyPriceResult(row, entry, data) {
   if (!data.found) {
     currentEl.textContent = isAvailabilityWatch(entry) ? "Nenhum anúncio" : "Sem anúncios";
     lastKnownPrice.set(entry.id, null);
-    updateHitState(row, entry, null);
+    updateHitState(row, entry, null, null);
     return;
   }
   currentEl.textContent = isAvailabilityWatch(entry)
     ? "Produto encontrado por " + formatMoney(data.minPrice)
     : "Atual: " + formatMoney(data.minPrice);
   lastKnownPrice.set(entry.id, data.minPrice);
-  updateHitState(row, entry, data.minPrice);
+  updateHitState(row, entry, data.minPrice, data.naviCommand);
 }
 
 // fetchLivePrice consulta o preço ao vivo de uma entrada. Por padrão o
@@ -780,11 +796,28 @@ function isHit(entry, minPrice) {
 // notificação do SO) uma única vez por cruzamento — o campo "notified" da
 // entrada é o que evita repetir o aviso a cada checagem e é rearmado quando a
 // condição deixa de valer.
-function updateHitState(row, entry, minPrice) {
+//
+// naviCommand só é usado quando hit é true: é o que mostra (e esconde de
+// volta, se a condição deixar de valer) o botão de localização — o servidor
+// manda a localização sempre que encontra um anúncio, não sabe qual é o
+// alvo do usuário (ele vive só no navegador), então a decisão de exibir de
+// fato é toda daqui.
+function updateHitState(row, entry, minPrice, naviCommand) {
   const hit = isHit(entry, minPrice);
   row.classList.toggle("target-hit", hit);
   const badge = row.querySelector(".watchlist-hit-badge");
   if (badge) badge.hidden = !hit;
+
+  const locationEl = row.querySelector(".watchlist-location");
+  if (locationEl) {
+    if (hit && naviCommand) {
+      locationEl.textContent = naviCommand;
+      locationEl.dataset.command = naviCommand;
+      locationEl.hidden = false;
+    } else {
+      locationEl.hidden = true;
+    }
+  }
 
   const wasNotified = Boolean(entry.notified);
   if (hit && !wasNotified) {

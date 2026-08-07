@@ -13,9 +13,10 @@ import (
 )
 
 type watchlistPriceView struct {
-	Found    bool  `json:"found"`
-	MinPrice int64 `json:"minPrice,omitempty"`
-	Refine   *int  `json:"refine,omitempty"`
+	Found       bool   `json:"found"`
+	MinPrice    int64  `json:"minPrice,omitempty"`
+	Refine      *int   `json:"refine,omitempty"`
+	NaviCommand string `json:"naviCommand,omitempty"`
 }
 
 // isEquipment diz se o item pode ter refino. O site usa um tipo só ("armor")
@@ -33,11 +34,17 @@ func locationKey(loc gnjoy.StoreLocation) string {
 	return cacheKey(strconv.Itoa(loc.SvrId), strconv.Itoa(loc.MapId), loc.SSI)
 }
 
-// storeKey é locationKey a partir de um ShopListItem já em mãos (o formato em
-// que a busca e a watchlist carregam um anúncio), sem precisar montar um
-// StoreLocation à parte.
+// storeLocationOf monta o StoreLocation (o "endereço" svrId+mapId+ssi) de um
+// ShopListItem já em mãos — o formato em que a busca e a watchlist carregam
+// um anúncio.
+func storeLocationOf(item gnjoy.ShopListItem) gnjoy.StoreLocation {
+	return gnjoy.StoreLocation{SvrId: item.SvrId, MapId: item.MapId, SSI: item.SSI}
+}
+
+// storeKey é locationKey a partir de um ShopListItem já em mãos, sem precisar
+// montar um StoreLocation à parte antes de chamar locationKey.
 func storeKey(item gnjoy.ShopListItem) string {
-	return locationKey(gnjoy.StoreLocation{SvrId: item.SvrId, MapId: item.MapId, SSI: item.SSI})
+	return locationKey(storeLocationOf(item))
 }
 
 // WatchlistPrice trata GET /web/watchlist/price e devolve, em JSON, o preço
@@ -46,9 +53,10 @@ func storeKey(item gnjoy.ShopListItem) string {
 // palavra — ver teste com "Espada").
 //
 // Sem o parâmetro opcional "refine", devolve o menor preço entre todas as
-// lojas com esse itemId e, se a mais barata for um equipamento, o refino
-// dela — só informativo, "o que está mais barato agora e qual o refino dessa
-// unidade em especial".
+// lojas com esse itemId, o comando "/navi ..." até a loja mais barata (ver
+// naviCommand em navi.go) e, se ela for um equipamento, o refino dela — só
+// informativo, "o que está mais barato agora, onde fica e qual o refino
+// dessa unidade em especial".
 //
 // Com "refine" informado, a busca passa a ser por uma unidade NESSE refino
 // específico: entre as lojas com esse itemId, ordenadas por preço crescente,
@@ -130,53 +138,68 @@ func (h *Handler) WatchlistPrice(w http.ResponseWriter, r *http.Request) {
 // ciclos em vez de custar dezenas de chamadas em cada um.
 const maxRefineDetailFetches = 8
 
-// fetchStoreRefine consulta o detalhe de uma loja — do memo compartilhado ou
-// do upstream (ver Handler.storeDetail) — e devolve o refino. NoRetry: isto
-// roda dentro de uma checagem da watchlist, que tem repetição própria — se o
-// site está pedindo calma, desistir é o certo.
+// fetchStoreDetail consulta o detalhe de uma loja — do memo compartilhado ou
+// do upstream (ver Handler.storeDetail). NoRetry: isto roda dentro de uma
+// checagem da watchlist, que tem repetição própria — se o site está pedindo
+// calma, desistir é o certo.
 //
 // O erro sai junto do valor porque a varredura da busca (ver bonus.go) precisa
 // distinguir "consultei e não deu certo" de "o site parou de responder": lá,
 // ao contrário daqui, o primeiro erro aborta o resto da varredura.
-func (h *Handler) fetchStoreRefine(ctx context.Context, item gnjoy.ShopListItem) (int, error) {
-	loc := gnjoy.StoreLocation{SvrId: item.SvrId, MapId: item.MapId, SSI: item.SSI}
-	detail, err := h.storeDetail(ctx, loc, gnjoy.NoRetry())
+func (h *Handler) fetchStoreDetail(ctx context.Context, item gnjoy.ShopListItem) (*gnjoy.StoreDetail, error) {
+	detail, err := h.storeDetail(ctx, storeLocationOf(item), gnjoy.NoRetry())
 	if err != nil {
 		// Debug, e não Warn: uma varredura de busca com o site instável
 		// geraria uma linha destas por anúncio.
-		slog.Debug("web: não foi possível obter o refino de um anúncio", "error", err)
-		return 0, err
+		slog.Debug("web: não foi possível obter o detalhe de um anúncio", "error", err)
+		return nil, err
 	}
-	return detail.Refine, nil
+	return detail, nil
 }
 
-// lookupRefine devolve o refino de uma loja, do memo ou do upstream —
-// consumindo, neste segundo caso, uma unidade do orçamento da checagem.
+// lookupDetail devolve o detalhe completo de uma loja — refino e localização
+// —, do memo ou do upstream, consumindo, neste segundo caso, uma unidade do
+// orçamento da checagem.
 //
 // affordable falso significa "não estava no memo e o orçamento acabou": o
-// candidato não foi descartado, só ficou para um próximo ciclo. known falso
-// significa que a consulta foi feita e não deu certo.
-func (h *Handler) lookupRefine(r *http.Request, item gnjoy.ShopListItem, budget *int) (refine int, known, affordable bool) {
-	if detail, ok := h.storeDetailMemo.peek(storeKey(item)); ok {
-		return detail.Refine, true, true
+// candidato não foi descartado, só ficou para um próximo ciclo. detail nil
+// (com affordable true) significa que a consulta foi feita e não deu certo.
+func (h *Handler) lookupDetail(r *http.Request, item gnjoy.ShopListItem, budget *int) (detail *gnjoy.StoreDetail, affordable bool) {
+	if cached, ok := h.storeDetailMemo.peek(storeKey(item)); ok {
+		return cached, true
 	}
 	if *budget == 0 {
-		return 0, false, false
+		return nil, false
 	}
 	*budget--
-	refine, err := h.fetchStoreRefine(r.Context(), item)
-	return refine, err == nil, true
+	detail, err := h.fetchStoreDetail(r.Context(), item)
+	if err != nil {
+		return nil, true
+	}
+	return detail, true
 }
 
+// watchlistPriceForCheapest também busca o detalhe da loja mais barata —
+// mesmo quando o item não é equipamento e por isso não precisa de refino —
+// porque é dali que sai a localização (NaviCommand): o card só mostra o
+// botão de copiar quando o front-end decide que vale a pena (alvo atingido
+// ou item disponível), mas o servidor não sabe qual é o alvo do usuário (ele
+// vive só no navegador — ver watchlist.js), então busca sempre que encontra
+// um anúncio. O custo real fica baixo na prática: a mesma loja tende a
+// continuar sendo a mais barata de uma checagem para a próxima, e a segunda
+// em diante é só um peek no memo (ver lookupDetail).
 func (h *Handler) watchlistPriceForCheapest(r *http.Request, candidates []gnjoy.ShopListItem) watchlistPriceView {
 	if len(candidates) == 0 {
 		return watchlistPriceView{Found: false}
 	}
 	cheapest := candidates[0]
 	view := watchlistPriceView{Found: true, MinPrice: cheapest.ItemPrice}
-	if isEquipment(cheapest.DatabaseType) {
-		budget := 1
-		if refine, known, _ := h.lookupRefine(r, cheapest, &budget); known {
+
+	budget := 1
+	if detail, _ := h.lookupDetail(r, cheapest, &budget); detail != nil {
+		view.NaviCommand = naviCommand(detail.MapName, detail.Xpos, detail.Ypos)
+		if isEquipment(cheapest.DatabaseType) {
+			refine := detail.Refine
 			view.Refine = &refine
 		}
 	}
@@ -194,7 +217,7 @@ func (h *Handler) watchlistPriceForCheapest(r *http.Request, candidates []gnjoy.
 func (h *Handler) watchlistPriceForRefine(r *http.Request, candidates []gnjoy.ShopListItem, wantRefine int) watchlistPriceView {
 	budget := maxRefineDetailFetches
 	for _, candidate := range candidates {
-		refine, known, affordable := h.lookupRefine(r, candidate, &budget)
+		detail, affordable := h.lookupDetail(r, candidate, &budget)
 		if !affordable {
 			// Orçamento do ciclo esgotado: esta loja fica para o próximo (o
 			// memo guarda as já descobertas, então lá o orçamento avança para
@@ -203,8 +226,14 @@ func (h *Handler) watchlistPriceForRefine(r *http.Request, candidates []gnjoy.Sh
 			// consulta agora.
 			continue
 		}
-		if known && refine == wantRefine {
-			return watchlistPriceView{Found: true, MinPrice: candidate.ItemPrice, Refine: &refine}
+		if detail != nil && detail.Refine == wantRefine {
+			refine := detail.Refine
+			return watchlistPriceView{
+				Found:       true,
+				MinPrice:    candidate.ItemPrice,
+				Refine:      &refine,
+				NaviCommand: naviCommand(detail.MapName, detail.Xpos, detail.Ypos),
+			}
 		}
 	}
 	// Não achou dentro do que o memo e o orçamento deste ciclo alcançaram.

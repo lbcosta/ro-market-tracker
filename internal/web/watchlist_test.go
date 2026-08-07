@@ -11,9 +11,10 @@ import (
 )
 
 type watchlistPriceResponse struct {
-	Found    bool  `json:"found"`
-	MinPrice int64 `json:"minPrice"`
-	Refine   *int  `json:"refine"`
+	Found       bool   `json:"found"`
+	MinPrice    int64  `json:"minPrice"`
+	Refine      *int   `json:"refine"`
+	NaviCommand string `json:"naviCommand"`
 }
 
 // TestWatchlistPriceMenorPreco é o caso padrão da watchlist: sem refino
@@ -44,6 +45,9 @@ func TestWatchlistPriceMenorPreco(t *testing.T) {
 	if *view.Refine != 0 {
 		t.Errorf("Refine = %d, quero 0 (o anúncio mais barato é o sem refino)", *view.Refine)
 	}
+	if view.NaviCommand != "/navi prt_mk.gat 114/180" {
+		t.Errorf("NaviCommand = %q, quero a localização da loja mais barata", view.NaviCommand)
+	}
 
 	// Uma busca + o detalhe da loja mais barata: nada além disso.
 	if got := mock.RequestCount(); got != 2 {
@@ -72,7 +76,9 @@ func TestWatchlistPriceFiltraPorItemId(t *testing.T) {
 }
 
 // TestWatchlistPriceItemNaoEquipamento confirma que itens sem refino não
-// ganham um "+0" enganoso: o campo simplesmente não vem.
+// ganham um "+0" enganoso: o campo simplesmente não vem. A localização, essa
+// sim, vem — ela não depende do item ser equipamento (ver comentário de
+// watchlistPriceForCheapest).
 func TestWatchlistPriceItemNaoEquipamento(t *testing.T) {
 	srv, mock := newWebServer(t)
 
@@ -89,10 +95,14 @@ func TestWatchlistPriceItemNaoEquipamento(t *testing.T) {
 	if view.Refine != nil {
 		t.Errorf("Refine = %d, quero ausente para um item que não é equipamento", *view.Refine)
 	}
+	if view.NaviCommand != "/navi prt_mk.gat 100/100" {
+		t.Errorf("NaviCommand = %q, quero a localização da loja mesmo sem equipamento", view.NaviCommand)
+	}
 
-	// Sem equipamento, não há motivo para consultar o detalhe da loja.
-	if got := mock.RequestCount(); got != 1 {
-		t.Errorf("houve %d requisições ao upstream, quero só a busca", got)
+	// Busca + o detalhe da loja mais barata (agora sempre consultado, para a
+	// localização — ver watchlistPriceForCheapest).
+	if got := mock.RequestCount(); got != 2 {
+		t.Errorf("houve %d requisições ao upstream, quero 2", got)
 	}
 }
 
@@ -105,22 +115,23 @@ func TestWatchlistPriceComRefinoFixado(t *testing.T) {
 		refine       string
 		wantFound    bool
 		wantPrice    int64
+		wantNavi     string
 		wantRequests int
 	}{
 		{
 			// Primeiro candidato (o mais barato) já bate.
 			name: "refino do anúncio mais barato", refine: "0",
-			wantFound: true, wantPrice: 129999999, wantRequests: 2,
+			wantFound: true, wantPrice: 129999999, wantNavi: "/navi prt_mk.gat 114/180", wantRequests: 2,
 		},
 		{
 			// Busca + detalhe do 1º (não bate) + detalhe do 2º (bate).
 			name: "refino intermediário", refine: "7",
-			wantFound: true, wantPrice: 158000000, wantRequests: 3,
+			wantFound: true, wantPrice: 158000000, wantNavi: "/navi prt_mk.gat 120/150", wantRequests: 3,
 		},
 		{
 			// Precisa varrer os três candidatos até achar.
 			name: "refino do anúncio mais caro", refine: "10",
-			wantFound: true, wantPrice: 299999999, wantRequests: 4,
+			wantFound: true, wantPrice: 299999999, wantNavi: "/navi prt_mk.gat 99/42", wantRequests: 4,
 		},
 		{
 			// Nenhum anúncio nesse refino: varre todos e não acha.
@@ -156,6 +167,9 @@ func TestWatchlistPriceComRefinoFixado(t *testing.T) {
 				}
 				if view.Refine == nil || *view.Refine != wantRefine {
 					t.Errorf("Refine = %v, quero %d", view.Refine, wantRefine)
+				}
+				if view.NaviCommand != tt.wantNavi {
+					t.Errorf("NaviCommand = %q, quero %q", view.NaviCommand, tt.wantNavi)
 				}
 			}
 			if got := mock.RequestCount(); got != tt.wantRequests {
@@ -269,6 +283,9 @@ func TestWatchlistPriceRefinoIndisponivel(t *testing.T) {
 	}
 	if view.Refine != nil {
 		t.Errorf("Refine = %d, quero ausente quando o detalhe da loja não veio", *view.Refine)
+	}
+	if view.NaviCommand != "" {
+		t.Errorf("NaviCommand = %q, quero ausente quando o detalhe da loja não veio", view.NaviCommand)
 	}
 }
 

@@ -319,6 +319,14 @@ Cada linha da watchlist mostra:
 - O menor preço anunciado agora (respeitando o refino fixado, se houver).
 - Um badge "🎯 Alvo atingido" e a linha destacada com borda verde, quando o
   menor preço atual está no valor do alvo ou abaixo dele.
+- Junto do badge, a localização da loja mais barata como um botão
+  `/navi <mapa> <x>/<y>` — mesmo botão e mesma função `copyNavi` do card de
+  detalhe da busca (ver acima): clicar copia o comando para a área de
+  transferência. Só aparece enquanto o badge estiver visível (some de novo
+  se o preço voltar a subir do alvo) — o servidor manda a localização em
+  toda consulta que encontra um anúncio (ele não sabe qual é o alvo do
+  usuário, que vive só no navegador), mas quem decide mostrar é o
+  front-end.
 - Um "↻" para consultar só aquele item na hora, ignorando o cache do
   servidor — a única forma de forçar uma atualização; não existe mais um
   botão que force a lista inteira (ver "Monitoramento e alertas" abaixo).
