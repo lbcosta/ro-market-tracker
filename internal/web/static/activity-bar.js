@@ -55,18 +55,19 @@ function activityLineText(ev) {
   return suffix ? ev.label + " " + suffix : ev.label;
 }
 
-// formatTime mostra o horário local de startedAt (HH:MM:SS) — o mesmo
-// instante nas três fases de uma chamada (aguardando/em voo/concluída, ver
-// StartedAt em internal/gnjoy/activity.go), então o horário de uma linha não
-// muda enquanto ela avança de status. Segundos entram porque o rate limiter
-// padrão dispara cerca de uma chamada por segundo — sem eles, várias linhas
-// seguidas mostrariam o mesmo minuto.
+// formatTime mostra, entre colchetes, o horário local de startedAt
+// ("[14:32:07]") — o mesmo instante nas três fases de uma chamada
+// (aguardando/em voo/concluída, ver StartedAt em internal/gnjoy/activity.go),
+// então o horário de uma linha não muda enquanto ela avança de status.
+// Segundos entram porque o rate limiter padrão dispara cerca de uma chamada
+// por segundo — sem eles, várias linhas seguidas mostrariam o mesmo minuto.
 function formatTime(ms) {
-  return new Date(ms).toLocaleTimeString("pt-BR", {
+  const hora = new Date(ms).toLocaleTimeString("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
   });
+  return "[" + hora + "]";
 }
 
 function renderCurrentLine() {
@@ -115,15 +116,15 @@ function renderHistory() {
     li.className = activityStatusClass(ev.status);
     if (ev.status === "error" && ev.error) li.title = ev.error;
 
-    const textEl = document.createElement("span");
-    textEl.className = "activity-history-text";
-    textEl.textContent = activityLineText(ev);
-    li.appendChild(textEl);
-
     const timeEl = document.createElement("span");
     timeEl.className = "activity-time";
     timeEl.textContent = formatTime(ev.startedAt);
     li.appendChild(timeEl);
+
+    const textEl = document.createElement("span");
+    textEl.className = "activity-history-text";
+    textEl.textContent = activityLineText(ev);
+    li.appendChild(textEl);
 
     list.appendChild(li);
   }

@@ -79,13 +79,13 @@ test("a chamada anterior fica logo acima da atual no histórico", async ({ page 
 });
 
 // A hora ajuda a entender QUANDO cada chamada aconteceu, não só o quê — fica
-// sempre na ponta direita da linha (tanto na atual quanto no histórico), que
-// é a ponta direita da tela: a barra ocupa a largura inteira.
+// sempre à esquerda da linha (tanto na atual quanto no histórico), entre
+// colchetes e menos destacada que a mensagem ao lado.
 test("cada linha mostra o horário em que a requisição foi feita", async ({ page }) => {
   await buscar(page, "Espada");
 
   const horaAtual = page.locator("#activity-current-time");
-  await expect(horaAtual).toHaveText(/^\d{2}:\d{2}:\d{2}$/, ESPERA_ATIVIDADE);
+  await expect(horaAtual).toHaveText(/^\[\d{2}:\d{2}:\d{2}\]$/, ESPERA_ATIVIDADE);
 
   await buscar(page, "Poring");
   await expect(page.locator("#activity-current-label")).toContainText("Poring", ESPERA_ATIVIDADE);
@@ -93,7 +93,7 @@ test("cada linha mostra o horário em que a requisição foi feita", async ({ pa
 
   const linhaAnterior = page.locator("#activity-history li").last();
   await expect(linhaAnterior).toContainText("Espada");
-  await expect(linhaAnterior.locator(".activity-time")).toHaveText(/^\d{2}:\d{2}:\d{2}$/);
+  await expect(linhaAnterior.locator(".activity-time")).toHaveText(/^\[\d{2}:\d{2}:\d{2}\]$/);
 });
 
 test("uma chamada que falha aparece em vermelho com [Erro]", async ({ page, request }) => {
