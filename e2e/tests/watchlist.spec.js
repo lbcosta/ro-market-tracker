@@ -103,6 +103,52 @@ test("reordenar não custa nenhuma consulta ao site", async ({ page, request }) 
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
 });
 
+// Idem para o botão "+": a linha mostra o cache assim que a página existe,
+// sem esperar a consulta responder — é o mesmo dado que fetchLivePrice
+// mostraria, só que lido do localStorage em vez de vir de rede.
+test("recarregar mostra o cache na hora, sem esperar nenhuma consulta", async ({ page }) => {
+  await adicionarTresItens(page);
+  await expect(page.locator(".watchlist-row .watchlist-current"))
+    .toContainText(["z", "z", "z"], ESPERA_PRECO);
+  const precosAntes = await page.locator(".watchlist-row .watchlist-current").allTextContents();
+
+  await page.reload();
+
+  // Sem "await" de rede antes desta asserção: se a linha nascesse com o
+  // spinner de novo (como antes desta mudança), o texto não bateria aqui.
+  await expect(page.locator(".watchlist-row .watchlist-current")).toHaveText(precosAntes);
+});
+
+// O rodízio automático (pickNextEntry) escolhe sempre o item há mais tempo
+// sem consulta — no recarregamento, é o primeiro que foi adicionado (e por
+// isso o primeiro a ter sido consultado). Este teste também trava a rajada:
+// se o recarregamento voltasse a consultar a lista inteira, "consultas"
+// teria três entradas, não uma.
+test("recarregar consulta só o item mais antigo do rodízio, não os três", async ({ page }) => {
+  // Adiciona um de cada vez, esperando o preço de cada um voltar antes do
+  // próximo clique: é o que garante lastCheckedAt em ordem estrita de
+  // adição — adicionarTresItens não serve aqui porque os três cliques saem
+  // em sequência rápida, e as respostas podem voltar fora de ordem.
+  await buscar(page, "Espada");
+  for (const nome of ["Espada Primordial", "Espada Citadina", "Carta Peixe-Espada"]) {
+    await clicarWatchlistDoItem(page, nome);
+    await expect(page.locator(".watchlist-row", { hasText: nome }).locator(".watchlist-current"))
+      .toContainText("z", ESPERA_PRECO);
+  }
+  const idDoMaisAntigo = await page.locator(".watchlist-row").nth(0).getAttribute("data-id");
+
+  const consultas = [];
+  page.on("response", (r) => {
+    const url = new URL(r.url());
+    if (url.pathname === "/web/watchlist/price") consultas.push(url.searchParams.get("itemId"));
+  });
+
+  await page.reload();
+
+  await expect.poll(() => consultas.length).toBeGreaterThan(0);
+  expect(consultas).toEqual([idDoMaisAntigo.split(":")[1]]);
+});
+
 // Sem nenhuma busca ainda, não há por que reservar a coluna de resultados —
 // ela está vazia. A watchlist aparece expandida por padrão, sem que ninguém
 // precise clicar em nada.
@@ -491,7 +537,7 @@ test("quando o item aparece no mercado, a watchlist avisa", async ({ page, reque
     itemId: 25690,
     price: 6000000,
   });
-  await page.click("#watchlist-refresh-now");
+  await linha.locator(".watchlist-refresh-item").click();
 
   await expect(linha.locator(".watchlist-current")).toHaveText("Produto encontrado por 6.000.000 z", ESPERA_PRECO);
   await expect(linha.locator(".watchlist-hit-badge")).toBeVisible();
@@ -524,16 +570,32 @@ test("um item adicionado pela busca continua acompanhando preço", async ({ page
   await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 129.999.999 z", ESPERA_PRECO);
 });
 
-test("o cronômetro conta e o botão de atualizar agora o reinicia", async ({ page }) => {
+test("o cronômetro conta até o próximo tick automático de 1 minuto", async ({ page }) => {
   const cronometro = page.locator("#watchlist-countdown");
 
-  // O ciclo de monitoramento é de 5 minutos.
-  await expect(cronometro).toHaveText("05:00");
+  // O tick automático é a cada 1 minuto.
+  await expect(cronometro).toHaveText("01:00");
 
-  // Espera o suficiente para o cronômetro sair de 05:00.
-  await expect(cronometro).not.toHaveText("05:00", { timeout: 5_000 });
+  // Espera o suficiente para o cronômetro sair de 01:00.
+  await expect(cronometro).not.toHaveText("01:00", { timeout: 5_000 });
+});
 
-  await page.click("#watchlist-refresh-now");
+// O botão "↻" de cada linha é a única forma de forçar uma consulta desde que
+// o "atualizar agora" global saiu — e, ao contrário dele, não mexe no
+// cronômetro do rodízio automático nem nos outros itens.
+test("o botão de atualizar agora de um item não reinicia o cronômetro nem mexe nos outros", async ({ page }) => {
+  await adicionarTresItens(page);
+  await expect(page.locator(".watchlist-row .watchlist-current"))
+    .toContainText(["z", "z", "z"], ESPERA_PRECO);
 
-  await expect(cronometro).toHaveText("05:00");
+  const cronometro = page.locator("#watchlist-countdown");
+  await expect(cronometro).not.toHaveText("01:00", { timeout: 5_000 });
+
+  const segundaLinha = page.locator(".watchlist-row").nth(1);
+  const resposta = page.waitForResponse((r) => new URL(r.url()).pathname === "/web/watchlist/price");
+  await segundaLinha.locator(".watchlist-refresh-item").click();
+  await resposta;
+
+  // Continua contando de onde estava — não voltou para 01:00.
+  await expect(cronometro).not.toHaveText("01:00");
 });

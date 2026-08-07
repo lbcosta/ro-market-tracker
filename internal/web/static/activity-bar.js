@@ -196,7 +196,7 @@ function applySuspension(state) {
 
   // A watchlist inteira: nada de consultar preço, editar alvo ou ligar o
   // monitoramento de um item enquanto não há como consultar o mercado.
-  document.querySelectorAll("#watchlist-list button, #watchlist-refresh-now")
+  document.querySelectorAll("#watchlist-list button")
     .forEach((el) => { el.disabled = suspended; });
 
   if (typeof setWatchlistSuspended === "function") setWatchlistSuspended(suspended);

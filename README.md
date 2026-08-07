@@ -319,6 +319,9 @@ Cada linha da watchlist mostra:
 - O menor preço anunciado agora (respeitando o refino fixado, se houver).
 - Um badge "🎯 Alvo atingido" e a linha destacada com borda verde, quando o
   menor preço atual está no valor do alvo ou abaixo dele.
+- Um "↻" para consultar só aquele item na hora, ignorando o cache do
+  servidor — a única forma de forçar uma atualização; não existe mais um
+  botão que force a lista inteira (ver "Monitoramento e alertas" abaixo).
 - Um "×" para remover da lista.
 
 O preço atual (e o refino) é a única parte que depende do servidor:
@@ -343,13 +346,13 @@ ver teste com "Espada", que retorna itens com itemId 600009, 1147 e 4089) e:
 As consultas do frontend passam por um cache de resultados no servidor
 (`internal/web/cache.go`, TTL + deduplicação de buscas concorrentes via
 `singleflight`): a checagem automática da watchlist aceita um resultado de
-até 4 minutos (`monitorMaxAge` — menor que o ciclo, então a aba que chega
-primeiro sempre renova), e a busca/histórico interativos aceitam até 30
-segundos (`freshMaxAge` — um F5 ou um clique de ordenação não vão ao
-upstream de novo). O botão "↻" da watchlist envia `fresh=1`, que ignora o
-cache: quem apertou quer o estado de agora. É esse cache que faz várias
-abas abertas, recarregamentos de página e o ciclo de monitoramento não
-multiplicarem o tráfego contra o GnJoy.
+até 4 minutos (`monitorMaxAge` — como o array da watchlist mora em
+`localStorage`, compartilhado entre abas da mesma origem, várias abas tendem
+a escolher o mesmo item a cada tick, e é esse cache que absorve a
+sobreposição), e a busca/histórico interativos aceitam até 30 segundos
+(`freshMaxAge` — um F5 ou um clique de ordenação não vão ao upstream de
+novo). O botão "↻" de cada linha da watchlist envia `fresh=1`, que ignora o
+cache: quem apertou quer o estado de agora.
 
 Ligar/desligar, editar o alvo e remover um item são só atualizações de
 `localStorage` + DOM, sem chamada ao servidor. Editar o refino fixado dispara
@@ -357,16 +360,14 @@ uma nova consulta de preço — o filtro mudou, o preço em cache não serve mai
 Adicionar um item novo busca o preço só dele (os demais já carregados não são
 recarregados).
 
-**Limite de 50 itens.** Cada item monitorado custa em geral uma requisição
-por ciclo (a busca do preço; o refino, uma vez descoberto, fica memoizado no
-servidor e não se repete). O ciclo consulta os itens em série, espaçados por
-`MONITOR_ITEM_SPACING_MS` (1s) — de propósito, no mesmo ritmo do rate limit
-padrão do site. Uma watchlist grande o bastante para ocupar o ciclo inteiro
-(5 min) não deixaria brecha para o resto — uma busca, expandir uma linha, a
-varredura de refino/bônus — sem enfileirar atrás dela, ciclo após ciclo. O
-teto reserva para a watchlist só 1/6 do ciclo: `(MONITOR_INTERVAL_MS / 6) /
-MONITOR_ITEM_SPACING_MS = 50`. Ao esbarrar nele, um toast explica e nada é
-adicionado.
+**Limite de 50 itens.** O ritmo automático é sempre de UMA consulta por
+minuto, revezando entre os itens monitorados (ver "Monitoramento e alertas"
+abaixo) — o intervalo entre duas consultas do MESMO item cresce com o
+tamanho da lista, aproximadamente `N × 1 min`. Sem teto, uma watchlist muito
+grande faria cada item demorar cada vez mais para ser reconsultado; 50 itens
+já significa quase uma hora entre uma consulta e a seguinte do mesmo item —
+grande o bastante para acompanhar listas razoáveis sem o intervalo virar
+impraticável. Ao esbarrar nele, um toast explica e nada é adicionado.
 
 **Expandir o painel.** O botão "«"/"»" no cabeçalho (ao lado do cronômetro)
 esconde a coluna de resultados e faz a watchlist ocupar a largura inteira da
@@ -414,13 +415,31 @@ tratadas como acompanhamento de preço, que era o único comportamento.
 
 #### Monitoramento e alertas
 
-Enquanto a página estiver aberta, a cada 5 minutos
-(`MONITOR_INTERVAL_MS` em `watchlist.js`) os itens com o indicador ligado
-(verde) têm o preço reconsultado — um item por vez, em série, com 1 segundo
-de pausa entre um e o próximo (`MONITOR_ITEM_SPACING_MS`): o servidor
-enfileiraria as consultas paralelas de qualquer forma, e despejar a lista
-inteira de uma vez só atrasaria uma busca feita no meio do ciclo. Se a condição que o item acompanha passar
-a valer, o usuário é avisado de duas formas:
+Enquanto a página estiver aberta, a cada minuto (`MONITOR_TICK_MS` em
+`watchlist.js`) UM item entre os com o indicador ligado (verde) tem o preço
+reconsultado — nunca a lista inteira de uma vez. O escolhido é sempre o que
+está há mais tempo sem consulta (`pickNextEntry`: o `lastCheckedAt` mais
+antigo entre os monitorados, nunca consultado contando como o mais antigo de
+todos, com empate desfeito pela ordem de exibição); isso faz os itens
+revezarem sozinhos, sem um cursor/fila separado para acompanhar
+adições e remoções — remover um item da lista simplesmente tira-o da
+disputa, e um item recém-adicionado (ou recolocado) entra na frente por
+nunca ter sido consultado. É esse rodízio, e não mais um ciclo de vários
+minutos despachando tudo de uma vez em série, que garante o ritmo constante
+de uma requisição por minuto não importa quantos itens a watchlist tenha.
+
+Cada linha nasce com o último resultado conhecido — persistido na própria
+entrada (`lastResult`, junto de `lastCheckedAt`) — pintado na hora, sem
+nenhuma requisição; a única consulta de verdade do carregamento é a do item
+escolhido pelo rodízio, disparada imediatamente (sem esperar o primeiro
+minuto). O botão "↻" de cada linha (ver acima) força uma consulta só
+daquele item a qualquer momento, sem tocar no cronômetro nem no item que o
+tick automático escolheria a seguir — o `lastCheckedAt` dele também é
+atualizado, então ele naturalmente sai da frente da fila até voltar a ser o
+mais antigo.
+
+Se a condição que o item acompanha passar a valer, o usuário é avisado de
+duas formas:
 
 - Um toast no canto inferior direito da página (sempre aparece, não
   depende de nenhuma permissão do navegador).
@@ -436,17 +455,21 @@ se ela deixar de valer e voltar a valer depois, um novo aviso é disparado.
 Esse estado ("já avisado desta vez") é persistido em `localStorage` junto
 com o resto da entrada.
 
-Itens com o indicador desligado (vermelho) continuam na lista, mas não são
-reconsultados pela checagem periódica nem podem disparar aviso enquanto
-assim permanecerem — eles ainda têm o preço atualizado ao carregar a
-página ou ao serem adicionados, só não entram no ciclo de 5 minutos.
+Itens com o indicador desligado (vermelho) continuam na lista, mas não
+disputam a vez do rodízio nem podem disparar aviso enquanto assim
+permanecerem — eles ainda têm o preço atualizado ao carregar a página (do
+cache) ou ao serem adicionados, só não voltam a ser consultados
+automaticamente enquanto desligados.
 
 Como a watchlist vive só no navegador, o monitoramento também só roda
 enquanto uma aba com a página estiver aberta; fechar a aba interrompe as
-checagens até ela ser reaberta (quando o ciclo recomeça imediatamente,
-antes do primeiro intervalo de 5 minutos). Várias abas abertas rodam cada
-uma o próprio ciclo, mas o cache do servidor absorve as checagens
-repetidas — só a primeira de cada janela vai ao upstream.
+checagens até ela ser reaberta (quando o rodízio retoma de onde parou,
+graças ao `lastCheckedAt` persistido, e a primeira consulta sai na hora, sem
+esperar o primeiro minuto). Várias abas abertas rodam cada uma o próprio
+tick, mas como o array da watchlist mora no mesmo `localStorage`
+compartilhado entre elas, tendem a escolher o mesmo item por vez — e o
+cache do servidor absorve essa sobreposição, sem coordenação explícita entre
+abas.
 
 O HTMX é vendorizado localmente em `internal/web/static/htmx.min.js`
 (embutido no binário via `go:embed`) — não depende de CDN em runtime.

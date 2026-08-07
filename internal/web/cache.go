@@ -19,11 +19,12 @@ const (
 	freshMaxAge = 30 * time.Second
 
 	// monitorMaxAge é a validade aceita pela checagem automática da
-	// watchlist. É deliberadamente MENOR que o intervalo do ciclo (5 min,
-	// ver MONITOR_INTERVAL_MS em static/watchlist.js): assim a aba que
-	// chega primeiro em cada ciclo sempre renova os dados, e o que as
-	// outras abas — e os recarregamentos de página — encontram é um cache
-	// ainda válido, em vez de motivo para outra ida ao upstream.
+	// watchlist. Como o array da watchlist — inclusive quando cada item foi
+	// consultado por último — mora no localStorage, compartilhado entre
+	// abas da mesma origem, várias abas tendem a escolher o mesmo item a
+	// cada tick (ver pickNextEntry em static/watchlist.js); esta validade é
+	// o que faz a segunda (e a terceira...) encontrar um cache ainda válido
+	// em vez de gerar outra ida ao upstream.
 	monitorMaxAge = 4 * time.Minute
 
 	searchCacheSize      = 256

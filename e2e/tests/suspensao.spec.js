@@ -2,6 +2,7 @@ const { test, expect } = require("@playwright/test");
 const {
   resetPage,
   buscar,
+  clicarWatchlistDoItem,
   contarRequisicoesAoUpstream,
   zerarContagemDoUpstream,
   falharProximasRequisicoes,
@@ -32,6 +33,18 @@ test.afterEach(async ({ page }) => {
 test("um 429 mostra o aviso e trava a busca", async ({ page, request }) => {
   await expect(page.locator(banner)).toBeHidden();
 
+  // Um item na watchlist para checar, junto do resto, que o botão de
+  // atualizar DELE também trava — a suspensão é da watchlist inteira, não só
+  // do formulário de busca. O item aqui ("Espada Citadina") precisa ser
+  // DIFERENTE do usado para provocar o 429 abaixo ("Espada Primordial"): a
+  // própria consulta de preço da watchlist já cacheia o nome exato do item
+  // por até 4 minutos (monitorMaxAge) — se fosse o mesmo, a busca que devia
+  // falhar reaproveitaria esse cache em vez de ir ao upstream, e a falha
+  // configurada nunca seria consumida.
+  await buscar(page, "Espada");
+  await clicarWatchlistDoItem(page, "Espada Citadina");
+  await expect(page.locator(".watchlist-current")).toContainText("z", { timeout: 15_000 });
+
   await falharProximasRequisicoes(request, { status: 429, times: 1, retryAfter: 0 });
   await buscar(page, "Espada Primordial", { esperarResultados: false });
 
@@ -42,7 +55,7 @@ test("um 429 mostra o aviso e trava a busca", async ({ page, request }) => {
   // clicando em algo que não vai funcionar.
   await expect(page.locator('input[name="item"]')).toBeDisabled();
   await expect(page.locator(".search-button")).toBeDisabled();
-  await expect(page.locator("#watchlist-refresh-now")).toBeDisabled();
+  await expect(page.locator(".watchlist-refresh-item").first()).toBeDisabled();
 });
 
 test("enquanto suspenso, nenhuma busca chega ao site", async ({ page, request }) => {

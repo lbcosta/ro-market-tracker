@@ -791,7 +791,6 @@ h4 {
   font-variant-numeric: tabular-nums;
 }
 
-#watchlist-refresh-now,
 #watchlist-expand {
   flex-shrink: 0;
   border: none;
@@ -804,7 +803,6 @@ h4 {
   border-radius: 4px;
 }
 
-#watchlist-refresh-now:hover,
 #watchlist-expand:hover {
   background: var(--border);
   color: var(--accent);
@@ -966,6 +964,23 @@ h4 {
 .watchlist-hit-badge {
   font-weight: 600;
   color: var(--success);
+}
+
+.watchlist-refresh-item {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+}
+
+.watchlist-refresh-item:hover {
+  background: var(--border);
+  color: var(--accent);
 }
 
 .watchlist-row.target-hit {
