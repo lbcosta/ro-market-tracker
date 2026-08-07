@@ -86,8 +86,12 @@ test("arrastar uma linha reordena a watchlist", async ({ page }) => {
 // watchlist — é este teste que trava essa armadilha.
 test("reordenar não custa nenhuma consulta ao site", async ({ page, request }) => {
   await adicionarTresItens(page);
-  await expect(page.locator(".watchlist-row").first().locator(".watchlist-current"))
-    .toContainText("z", ESPERA_PRECO);
+  // As TRÊS consultas de preço têm de ter voltado antes de zerar a contagem.
+  // Esperar só a primeira linha deixa as outras duas em voo — elas saem
+  // espaçadas pelo rate limiter — e a que chegasse ao site depois do
+  // zeramento entraria na conta como se fosse custo da reordenação.
+  await expect(page.locator(".watchlist-row .watchlist-current"))
+    .toContainText(["z", "z", "z"], ESPERA_PRECO);
 
   await zerarContagemDoUpstream(request);
 
