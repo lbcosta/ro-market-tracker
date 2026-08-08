@@ -796,6 +796,29 @@ O `databaseType` é o mesmo `"armor"` para armaduras, acessórios e chapéus —
 não há tipo separado para eles. Existe também `"costume"` (visuais). Ou seja,
 `weapon` + `armor` cobre tudo que pode ter refino ou bônus aleatórios.
 
+### Em aberto: a posição do equipamento (e quem aceita refino)
+
+No jogo, só refinam **arma, armadura, capa, bota, escudo e chapéu de topo**;
+chapéu de baixo, chapéu do meio e acessório não. O programa hoje oferece
+refino para todo `weapon`/`armor`, porque **nenhum campo conhecido distingue a
+posição do equipamento** — o `databaseType` colapsa todos, como está acima.
+
+Antes de recorrer a uma tabela local de itens (manutenção sem fim) ou a
+heurística de nome (frágil), falta descartar a hipótese mais barata: **o JSON
+cru do detalhe de um equipamento nunca foi capturado**. A única captura
+completa da action `item` neste documento é de um `miscellaneous` ("Pó de
+Éter"), e o parsing usa `json.Unmarshal` sem `DisallowUnknownFields`, então um
+campo de posição que o site mande estaria sendo descartado em silêncio. O
+suspeito mais provável é `itemType`, que é decodificado e nunca usado, e cujo
+valor real para equipamentos é desconhecido (nos testes ele só aparece igual
+ao `databaseType` porque o mock copia um no outro).
+
+Para capturar, subir com `GNJOY_DUMP_ACTIONS=1` e expandir uma linha da busca
+(o expand dispara `store` e `item` de uma vez) de uma arma, uma armadura, um
+acessório e um chapéu de baixo/meio — o contraste entre um `armor` que refina
+e um que não refina é o que responde a pergunta. Ver a seção
+"Inspecionar a resposta crua do site" no README.
+
 ## Defeito do upstream: pontuação no termo de busca
 
 O backend de busca do GnJoy só aceita **letras, dígitos e espaços** no

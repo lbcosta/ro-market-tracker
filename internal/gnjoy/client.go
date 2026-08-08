@@ -116,6 +116,11 @@ type Client struct {
 	suspension   *SuspensionState
 	suspendOn429 bool
 
+	// dumpActions registra no log a resposta crua de cada Server Action, para
+	// inspecionar o que o site manda além do que este pacote decodifica —
+	// ver WithActionDump.
+	dumpActions bool
+
 	actionIDMu sync.RWMutex
 	actionID   string
 
@@ -156,6 +161,21 @@ func WithHTTPClient(hc *http.Client) Option {
 // de até burst requisições. Veja DefaultRateLimitRPS/DefaultRateLimitBurst.
 func WithRateLimit(rps float64, burst int) Option {
 	return func(c *Client) { c.limiter = rate.NewLimiter(rate.Limit(rps), burst) }
+}
+
+// WithActionDump registra, no log, o JSON CRU que cada Server Action devolve,
+// antes de ele ser decodificado nas structs deste pacote.
+//
+// Existe porque a decodificação é silenciosa quanto ao que não conhece: os
+// campos são lidos com json.Unmarshal sem DisallowUnknownFields, então um
+// campo que o site passe a mandar — ou que nunca tenhamos reparado — some sem
+// deixar rastro. Quando surge a pergunta "o site expõe X?", esta é a única
+// forma de responder olhando o dado real em vez do que já mapeamos.
+//
+// Fica desligada por padrão e atrás de uma option própria (e não do nível de
+// log) porque o volume é alto e o conteúdo é a resposta inteira do upstream.
+func WithActionDump() Option {
+	return func(c *Client) { c.dumpActions = true }
 }
 
 // WithSuspendOn429 faz o primeiro 429 suspender TODAS as consultas até o site
@@ -450,6 +470,21 @@ func truncateBody(body []byte) string {
 		body = body[:maxLen]
 	}
 	return string(body)
+}
+
+// truncateDump corta o dump da resposta crua de uma action (ver
+// WithActionDump). O teto é muito maior que o de truncateBody porque os dois
+// servem a coisas opostas: aquele resume o corpo de um erro em uma linha de
+// log, este existe para o payload chegar INTEIRO — cortar em 500 bytes
+// esconderia justamente os campos do fim do objeto, que são o motivo de
+// alguém ligar o dump. O teto continua existindo só para uma resposta
+// inesperadamente enorme não afogar o log.
+func truncateDump(data []byte) string {
+	const maxLen = 8 << 10
+	if len(data) > maxLen {
+		return string(data[:maxLen]) + "…(cortado)"
+	}
+	return string(data)
 }
 
 // retryAfterDuration decide quanto esperar antes de repetir uma requisição
@@ -759,6 +794,13 @@ func (c *Client) callActionWithID(ctx context.Context, actionType string, params
 	}
 	if !env.Success {
 		return fmt.Errorf("gnjoy: action %q reportou falha: %w", actionType, ErrActionFailed)
+	}
+	// Antes de decodificar, e não depois: o objetivo é justamente ver o que a
+	// decodificação descarta. Os params vão junto para dar para saber de qual
+	// anúncio é cada dump quando há vários no log.
+	if c.dumpActions {
+		slog.Info("gnjoy: resposta crua da action",
+			"action", actionType, "params", params, "data", truncateDump(env.Data))
 	}
 	if out == nil {
 		return nil

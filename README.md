@@ -523,6 +523,27 @@ Variáveis de ambiente (todas opcionais):
 | `GNJOY_RATE_LIMIT_RPS`                | `1` (`gnjoy.DefaultRateLimitRPS`)      | Requisições por segundo permitidas ao upstream       |
 | `GNJOY_RATE_LIMIT_BURST`              | `1` (`gnjoy.DefaultRateLimitBurst`)    | Rajada inicial permitida acima do ritmo sustentado   |
 | `GNJOY_SUSPENSION_PROBE_INTERVAL`     | `10m`                                  | Intervalo da sonda de recuperação após um `429` (ver [Suspensão](#suspensão-quando-o-429-não-é-um-tropeço)) |
+| `GNJOY_DUMP_ACTIONS`                  | desligado                              | `1` registra no log a resposta crua do site (ver [Inspecionar a resposta crua](#inspecionar-a-resposta-crua-do-site)) |
+
+### Inspecionar a resposta crua do site
+
+As respostas do GnJoy são decodificadas com `json.Unmarshal` sem
+`DisallowUnknownFields`, então **um campo que o site mande e o programa não
+conheça some sem deixar rastro**. Quando a pergunta é "o site expõe X?", não
+dá para responder olhando as structs — só olhando o dado real.
+
+Subir com `GNJOY_DUMP_ACTIONS=1` faz cada Server Action (`store`, `item`,
+histórico de preço) registrar no log o JSON que veio, antes de ser
+decodificado:
+
+```
+gnjoy: resposta crua da action action=item params=map[...] data={"itemId":...}
+```
+
+O dump sai junto dos `params`, para dar para saber de qual anúncio é cada
+linha quando há várias. **Expandir uma linha da busca** é o gesto que dispara
+as duas actions de detalhe (`store` e `item`) de uma vez. Fica desligado por
+padrão: o log é volumoso e traz a resposta inteira do upstream.
 
 ## Rate limiting
 

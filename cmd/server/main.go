@@ -50,6 +50,12 @@ func main() {
 	if opt, ok := rateLimitOptionFromEnv(); ok {
 		opts = append(opts, opt)
 	}
+	// Ferramenta de diagnóstico: mostra no log a resposta crua do site, para
+	// descobrir se ele manda algum campo que o programa ainda não lê (ver
+	// gnjoy.WithActionDump). Desligada por padrão — o log fica volumoso.
+	if os.Getenv("GNJOY_DUMP_ACTIONS") == "1" {
+		opts = append(opts, gnjoy.WithActionDump())
+	}
 	// Um 429 aqui não é um tropeço a insistir: é o site dizendo que a cota
 	// acabou. O programa para de falar com ele, avisa na tela e espera —
 	// insistir a partir daí só prolonga o bloqueio (ver internal/gnjoy/suspend.go).
