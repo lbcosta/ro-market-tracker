@@ -966,6 +966,50 @@ h4 {
   color: var(--success);
 }
 
+/* Os campos de bônus ocupam uma linha só deles, abaixo do preço: são frases
+   inteiras, e podem quebrar para a linha seguinte quando não couberem lado a
+   lado — ao contrário do badge "+7", que sempre cabe ao lado do nome. */
+.watchlist-bonus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+}
+
+/* Sem isto o atributo HTML "hidden" não tem efeito, pelo mesmo motivo já
+   documentado em .refine-badge[hidden]. */
+.watchlist-bonus[hidden] {
+  display: none;
+}
+
+.watchlist-bonus-chip {
+  cursor: pointer;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.watchlist-bonus-chip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Tracejado e em itálico: o mesmo vocabulário que .group-chip-desconhecido já
+   usa na busca para dizer "aqui não há dado", sem depender de cor. */
+.watchlist-bonus-chip.vazio {
+  border-style: dashed;
+  font-style: italic;
+}
+
+.watchlist-bonus-input {
+  width: 100%;
+  min-width: 8rem;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+}
+
 .watchlist-refresh-item {
   flex-shrink: 0;
   border: none;

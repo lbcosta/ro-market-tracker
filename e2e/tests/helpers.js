@@ -86,8 +86,15 @@ async function falharProximasRequisicoes(request, { status = 500, times = 1, ret
 // palavra pode casar vários itens de nomes diferentes (cada um com sua
 // própria seção e seu próprio botão) — ver internal/web/handlers.go
 // (resultsGroup).
-async function clicarWatchlistDoItem(page, itemName) {
-  await page.locator(".item-group-row", { hasText: itemName }).locator(".watchlist-button").click();
+//
+// Com as varreduras ligadas, o MESMO item também se divide em várias seções
+// (uma por refino, uma por combinação de bônus), e aí o nome sozinho não
+// identifica mais uma seção só: `etiqueta` desempata pelo texto do chip
+// daquela seção (ex.: "+7", "ATQ +3%", "sem bônus").
+async function clicarWatchlistDoItem(page, itemName, { etiqueta } = {}) {
+  let secao = page.locator(".item-group-row", { hasText: itemName });
+  if (etiqueta) secao = secao.filter({ hasText: etiqueta });
+  await secao.locator(".watchlist-button").click();
 }
 
 // anunciarNoMercado faz um item que ninguém estava anunciando aparecer na

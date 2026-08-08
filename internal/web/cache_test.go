@@ -215,13 +215,13 @@ func TestWatchlistPriceRefinoMemoizado(t *testing.T) {
 }
 
 // configComMuitosAnuncios monta um item com mais anúncios do que o orçamento
-// de detalhes de uma checagem (maxRefineDetailFetches), com a única unidade
+// de detalhes de uma checagem (maxDetailFetches), com a única unidade
 // no refino procurado deliberadamente além do primeiro orçamento — na 11ª
 // loja mais barata.
 func configComMuitosAnuncios(t *testing.T) gnjoytest.Config {
 	t.Helper()
-	if maxRefineDetailFetches != 8 {
-		t.Fatalf("maxRefineDetailFetches = %d; este teste assume 8 — reveja as contas dele", maxRefineDetailFetches)
+	if maxDetailFetches != 8 {
+		t.Fatalf("maxDetailFetches = %d; este teste assume 8 — reveja as contas dele", maxDetailFetches)
 	}
 
 	items := make([]gnjoytest.ShopListItem, 0, 12)
@@ -251,7 +251,7 @@ func configComMuitosAnuncios(t *testing.T) gnjoytest.Config {
 
 // TestWatchlistPriceOrcamentoDeDetalhes cobre o teto de custo do refino
 // fixado e a convergência entre ciclos: cada checagem consulta no máximo
-// maxRefineDetailFetches lojas NOVAS, e o que ela descobre fica no memo — o
+// maxDetailFetches lojas NOVAS, e o que ela descobre fica no memo — o
 // ciclo seguinte continua de onde ela parou até cobrir todos os anúncios.
 func TestWatchlistPriceOrcamentoDeDetalhes(t *testing.T) {
 	srv, mock := newWebServerWith(t, configComMuitosAnuncios(t))
@@ -272,7 +272,7 @@ func TestWatchlistPriceOrcamentoDeDetalhes(t *testing.T) {
 		t.Errorf("Found = true na primeira checagem, quero false (a unidade +5 está além do orçamento)")
 	}
 	if got := mock.RequestCount(); got != 9 {
-		t.Errorf("primeira checagem custou %d requisições, quero 9 (busca + %d detalhes)", got, maxRefineDetailFetches)
+		t.Errorf("primeira checagem custou %d requisições, quero 9 (busca + %d detalhes)", got, maxDetailFetches)
 	}
 
 	// 2ª checagem: a busca vem do cache e as 8 primeiras lojas do memo; o

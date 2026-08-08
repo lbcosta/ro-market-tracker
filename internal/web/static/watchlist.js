@@ -79,6 +79,34 @@ function entrySearchName(entry) {
   return entry.searchName || entry.itemName;
 }
 
+// BONUS_FILTER_SLOTS é quantos bônus aleatórios uma linha pode exigir.
+//
+// O site expõe quatro por anúncio (randomOpt1..4), mas na prática só os dois
+// primeiros aparecem preenchidos. Dois campos cobrem o que existe sem
+// carregar a linha — e, como o filtro é "os pedidos têm de estar presentes",
+// pedir dois de uma unidade que tem quatro continua encontrando ela: é um
+// filtro mais frouxo, nunca um que exclua o anúncio de origem.
+const BONUS_FILTER_SLOTS = 2;
+
+// entryBonusSlots devolve os filtros de bônus da entrada SEMPRE com
+// BONUS_FILTER_SLOTS posições, preenchendo com "" o que faltar — é o que a
+// linha renderiza, um campo por posição.
+//
+// Posição fixa, e não lista compacta: com uma lista, limpar o primeiro campo
+// faria o bônus do segundo pular para o lugar dele, debaixo do cursor de quem
+// estava editando. Entradas gravadas antes dos bônus existirem não têm o
+// campo, e caem no caso "tudo vazio" sem precisar de migração.
+function entryBonusSlots(entry) {
+  const slots = Array.isArray(entry.bonusFilters) ? entry.bonusFilters : [];
+  return Array.from({ length: BONUS_FILTER_SLOTS }, (_, i) => (slots[i] || "").trim());
+}
+
+// entryBonusFilters são só os bônus de fato exigidos — é o que vai para a
+// URL da consulta de preço. Um campo em branco não é filtro nenhum.
+function entryBonusFilters(entry) {
+  return entryBonusSlots(entry).filter((b) => b !== "");
+}
+
 // lastKnownPrice guarda, em memória (não persistido), o último preço mínimo
 // visto por item — usado para reavaliar o status de "alvo atingido" na hora
 // (sem esperar a próxima consulta) quando o usuário edita o preço alvo.
@@ -121,14 +149,40 @@ function updateEntry(id, changes) {
 // uma unidade diferente do mesmo item — a "+7" e a "+10" da mesma espada são
 // duas linhas legítimas —, então o refino entra no id.
 //
-// Sem refino fixado o id continua "server:itemId": as entradas gravadas antes
-// desta mudança seguem válidas, sem migração.
+// Os bônus entram pelo mesmo motivo: com a busca separada por bônus, as
+// unidades "CRIT +4" e "CRIT +5" do mesmo item são duas seções, e clicar no
+// "+ Watchlist" das duas tem de dar duas linhas — sem isso, a segunda seria
+// descartada como duplicata.
 //
-// É opaco e não muda depois de criado: editar o refino pela linha altera o
-// refineFilter, não o id.
-function watchlistId(server, itemId, refineFilter) {
-  if (refineFilter == null) return server + ":" + itemId;
-  return server + ":" + itemId + ":+" + refineFilter;
+// Sem refino nem bônus fixados o id continua "server:itemId": as entradas
+// gravadas antes desta mudança seguem válidas, sem migração.
+//
+// É opaco e não muda depois de criado: editar o refino ou os bônus pela linha
+// altera os filtros, não o id.
+function watchlistId(server, itemId, refineFilter, bonusFilters) {
+  let id = server + ":" + itemId;
+  if (refineFilter != null) id += ":+" + refineFilter;
+
+  // Ordenado antes de virar chave, como o bonusKey do servidor faz: a mesma
+  // combinação em ordens diferentes é a mesma linha.
+  const bonus = (bonusFilters || []).map((b) => (b || "").trim()).filter((b) => b !== "");
+  if (bonus.length > 0) id += ":ba" + hashKey(bonus.sort().join(""));
+  return id;
+}
+
+// hashKey resume um texto em algo curto e estável (FNV-1a de 32 bits, em
+// base36). Os bônus entram no id como hash, e não como as frases inteiras,
+// porque o id vai parar num atributo data-id e volta por seletor CSS —
+// carregar frases com aspas, barras e acentos até lá seria fragilidade sem
+// ganho nenhum, já que o id é opaco de propósito.
+function hashKey(text) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    // Multiplicação de 32 bits sem estourar para ponto flutuante.
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(36);
 }
 
 // parseRefineData lê o data-refine que o cabeçalho da seção emite quando a
@@ -138,6 +192,26 @@ function parseRefineData(raw) {
   if (raw == null || raw === "") return null;
   const parsed = Math.round(Number(raw));
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+// parseBonusData lê o data-bonus (JSON) que o cabeçalho da seção emite quando
+// a busca separou os anúncios por bônus. Trunca em BONUS_FILTER_SLOTS: a
+// linha só tem campo para esses, e guardar filtros que não aparecem em lugar
+// nenhum deixaria a busca apertada por um motivo invisível.
+function parseBonusData(raw) {
+  if (!raw) return [];
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((b) => typeof b === "string")
+    .map((b) => b.trim())
+    .filter((b) => b !== "")
+    .slice(0, BONUS_FILTER_SLOTS);
 }
 
 function cssEscape(value) {
@@ -173,11 +247,13 @@ function addToWatchlist(button) {
   const itemName = button.dataset.itemName;
   if (!server || !itemId || !itemName) return;
 
-  // Já vem fixado quando a seção representa um refino só: a linha nasce
-  // acompanhando aquela unidade, e não "a mais barata de qualquer refino".
+  // Já vêm fixados quando a seção representa um refino só / uma combinação de
+  // bônus só: a linha nasce acompanhando aquela unidade, e não "a mais barata
+  // de qualquer refino ou bônus".
   const refineFilter = parseRefineData(button.dataset.refine);
+  const bonusFilters = parseBonusData(button.dataset.bonus);
 
-  const id = watchlistId(server, itemId, refineFilter);
+  const id = watchlistId(server, itemId, refineFilter, bonusFilters);
   const list = loadWatchlist();
   if (list.some((entry) => entry.id === id)) return;
 
@@ -200,6 +276,7 @@ function addToWatchlist(button) {
     mode: button.dataset.mode === MODE_AVAILABILITY ? MODE_AVAILABILITY : MODE_PRICE,
     targetPrice: null,
     refineFilter,
+    bonusFilters,
     monitoring: true,
     notified: false,
   };
@@ -355,6 +432,78 @@ function startEditingRefine(span, id) {
 
   input.addEventListener("blur", () => {
     if (!confirmed) span.textContent = previousText;
+  });
+}
+
+// BONUS_VAZIO é o rótulo do campo de bônus que ainda não exige nada. Não é um
+// filtro: é o convite para clicar e digitar um.
+const BONUS_VAZIO = "+ bônus";
+
+// paintBonusChip põe o campo de bônus no estado que o valor pede: a frase
+// exigida, ou o convite discreto quando não há nenhuma.
+function paintBonusChip(span, valor) {
+  const preenchido = valor !== "";
+  span.textContent = preenchido ? valor : BONUS_VAZIO;
+  // O texto completo no title porque o chip trunca com reticências: os bônus
+  // são frases inteiras e o painel recolhido tem 300px de largura.
+  span.title = preenchido ? valor : "Clique para exigir um bônus aleatório";
+  span.classList.toggle("vazio", !preenchido);
+}
+
+// startEditingBonus troca um dos campos de bônus por um <input> de texto.
+// Enter confirma e passa a procurar anúncios que tenham aquele bônus; Escape
+// ou perder o foco sem confirmar descarta a edição. Confirmar com o campo
+// vazio remove a exigência daquela posição.
+//
+// Mesmo padrão de startEditingRefine, com uma diferença: aqui o valor é a
+// frase do site, palavra por palavra ("CRIT +5", "Conjuração variável -4%"),
+// e a comparação no servidor é por igualdade — um bônus digitado quase certo
+// não acha nada. É por isso que o campo já nasce preenchido com o que veio da
+// busca, em vez de esperar alguém digitar do zero.
+function startEditingBonus(span, id, slot) {
+  if (span.querySelector("input")) return;
+  const list = loadWatchlist();
+  const entry = list.find((e) => e.id === id);
+  if (!entry) return;
+
+  const slots = entryBonusSlots(entry);
+  const previousValue = slots[slot];
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "watchlist-bonus-input";
+  input.value = previousValue;
+  input.setAttribute("aria-label", "Bônus aleatório " + (slot + 1) + " de " + entry.itemName);
+
+  span.textContent = "";
+  span.appendChild(input);
+  input.focus();
+  input.select();
+
+  let confirmed = false;
+
+  const confirmEdit = () => {
+    confirmed = true;
+    const bonusFilters = entryBonusSlots(entry);
+    bonusFilters[slot] = input.value.trim();
+    // notified zerado: o que a linha acompanha mudou, então o aviso precisa
+    // poder disparar de novo para a condição nova.
+    const updated = updateEntry(id, { bonusFilters, notified: false }) || entry;
+    paintBonusChip(span, entryBonusSlots(updated)[slot]);
+    fetchLivePrice(updated);
+  };
+
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      confirmEdit();
+    } else if (ev.key === "Escape") {
+      confirmed = true;
+      paintBonusChip(span, previousValue);
+    }
+  });
+
+  input.addEventListener("blur", () => {
+    if (!confirmed) paintBonusChip(span, previousValue);
   });
 }
 
@@ -684,8 +833,31 @@ function buildWatchlistRow(entry) {
   pricesRow.appendChild(hitBadge);
   pricesRow.appendChild(location);
   pricesRow.appendChild(refreshNow);
+
+  // Os bônus aleatórios ganham linha própria, e não um lugar ao lado do nome
+  // ou do preço: são frases inteiras ("Conjuração variável -4%"), não cabem
+  // onde o badge "+7" cabe — e a linha do preço é o estado que o servidor
+  // respondeu, enquanto estes campos são o que o usuário está pedindo.
+  //
+  // Sempre construída, e só escondida quando o item não é equipamento (quem
+  // responde isso é o servidor, ver applyPriceResult): assim as entradas
+  // gravadas antes desta mudança ganham os campos na primeira checagem, sem
+  // migração nenhuma.
+  const bonusRow = document.createElement("div");
+  bonusRow.className = "watchlist-bonus";
+  bonusRow.hidden = entry.isEquipment !== true;
+  entryBonusSlots(entry).forEach((valor, slot) => {
+    const chip = document.createElement("span");
+    chip.className = "bonus-chip watchlist-bonus-chip";
+    chip.tabIndex = 0;
+    chip.addEventListener("click", () => startEditingBonus(chip, entry.id, slot));
+    paintBonusChip(chip, valor);
+    bonusRow.appendChild(chip);
+  });
+
   info.appendChild(nameRow);
   info.appendChild(pricesRow);
+  info.appendChild(bonusRow);
 
   const remove = document.createElement("button");
   remove.type = "button";
@@ -729,12 +901,37 @@ function applyPriceResult(row, entry, data) {
     refineEl.textContent = "+" + data.refine;
   }
 
+  // O tipo do item vem sempre que houver anúncio, mesmo quando o filtro não
+  // casou com nenhum — é o que decide se a linha oferece os campos de bônus.
+  // Ausente significa "não sei" (item sem anúncio nenhum agora), e aí o que
+  // já se sabia continua valendo: perder os campos levaria junto os filtros
+  // que o usuário digitou neles.
+  if (data.equipment !== undefined) {
+    const bonusRow = row.querySelector(".watchlist-bonus");
+    if (bonusRow) bonusRow.hidden = !data.equipment;
+    if (entry.isEquipment !== data.equipment) {
+      updateEntry(entry.id, { isEquipment: data.equipment });
+      entry.isEquipment = data.equipment;
+    }
+  }
+
   if (!data.found) {
-    currentEl.textContent = isAvailabilityWatch(entry) ? "Nenhum anúncio" : "Sem anúncios";
+    // "partial" é o servidor dizendo que nem chegou a olhar todos os
+    // anúncios — o orçamento de consultas acabou antes. Dizer "Sem anúncios"
+    // aí seria mentira: a cobertura ainda está crescendo, e o próximo ciclo
+    // continua de onde este parou.
+    if (data.partial) {
+      currentEl.textContent = "Verificando…";
+      currentEl.title = "O site é consultado aos poucos para não ser bloqueado; a busca continua no próximo ciclo.";
+    } else {
+      currentEl.textContent = isAvailabilityWatch(entry) ? "Nenhum anúncio" : "Sem anúncios";
+      currentEl.title = "";
+    }
     lastKnownPrice.set(entry.id, null);
     updateHitState(row, entry, null, null);
     return;
   }
+  currentEl.title = "";
   currentEl.textContent = isAvailabilityWatch(entry)
     ? "Produto encontrado por " + formatMoney(data.minPrice)
     : "Atual: " + formatMoney(data.minPrice);
@@ -763,6 +960,14 @@ async function fetchLivePrice(entry, fresh = false) {
       "&item=" + encodeURIComponent(entrySearchName(entry));
     if (entry.refineFilter != null) {
       url += "&refine=" + encodeURIComponent(entry.refineFilter);
+    }
+    // Um parâmetro por bônus, em vez de uma lista com separador: as frases
+    // têm pontuação livre e qualquer separador escolhido a dedo poderia
+    // aparecer dentro de uma delas. encodeURIComponent (e não
+    // URLSearchParams) porque o "+" de "CRIT +4" precisa virar %2B — como
+    // espaço, ele viraria outro bônus.
+    for (const bonus of entryBonusFilters(entry)) {
+      url += "&bonus=" + encodeURIComponent(bonus);
     }
     if (fresh) {
       url += "&fresh=1";

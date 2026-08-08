@@ -291,6 +291,7 @@ async function semearWatchlistCheia(page, quantidade) {
       mode: "price",
       targetPrice: null,
       refineFilter: null,
+      bonusFilters: ["", ""],
       monitoring: false,
       notified: false,
     }));
@@ -636,4 +637,123 @@ test("o botão de atualizar agora de um item não reinicia o cronômetro nem mex
 
   // Continua contando de onde estava — não voltou para 01:00.
   await expect(cronometro).not.toHaveText("01:00");
+});
+
+// --- bônus aleatórios ---
+//
+// Nas fixtures, a Espada Primordial tem três anúncios: 129 milhões sem bônus,
+// 158 com "CRIT +4" e "ATQ +3%", e 299 com só "CRIT +4". Buscar com a
+// varredura de bônus ligada separa os três em seções próprias.
+
+/** Adiciona à watchlist a seção de bônus indicada da Espada Primordial. */
+async function adicionarEspadaComBonus(page, etiqueta) {
+  await buscar(page, "Espada Primordial", { bonus: true });
+  await clicarWatchlistDoItem(page, "Espada Primordial", { etiqueta });
+  return page.locator(".watchlist-row").last();
+}
+
+// O bug que isto conserta: a combinação de bônus da seção era perdida no
+// caminho, e a linha passava a seguir o mais barato de qualquer bônus (129
+// milhões) em vez da unidade que o usuário estava olhando.
+test("adicionar um item com bônus leva o bônus para a watchlist", async ({ page }) => {
+  const linha = await adicionarEspadaComBonus(page, "ATQ +3%");
+
+  await expect(linha.locator(".watchlist-bonus-chip").first()).toHaveText("CRIT +4");
+  await expect(linha.locator(".watchlist-bonus-chip").nth(1)).toHaveText("ATQ +3%");
+  // 158, e não 129: a prova de que o filtro chegou até o endpoint de preço.
+  await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 158.000.000 z", ESPERA_PRECO);
+});
+
+// Duas combinações do mesmo item são duas coisas diferentes de se acompanhar,
+// como já acontece com refino. Sem os bônus no id, o segundo clique cairia na
+// checagem de duplicata e seria descartado em silêncio.
+test("duas seções de bônus diferentes viram duas linhas", async ({ page }) => {
+  await buscar(page, "Espada Primordial", { bonus: true });
+  await clicarWatchlistDoItem(page, "Espada Primordial", { etiqueta: "ATQ +3%" });
+  await clicarWatchlistDoItem(page, "Espada Primordial", { etiqueta: "sem bônus" });
+
+  await expect(page.locator(".watchlist-row")).toHaveCount(2);
+});
+
+test("os bônus são editáveis no lugar", async ({ page }) => {
+  const linha = await adicionarEspadaComBonus(page, "sem bônus");
+  await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 129.999.999 z", ESPERA_PRECO);
+
+  // A seção "sem bônus" não fixa nada, então os dois campos nascem vazios.
+  const primeiro = linha.locator(".watchlist-bonus-chip").first();
+  await expect(primeiro).toHaveText("+ bônus");
+
+  await primeiro.click();
+  await linha.locator(".watchlist-bonus-input").fill("ATQ +3%");
+  await linha.locator(".watchlist-bonus-input").press("Enter");
+
+  await expect(primeiro).toHaveText("ATQ +3%");
+  await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 158.000.000 z", ESPERA_PRECO);
+
+  // E esvaziar volta a acompanhar o mais barato.
+  await primeiro.click();
+  await linha.locator(".watchlist-bonus-input").fill("");
+  await linha.locator(".watchlist-bonus-input").press("Enter");
+
+  await expect(primeiro).toHaveText("+ bônus");
+  await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 129.999.999 z", ESPERA_PRECO);
+});
+
+test("Esc descarta a edição do bônus", async ({ page }) => {
+  const linha = await adicionarEspadaComBonus(page, "ATQ +3%");
+  const primeiro = linha.locator(".watchlist-bonus-chip").first();
+  await expect(primeiro).toHaveText("CRIT +4");
+
+  await primeiro.click();
+  await linha.locator(".watchlist-bonus-input").fill("CRIT +99");
+  await linha.locator(".watchlist-bonus-input").press("Escape");
+
+  await expect(primeiro).toHaveText("CRIT +4");
+});
+
+test("um bônus que ninguém anuncia avisa que não há anúncios", async ({ page }) => {
+  const linha = await adicionarEspadaComBonus(page, "sem bônus");
+  await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 129.999.999 z", ESPERA_PRECO);
+
+  await linha.locator(".watchlist-bonus-chip").first().click();
+  await linha.locator(".watchlist-bonus-input").fill("SP máx. +846");
+  await linha.locator(".watchlist-bonus-input").press("Enter");
+
+  await expect(linha.locator(".watchlist-current")).toHaveText("Sem anúncios", ESPERA_PRECO);
+});
+
+// Carta não tem bônus aleatório, e oferecer os campos sugeriria que tem.
+test("item que não é equipamento não mostra os campos de bônus", async ({ page }) => {
+  await buscar(page, "Espada");
+  await clicarWatchlistDoItem(page, "Carta Peixe-Espada");
+
+  const linha = page.locator(".watchlist-row").first();
+  await expect(linha.locator(".watchlist-current")).toContainText("z", ESPERA_PRECO);
+  await expect(linha.locator(".watchlist-bonus")).toBeHidden();
+});
+
+// Nada de migração: uma entrada gravada antes desta mudança não tem
+// bonusFilters nem isEquipment, e é a primeira checagem — que já traz o tipo
+// do item — que resolve a linha sozinha.
+test("entrada antiga ganha os campos de bônus na primeira checagem", async ({ page }) => {
+  await page.evaluate(() => {
+    localStorage.setItem("ro-market-tracker:watchlist", JSON.stringify([{
+      id: "NIDHOGG:600009",
+      server: "NIDHOGG",
+      itemId: 600009,
+      itemName: "Espada Primordial",
+      searchName: "Espada Primordial",
+      mode: "price",
+      targetPrice: null,
+      refineFilter: null,
+      monitoring: true,
+      notified: false,
+    }]));
+  });
+  await page.reload();
+
+  const linha = page.locator(".watchlist-row").first();
+  await expect(linha.locator(".watchlist-current")).toContainText("z", ESPERA_PRECO);
+  await expect(linha.locator(".watchlist-bonus")).toBeVisible();
+  await expect(linha.locator(".watchlist-bonus-chip")).toHaveCount(2);
 });

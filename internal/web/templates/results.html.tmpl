@@ -51,15 +51,16 @@
               {{else}}<span class="group-chip">sem bônus</span>{{end}}
             {{end}}
           </span>
-          {{/* data-refine só quando a seção de fato representa UM refino: é
-               ele que a watchlist passa a acompanhar, em vez de "o mais
-               barato de qualquer refino". Bônus não têm equivalente — o
-               endpoint de preço não filtra por eles, e filtrar custaria uma
-               consulta de detalhe por candidato a cada consulta do item. */}}
+          {{/* data-refine e data-bonus só quando a seção de fato representa
+               UM refino / UMA combinação de bônus: é o que a watchlist passa
+               a acompanhar, em vez de "o mais barato de qualquer um". A
+               seção SEM bônus não emite data-bonus — ver bonusJSON, em
+               bonus.go, para por que ela não tem como ser expressa. */}}
           <button type="button" class="watchlist-button"
               data-server="{{$.Server}}" data-item-id="{{.ItemID}}" data-item-name="{{.ItemName}}"
               data-search-name="{{.SearchName}}"
               {{if and $.GroupByRefine .RefineKnown}}data-refine="{{.Refine}}"{{end}}
+              {{if .BonusJSON}}data-bonus="{{.BonusJSON}}"{{end}}
               onclick="addToWatchlist(this)">+ Watchlist</button>
         </div>
       </td>

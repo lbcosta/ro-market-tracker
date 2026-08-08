@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -62,6 +63,63 @@ func bonusKey(bonus []string) string {
 	ordenados := slices.Clone(bonus)
 	sort.Strings(ordenados)
 	return strings.Join(ordenados, "\x1f")
+}
+
+// bonusJSON serializa os bônus de uma seção para o atributo data-bonus do
+// botão "+ Watchlist" — é por ele que a combinação daquela seção vira o filtro
+// da linha na watchlist.
+//
+// Devolve vazio (e o template omite o atributo) quando a varredura não
+// verificou a seção, ou quando ela é a seção "SEM bônus": um filtro que lista
+// o que exigir não tem como dizer "não quero bônus nenhum" — lista vazia é
+// justamente "tanto faz". Essa linha acompanha o mais barato de qualquer
+// bônus, e é o comportamento honesto até haver um jeito de expressar o
+// contrário.
+func bonusJSON(bonus []string, known bool) string {
+	if !known || len(bonus) == 0 {
+		return ""
+	}
+	encoded, err := json.Marshal(bonus)
+	if err != nil {
+		slog.Error("web: não foi possível serializar os bônus de uma seção", "error", err)
+		return ""
+	}
+	return string(encoded)
+}
+
+// normalizeBonus deixa duas grafias da mesma frase comparáveis: sem espaço
+// sobrando nas pontas nem no meio, e sem diferença de caixa. É o bastante
+// para o que a watchlist precisa — de um lado a frase que o site mandou, do
+// outro a mesma frase digitada à mão no campo da linha.
+//
+// NÃO mexe em acento: tirá-lo exigiria golang.org/x/text, e o programa não
+// tem dependência nenhuma hoje. Quem digitar "magico" não acha "mágico" — e é
+// por isso que o campo já nasce preenchido com a frase que veio da busca.
+func normalizeBonus(s string) string {
+	return strings.ToLower(strings.Join(strings.Fields(s), " "))
+}
+
+// bonusMatches diz se um anúncio serve para quem pediu esses bônus: cada um
+// dos pedidos tem de estar entre os do anúncio.
+//
+// Bônus a MAIS no anúncio não desqualificam. Quem pede "CRIT +4" quer uma
+// unidade que tenha isso; que ela também tenha "ATQ +3%" é um extra, não um
+// motivo para descartá-la. É o que torna a lista de pedidos um filtro que só
+// aperta conforme o usuário preenche mais campos.
+func bonusMatches(anunciados, pedidos []string) bool {
+	if len(pedidos) == 0 {
+		return true
+	}
+	normalizados := make([]string, 0, len(anunciados))
+	for _, a := range anunciados {
+		normalizados = append(normalizados, normalizeBonus(a))
+	}
+	for _, pedido := range pedidos {
+		if !slices.Contains(normalizados, normalizeBonus(pedido)) {
+			return false
+		}
+	}
+	return true
 }
 
 // lookupBonus devolve os bônus aleatórios de um anúncio — do memo

@@ -222,6 +222,15 @@ type resultsGroup struct {
 	Bonus       []string
 	BonusKnown  bool
 
+	// BonusJSON são os Bonus prontos para o atributo data-bonus do botão
+	// "+ Watchlist", que é como a combinação desta seção chega à watchlist.
+	//
+	// JSON, e não as frases juntadas por um separador: elas têm pontuação
+	// livre, e qualquer separador escolhido a dedo pode aparecer dentro de
+	// uma delas. Montado aqui, e não no template, para ser testável sem
+	// renderizar HTML.
+	BonusJSON string
+
 	Items []gnjoy.ShopListItem
 }
 
@@ -276,6 +285,7 @@ func groupItems(items []gnjoy.ShopListItem, facts map[string]itemFacts, byRefine
 				// ordenada, para a mesma combinação em ordens diferentes não
 				// virar duas seções.
 				g.Bonus, g.BonusKnown = f.Bonus, f.BonusKnown
+				g.BonusJSON = bonusJSON(f.Bonus, f.BonusKnown)
 			}
 			groups = append(groups, g)
 		}

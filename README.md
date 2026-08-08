@@ -330,26 +330,60 @@ Cada linha da watchlist mostra:
 - Um "↻" para consultar só aquele item na hora, ignorando o cache do
   servidor — a única forma de forçar uma atualização; não existe mais um
   botão que force a lista inteira (ver "Monitoramento e alertas" abaixo).
+- Numa linha própria, para itens que são equipamento, **dois campos de bônus
+  aleatório** editáveis do mesmo jeito (clicar, digitar, `Enter`; vazio
+  remove a exigência). Quando o item entra pela busca com "Verificar bônus
+  aleatórios" marcado, eles já nascem preenchidos com a combinação daquela
+  seção — e a linha passa a acompanhar o anúncio mais barato **que tenha
+  esses bônus**, não o mais barato do item. Como duas combinações do mesmo
+  item são duas coisas diferentes de acompanhar, elas viram duas linhas
+  (igual ao refino).
+
+  A comparação é por texto, e o servidor só normaliza caixa e espaços — quem
+  digitar a frase diferente da que o site usa não acha nada. Por isso os
+  campos já nascem preenchidos: o valor de referência é o que veio da busca.
+  O site expõe quatro bônus por anúncio, mas na prática só dois aparecem
+  preenchidos, e dois campos bastam (`BONUS_FILTER_SLOTS`) — como o filtro
+  exige presença, pedir dois de uma unidade que tem quatro continua achando
+  ela.
 - Um "×" para remover da lista.
 
 O preço atual (e o refino) é a única parte que depende do servidor:
-`GET /web/watchlist/price?server=...&itemId=...&item=...&refine=...`
-(`refine` é opcional) refaz a mesma busca por nome usada na página principal,
-filtra pelo `itemId` exato (uma busca por nome pode casar itens diferentes —
-ver teste com "Espada", que retorna itens com itemId 600009, 1147 e 4089) e:
+`GET /web/watchlist/price?server=...&itemId=...&item=...&refine=...&bonus=...`
+(`refine` e `bonus` são opcionais) refaz a mesma busca por nome usada na
+página principal, filtra pelo `itemId` exato (uma busca por nome pode casar
+itens diferentes — ver teste com "Espada", que retorna itens com itemId
+600009, 1147 e 4089) e:
 
-- Sem `refine`: pega o menor preço entre eles e, se a loja mais barata for
-  equipamento, busca o refino dela via `GetStoreDetail` — só informativo.
-- Com `refine`: ordena os candidatos por preço crescente e procura o
-  primeiro cujo refino bate exatamente com o pedido. Como a única forma de
-  saber o refino é o detalhe da loja (`GetStoreDetail`), cada refino
-  descoberto fica **memoizado por loja** (o refino nunca muda para um mesmo
-  `ssi` — a loja fechada e reaberta ganha um `ssi` novo) e cada checagem
-  consulta **no máximo 8 lojas novas** (`maxRefineDetailFetches`): a
+- Sem filtro: pega o menor preço entre eles e busca o detalhe da loja mais
+  barata via `GetStoreDetail`, de onde saem a localização e (se for
+  equipamento) o refino — só informativos.
+- Com `refine` e/ou `bonus`: ordena os candidatos por preço crescente e
+  procura o primeiro que satisfaça o pedido. `bonus` é **repetido, uma vez
+  por frase exigida** (`&bonus=CRIT+%2B4&bonus=ATQ+%2B3%25`) — as frases têm
+  pontuação livre, e qualquer separador escolhido a dedo poderia aparecer
+  dentro de uma delas. Todas as frases pedidas precisam estar no anúncio;
+  bônus a mais nele não desqualificam, então preencher só um campo é um
+  filtro mais frouxo.
+- Nem o refino nem os bônus vêm na busca por nome: cada um custa um detalhe
+  (`GetStoreDetail` e `GetItemDetail`, respectivamente). Ambos ficam
+  **memoizados por anúncio** (nenhum dos dois muda para um mesmo `ssi` — a
+  loja fechada e reaberta ganha um `ssi` novo) e cada checagem gasta **no
+  máximo 8 consultas novas** (`maxDetailFetches`, contado em requisições e
+  não em anúncios, já que um candidato com os dois filtros custa duas): a
   cobertura cresce a cada ciclo até abranger todos os anúncios, sem que um
-  item popular custe dezenas de chamadas em cada checagem. Enquanto a
-  unidade no refino pedido estiver além do que o memo já alcançou, a linha
-  mostra "Sem anúncios" — o ciclo seguinte amplia a busca.
+  item popular custe dezenas de chamadas em cada checagem.
+- O refino é conferido antes dos bônus de propósito: reprovar por ele
+  dispensa a segunda consulta daquele candidato.
+- Enquanto a varredura não tiver alcançado todos os anúncios, a resposta vem
+  com `partial: true` e a linha mostra "Verificando…" em vez de "Sem
+  anúncios" — a diferença entre "ninguém anuncia isso" e "ainda não cheguei
+  lá".
+- A resposta também traz `equipment`, que diz se o item aceita bônus
+  aleatórios (e portanto se a linha oferece os campos). Vem do
+  `databaseType`, que a busca já devolve, então não custa requisição — e é
+  informado mesmo quando o filtro não acha nada, senão a linha perderia os
+  campos justamente quando o usuário precisa corrigir o que digitou.
 
 As consultas do frontend passam por um cache de resultados no servidor
 (`internal/web/cache.go`, TTL + deduplicação de buscas concorrentes via

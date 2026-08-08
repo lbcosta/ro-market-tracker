@@ -279,3 +279,42 @@ func TestBonusKeyIgnoraAOrdem(t *testing.T) {
 		t.Error("sem bônus e com bônus precisam ser seções diferentes")
 	}
 }
+
+// TestBotaoDaWatchlistLevaOsBonus: a combinação de bônus da seção viaja até a
+// watchlist pelo data-bonus do botão. Sem isso, quem clicasse em "+ Watchlist"
+// numa seção "CRIT +4 / ATQ +3%" ganharia uma linha seguindo o mais barato de
+// qualquer bônus — outro item, outro preço.
+func TestBotaoDaWatchlistLevaOsBonus(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	html := buscarComVarredura(t, srv, "Espada Primordial", false, true)
+
+	// As frases saem escapadas no atributo, como html/template faz com "+".
+	for _, quero := range []string{
+		`data-bonus="[&#34;CRIT &#43;4&#34;,&#34;ATQ &#43;3%&#34;]"`,
+		`data-bonus="[&#34;CRIT &#43;4&#34;]"`,
+	} {
+		if !strings.Contains(html, quero) {
+			t.Errorf("faltou %s no HTML da busca", quero)
+		}
+	}
+
+	// A seção "sem bônus" fica de fora: um filtro que lista o que exigir não
+	// tem como dizer "não quero bônus nenhum" (ver bonusJSON).
+	if got := strings.Count(html, "data-bonus="); got != 2 {
+		t.Errorf("há %d botões com data-bonus, quero 2 (a seção sem bônus não deve ter)", got)
+	}
+}
+
+// TestBotaoDaWatchlistSemVarreduraNaoLevaBonus: sem o checkbox, a seção não
+// representa uma combinação de bônus — ela junta todas as unidades do item.
+// Mandar um filtro dali seria inventar um dado que ninguém verificou.
+func TestBotaoDaWatchlistSemVarreduraNaoLevaBonus(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	html := buscarComVarredura(t, srv, "Espada Primordial", false, false)
+
+	if strings.Contains(html, "data-bonus=") {
+		t.Error("o botão trouxe data-bonus sem a varredura de bônus ter sido pedida")
+	}
+}
