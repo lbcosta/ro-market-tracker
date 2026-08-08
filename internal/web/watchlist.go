@@ -76,7 +76,8 @@ func storeKey(item gnjoy.ShopListItem) string {
 //
 // Com "refine" e/ou "bonus" informados, a busca passa a ser por uma unidade
 // que satisfaça isso: entre as lojas com esse itemId, ordenadas por preço
-// crescente, procura a mais barata que bate com o pedido. Nem o refino nem os
+// crescente, procura a mais barata que bate com o pedido — "refine" valendo
+// como MÍNIMO (ver watchlistFilter). Nem o refino nem os
 // bônus vêm na busca por nome — cada um só é conhecido consultando um detalhe
 // (o da loja e o do item, respectivamente), então ambos são memoizados por
 // anúncio e uma checagem gasta no máximo maxDetailFetches consultas novas —
@@ -171,6 +172,11 @@ func (h *Handler) WatchlistPrice(w http.ResponseWriter, r *http.Request) {
 // significa "o mais barato, seja qual for"; um ou os dois, "o mais barato
 // entre os que satisfizerem isto".
 type watchlistFilter struct {
+	// Refine é um PISO, não um valor exato: quem acompanha +7 quer ser
+	// avisado de um +9 barato tanto quanto de um +7 (no jogo, refino maior
+	// só melhora a unidade). Exigir igualdade fazia a linha ignorar anúncios
+	// estritamente melhores que o pedido — e dizer "sem anúncios" com o
+	// mercado cheio deles.
 	Refine *int
 	Bonus  []string
 }
@@ -349,7 +355,7 @@ func (h *Handler) watchlistPriceForFilter(r *http.Request, candidates []gnjoy.Sh
 				parcial = true
 				continue
 			}
-			if detail == nil || detail.Refine != *filter.Refine {
+			if detail == nil || detail.Refine < *filter.Refine {
 				continue
 			}
 			store = detail

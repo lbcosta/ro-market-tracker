@@ -373,13 +373,31 @@ function startEditingTarget(span, id) {
   });
 }
 
+// refineFilterLabel é como o refino EXIGIDO aparece no badge. A seta é o que
+// distingue os dois significados que o mesmo badge tem: sem filtro ele mostra
+// "+N", o refino ao vivo da loja mais barata; com filtro, "+N↑", o piso que o
+// usuário pediu (ver watchlistFilter no backend — o filtro é um mínimo).
+function refineFilterLabel(refineFilter) {
+  return "+" + refineFilter + "↑";
+}
+
+// refineSuffix é o refino real do anúncio encontrado, para acompanhar o preço
+// quando o badge está ocupado mostrando o piso exigido. Vazio quando não há
+// exigência (o badge já mostra esse mesmo número) ou quando o servidor não
+// conseguiu o detalhe da loja de onde ele sai.
+function refineSuffix(entry, data) {
+  if (entry.refineFilter == null) return "";
+  if (data.refine === undefined || data.refine === null) return "";
+  return " (+" + data.refine + ")";
+}
+
 // startEditingRefine troca o badge "+N" (refino) por um <input> numérico.
 // Só existe para itens que já mostraram ter refino (armas/armaduras — ver
-// buildWatchlistRow). Confirmar com Enter passa a exigir esse refino
-// específico nas próximas consultas de preço (o "menor preço atual" da
-// linha passa a ser o menor preço só entre lojas NESSE refino); deixar o
-// campo vazio e confirmar volta ao padrão (mostra o refino de qualquer
-// loja que estiver mais barata, sem fixar um valor).
+// buildWatchlistRow). Confirmar com Enter passa a exigir esse refino nas
+// próximas consultas de preço, como MÍNIMO (o "menor preço atual" da linha
+// passa a ser o menor preço entre as lojas com refino igual ou maior);
+// deixar o campo vazio e confirmar volta ao padrão (mostra o refino de
+// qualquer loja que estiver mais barata, sem exigir nada).
 function startEditingRefine(span, id) {
   if (span.querySelector("input")) return;
   const list = loadWatchlist();
@@ -413,7 +431,7 @@ function startEditingRefine(span, id) {
     const updated = updateEntry(id, { refineFilter, notified: false }) || entry;
     if (updated.refineFilter != null) {
       span.hidden = false;
-      span.textContent = "+" + updated.refineFilter;
+      span.textContent = refineFilterLabel(updated.refineFilter);
     } else {
       span.textContent = "";
       span.hidden = true;
@@ -768,10 +786,10 @@ function buildWatchlistRow(entry) {
   const refineBadge = document.createElement("span");
   refineBadge.className = "refine-badge watchlist-refine";
   refineBadge.tabIndex = 0;
-  refineBadge.title = "Clique para fixar o refino que você quer acompanhar";
+  refineBadge.title = "Clique para exigir um refino mínimo deste item";
   refineBadge.addEventListener("click", () => startEditingRefine(refineBadge, entry.id));
   if (entry.refineFilter != null) {
-    refineBadge.textContent = "+" + entry.refineFilter;
+    refineBadge.textContent = refineFilterLabel(entry.refineFilter);
     refineBadge.hidden = false;
   } else {
     refineBadge.hidden = true;
@@ -889,13 +907,13 @@ function applyPriceResult(row, entry, data) {
   const currentEl = row.querySelector(".watchlist-current");
   const refineEl = row.querySelector(".watchlist-refine");
 
-  // Com refino fixado pelo usuário, o badge sempre mostra esse valor
+  // Com refino exigido pelo usuário, o badge sempre mostra esse valor
   // (é a intenção dele, independente de ter achado anúncio agora ou
-  // não); sem fixação, o badge reflete o refino ao vivo da loja mais
+  // não); sem exigência, o badge reflete o refino ao vivo da loja mais
   // barata, quando o item for um equipamento.
   if (entry.refineFilter != null) {
     refineEl.hidden = false;
-    refineEl.textContent = "+" + entry.refineFilter;
+    refineEl.textContent = refineFilterLabel(entry.refineFilter);
   } else if (data.refine !== undefined && data.refine !== null) {
     refineEl.hidden = false;
     refineEl.textContent = "+" + data.refine;
@@ -932,9 +950,15 @@ function applyPriceResult(row, entry, data) {
     return;
   }
   currentEl.title = "";
+  // Com refino exigido, o badge mostra o PISO, então o refino que o anúncio
+  // encontrado tem de fato não caberia em lugar nenhum — e ele importa: quem
+  // pede "+7 ou mais" precisa saber se o que apareceu barato é um +7 ou um
+  // +9 antes de ir comprar. Sem exigência os dois números são o mesmo, e o
+  // badge já basta.
+  const achado = formatMoney(data.minPrice) + refineSuffix(entry, data);
   currentEl.textContent = isAvailabilityWatch(entry)
-    ? "Produto encontrado por " + formatMoney(data.minPrice)
-    : "Atual: " + formatMoney(data.minPrice);
+    ? "Produto encontrado por " + achado
+    : "Atual: " + achado;
   lastKnownPrice.set(entry.id, data.minPrice);
   updateHitState(row, entry, data.minPrice, data.naviCommand);
 }

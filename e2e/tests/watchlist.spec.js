@@ -461,9 +461,9 @@ test("o botão de localização da watchlist copia o comando /navi", async ({ pa
   await expect(botao).toHaveText("/navi prt_mk.gat 114/180", { timeout: 3000 });
 });
 
-// Fixar um refino muda o que a linha acompanha: passa a ser o menor preço
-// NAQUELE refino, mesmo que não seja o anúncio mais barato do item.
-test("fixar um refino passa a acompanhar o preço daquele refino", async ({ page }) => {
+// Exigir um refino muda o que a linha acompanha: passa a ser o menor preço
+// DAQUELE refino PARA CIMA, mesmo que não seja o anúncio mais barato do item.
+test("exigir um refino passa a acompanhar o preço daquele refino", async ({ page }) => {
   const linha = await adicionarEspadaPrimordial(page);
   await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 129.999.999 z", ESPERA_PRECO);
 
@@ -471,20 +471,37 @@ test("fixar um refino passa a acompanhar o preço daquele refino", async ({ page
   await linha.locator(".watchlist-refine-input").fill("10");
   await linha.locator(".watchlist-refine-input").press("Enter");
 
-  await expect(linha.locator(".watchlist-refine")).toHaveText("+10");
+  await expect(linha.locator(".watchlist-refine")).toHaveText("+10↑");
   // O anúncio +10 é o mais caro dos três — é justamente o caso que o filtro
   // de refino existe para resolver.
-  await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 299.999.999 z", ESPERA_PRECO);
+  await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 299.999.999 z (+10)", ESPERA_PRECO);
 });
 
-test("desfixar o refino volta a acompanhar o mais barato", async ({ page }) => {
+// O refino exigido é um PISO: quem acompanha +3 quer saber do +7 barato
+// também, porque refino maior só melhora a unidade. Com igualdade exata, esta
+// linha dizia "Sem anúncios" com dois anúncios melhores que o pedido à venda.
+test("o refino exigido é um mínimo, não um valor exato", async ({ page }) => {
+  const linha = await adicionarEspadaPrimordial(page);
+  await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 129.999.999 z", ESPERA_PRECO);
+
+  await linha.locator(".watchlist-refine").click();
+  await linha.locator(".watchlist-refine-input").fill("3");
+  await linha.locator(".watchlist-refine-input").press("Enter");
+
+  // Ninguém anuncia +3. O +7 é o mais barato entre os que servem, e o preço
+  // mostra o refino que ele tem de fato — o badge só guarda o piso pedido.
+  await expect(linha.locator(".watchlist-refine")).toHaveText("+3↑");
+  await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 158.000.000 z (+7)", ESPERA_PRECO);
+});
+
+test("desfazer a exigência de refino volta a acompanhar o mais barato", async ({ page }) => {
   const linha = await adicionarEspadaPrimordial(page);
   await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 129.999.999 z", ESPERA_PRECO);
 
   await linha.locator(".watchlist-refine").click();
   await linha.locator(".watchlist-refine-input").fill("10");
   await linha.locator(".watchlist-refine-input").press("Enter");
-  await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 299.999.999 z", ESPERA_PRECO);
+  await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 299.999.999 z (+10)", ESPERA_PRECO);
 
   await linha.locator(".watchlist-refine").click();
   await linha.locator(".watchlist-refine-input").fill("");
@@ -493,12 +510,12 @@ test("desfixar o refino volta a acompanhar o mais barato", async ({ page }) => {
   await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 129.999.999 z", ESPERA_PRECO);
 });
 
-test("um refino que ninguém anuncia avisa que não há anúncios", async ({ page }) => {
+test("um refino acima de tudo que se anuncia avisa que não há anúncios", async ({ page }) => {
   const linha = await adicionarEspadaPrimordial(page);
   await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 129.999.999 z", ESPERA_PRECO);
 
   await linha.locator(".watchlist-refine").click();
-  await linha.locator(".watchlist-refine-input").fill("3");
+  await linha.locator(".watchlist-refine-input").fill("11");
   await linha.locator(".watchlist-refine-input").press("Enter");
 
   await expect(linha.locator(".watchlist-current")).toHaveText("Sem anúncios", ESPERA_PRECO);

@@ -179,8 +179,8 @@ bônus aleatórios"), com o custo escrito ao lado assim que um deles é marcado.
 Com a varredura ligada, a tabela deixa de agrupar só por item e passa a abrir
 uma seção por combinação de item, refino e bônus — que é o que torna visível
 *por que* três anúncios da mesma espada custam 129, 158 e 299 milhões. O botão
-"+ Watchlist" de uma seção de refino conhecido já nasce com aquele refino
-fixado.
+"+ Watchlist" de uma seção de refino conhecido já nasce exigindo aquele refino
+(como mínimo — ver "Watchlist").
 
 Três coisas seguram o custo:
 
@@ -310,13 +310,22 @@ Cada linha da watchlist mostra:
   alvo (volta a "—").
 - Para itens que já mostraram ter refino, o badge também é editável do
   mesmo jeito (clicar, digitar, `Enter`): em vez de mostrar o refino de
-  qualquer loja que estiver mais barata, passa a exigir esse refino
-  específico — o "menor preço atual" da linha vira o menor preço só entre
-  lojas NESSE refino (ex.: fixar "+10" numa arma que só é barata em +0
+  qualquer loja que estiver mais barata, passa a exigir um refino **mínimo**
+  — o "menor preço atual" da linha vira o menor preço entre as lojas com
+  refino igual ou maior (ex.: exigir "+10" numa arma que só é barata em +0
   passa a mostrar o preço da unidade +10, mesmo que ela não seja a mais
   barata no geral). Deixar o campo vazio e confirmar volta ao padrão
   (qualquer refino, o que estiver mais barato).
-- O menor preço anunciado agora (respeitando o refino fixado, se houver).
+
+  É um piso e não um valor exato porque, no jogo, refino maior só melhora a
+  unidade: quem acompanha "+7" quer ser avisado de um "+9" que apareça
+  barato tanto quanto de um "+7". O badge mostra a exigência com uma seta
+  (`+7↑`) justamente para não ser confundido com o refino ao vivo que ele
+  mostra quando não há exigência nenhuma.
+- O menor preço anunciado agora (respeitando o refino exigido, se houver) e,
+  quando há exigência, o refino que a unidade encontrada tem de fato —
+  `Atual: 158.000.000 z (+9)`. Sem isso, "+7↑" no badge não deixaria saber o
+  que exatamente ficou barato.
 - Um badge "🎯 Alvo atingido" e a linha destacada com borda verde, quando o
   menor preço atual está no valor do alvo ou abaixo dele.
 - Junto do badge, a localização da loja mais barata como um botão
@@ -359,12 +368,17 @@ itens diferentes — ver teste com "Espada", que retorna itens com itemId
   barata via `GetStoreDetail`, de onde saem a localização e (se for
   equipamento) o refino — só informativos.
 - Com `refine` e/ou `bonus`: ordena os candidatos por preço crescente e
-  procura o primeiro que satisfaça o pedido. `bonus` é **repetido, uma vez
-  por frase exigida** (`&bonus=CRIT+%2B4&bonus=ATQ+%2B3%25`) — as frases têm
-  pontuação livre, e qualquer separador escolhido a dedo poderia aparecer
-  dentro de uma delas. Todas as frases pedidas precisam estar no anúncio;
-  bônus a mais nele não desqualificam, então preencher só um campo é um
-  filtro mais frouxo.
+  procura o primeiro que satisfaça o pedido. `refine` vale como **mínimo**
+  (um anúncio +9 serve para quem pediu +7); o `refine` da resposta é o do
+  anúncio encontrado, não o pedido. `bonus` é **repetido, uma vez por frase
+  exigida** (`&bonus=CRIT+%2B4&bonus=ATQ+%2B3%25`) — as frases têm pontuação
+  livre, e qualquer separador escolhido a dedo poderia aparecer dentro de
+  uma delas. Todas as frases pedidas precisam estar no anúncio; bônus a mais
+  nele não desqualificam, então preencher só um campo é um filtro mais
+  frouxo.
+
+  Os dois filtros são frouxos na mesma direção, de propósito: eles dizem "no
+  mínimo isto", e uma unidade melhor que o pedido continua interessando.
 - Nem o refino nem os bônus vêm na busca por nome: cada um custa um detalhe
   (`GetStoreDetail` e `GetItemDetail`, respectivamente). Ambos ficam
   **memoizados por anúncio** (nenhum dos dois muda para um mesmo `ssi` — a
@@ -397,7 +411,7 @@ novo). O botão "↻" de cada linha da watchlist envia `fresh=1`, que ignora o
 cache: quem apertou quer o estado de agora.
 
 Ligar/desligar, editar o alvo e remover um item são só atualizações de
-`localStorage` + DOM, sem chamada ao servidor. Editar o refino fixado dispara
+`localStorage` + DOM, sem chamada ao servidor. Editar o refino exigido dispara
 uma nova consulta de preço — o filtro mudou, o preço em cache não serve mais.
 Adicionar um item novo busca o preço só dele (os demais já carregados não são
 recarregados).

@@ -165,8 +165,10 @@ test("reordenar depois de verificar não volta ao site", async ({ page, request 
 
 // Com as seções separadas por refino, cada uma acompanha uma unidade
 // diferente: são duas linhas legítimas do mesmo item, e o refino já vem
-// fixado sem o usuário precisar digitá-lo.
-test("a watchlist nasce com o refino da seção já fixado", async ({ page }) => {
+// exigido sem o usuário precisar digitá-lo. Na watchlist ele aparece com "↑"
+// porque lá vale como mínimo (ver refineFilterLabel), e o preço vem com o
+// refino que o anúncio encontrado tem de fato.
+test("a watchlist nasce com o refino da seção já exigido", async ({ page }) => {
   await buscar(page, "Espada Primordial", { refino: true });
 
   const secoes = page.locator(".item-group-row");
@@ -174,13 +176,13 @@ test("a watchlist nasce com o refino da seção já fixado", async ({ page }) =>
 
   const linhas = page.locator(".watchlist-row");
   await expect(linhas).toHaveCount(1);
-  await expect(linhas.first().locator(".watchlist-refine")).toHaveText("+7");
-  await expect(linhas.first().locator(".watchlist-current")).toHaveText("Atual: 158.000.000 z", ESPERA_PRECO);
+  await expect(linhas.first().locator(".watchlist-refine")).toHaveText("+7↑");
+  await expect(linhas.first().locator(".watchlist-current")).toHaveText("Atual: 158.000.000 z (+7)", ESPERA_PRECO);
 
   // A seção +10 é outra unidade: vira uma segunda linha, não um clique sem efeito.
   await secoes.filter({ has: page.locator(".refine-badge", { hasText: "+10" }) }).locator(".watchlist-button").click();
   await expect(linhas).toHaveCount(2);
-  await expect(linhas.nth(1).locator(".watchlist-refine")).toHaveText("+10");
+  await expect(linhas.nth(1).locator(".watchlist-refine")).toHaveText("+10↑");
 });
 
 // As duas versões chegam do site com o mesmo itemName e só se distinguem pelo

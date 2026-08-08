@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -110,36 +109,51 @@ func TestWatchlistPriceItemNaoEquipamento(t *testing.T) {
 	}
 }
 
-// TestWatchlistPriceComRefinoFixado é o caminho caro: o refino só é conhecido
-// consultando o detalhe de cada loja, então achar "o mais barato NESSE refino"
-// custa uma chamada por candidato até encontrar.
-func TestWatchlistPriceComRefinoFixado(t *testing.T) {
+// TestWatchlistPriceComRefinoMinimo é o caminho caro: o refino só é conhecido
+// consultando o detalhe de cada loja, então achar "o mais barato a partir
+// desse refino" custa uma chamada por candidato até encontrar.
+//
+// O filtro é um PISO, não um valor exato: refino maior só melhora a unidade,
+// então quem acompanha +7 quer saber de um +9 barato também.
+func TestWatchlistPriceComRefinoMinimo(t *testing.T) {
 	tests := []struct {
 		name         string
 		refine       string
 		wantFound    bool
 		wantPrice    int64
+		wantRefine   int
 		wantNavi     string
 		wantRequests int
 	}{
 		{
 			// Primeiro candidato (o mais barato) já bate.
 			name: "refino do anúncio mais barato", refine: "0",
-			wantFound: true, wantPrice: 129999999, wantNavi: "/navi prt_mk.gat 114/180", wantRequests: 2,
+			wantFound: true, wantPrice: 129999999, wantRefine: 0,
+			wantNavi: "/navi prt_mk.gat 114/180", wantRequests: 2,
 		},
 		{
 			// Busca + detalhe do 1º (não bate) + detalhe do 2º (bate).
 			name: "refino intermediário", refine: "7",
-			wantFound: true, wantPrice: 158000000, wantNavi: "/navi prt_mk.gat 120/150", wantRequests: 3,
+			wantFound: true, wantPrice: 158000000, wantRefine: 7,
+			wantNavi: "/navi prt_mk.gat 120/150", wantRequests: 3,
 		},
 		{
 			// Precisa varrer os três candidatos até achar.
 			name: "refino do anúncio mais caro", refine: "10",
-			wantFound: true, wantPrice: 299999999, wantNavi: "/navi prt_mk.gat 99/42", wantRequests: 4,
+			wantFound: true, wantPrice: 299999999, wantRefine: 10,
+			wantNavi: "/navi prt_mk.gat 99/42", wantRequests: 4,
 		},
 		{
-			// Nenhum anúncio nesse refino: varre todos e não acha.
-			name: "refino que ninguém anuncia", refine: "3",
+			// O contrato do piso: ninguém anuncia +3, mas o +7 serve — e é
+			// o mais barato entre os que servem. Com igualdade exata este
+			// caso respondia "sem anúncios" com o mercado cheio deles.
+			name: "refino que ninguém anuncia aceita o acima dele", refine: "3",
+			wantFound: true, wantPrice: 158000000, wantRefine: 7,
+			wantNavi: "/navi prt_mk.gat 120/150", wantRequests: 3,
+		},
+		{
+			// Acima de tudo que existe: varre todos e não acha.
+			name: "refino acima de todos os anúncios", refine: "11",
 			wantFound: false, wantRequests: 4,
 		},
 	}
@@ -165,12 +179,11 @@ func TestWatchlistPriceComRefinoFixado(t *testing.T) {
 				if view.MinPrice != tt.wantPrice {
 					t.Errorf("MinPrice = %d, quero %d", view.MinPrice, tt.wantPrice)
 				}
-				wantRefine, err := strconv.Atoi(tt.refine)
-				if err != nil {
-					t.Fatalf("refino do caso de teste inválido: %v", err)
-				}
-				if view.Refine == nil || *view.Refine != wantRefine {
-					t.Errorf("Refine = %v, quero %d", view.Refine, wantRefine)
+				// O refino DEVOLVIDO é o do anúncio encontrado, que pode
+				// ser maior que o pedido — é o que a linha mostra ao lado
+				// do preço para o usuário saber o que vai comprar.
+				if view.Refine == nil || *view.Refine != tt.wantRefine {
+					t.Errorf("Refine = %v, quero %d", view.Refine, tt.wantRefine)
 				}
 				if view.NaviCommand != tt.wantNavi {
 					t.Errorf("NaviCommand = %q, quero %q", view.NaviCommand, tt.wantNavi)
