@@ -355,7 +355,8 @@ function startEditingTarget(span, id) {
     const row = findRow(id);
     if (row) {
       const naviCommand = updated.lastResult ? updated.lastResult.naviCommand : null;
-      updateHitState(row, updated, lastKnownPrice.has(id) ? lastKnownPrice.get(id) : null, naviCommand);
+      const storeName = updated.lastResult ? updated.lastResult.storeName : null;
+      updateHitState(row, updated, lastKnownPrice.has(id) ? lastKnownPrice.get(id) : null, naviCommand, storeName);
     }
   };
 
@@ -751,6 +752,147 @@ function persistWatchlistOrder() {
   saveWatchlist(ordenada);
 }
 
+// buildSearchIcon é a mesma lupa do botão da barra de pesquisa
+// (index.html.tmpl), redesenhada aqui porque o botão da linha é montado em
+// JS puro, sem template.
+function buildSearchIcon() {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("stroke-width", "2.2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const circle = document.createElementNS(NS, "circle");
+  circle.setAttribute("cx", "11");
+  circle.setAttribute("cy", "11");
+  circle.setAttribute("r", "7");
+  const line = document.createElementNS(NS, "line");
+  line.setAttribute("x1", "21");
+  line.setAttribute("y1", "21");
+  line.setAttribute("x2", "16.2");
+  line.setAttribute("y2", "16.2");
+  svg.appendChild(circle);
+  svg.appendChild(line);
+  return svg;
+}
+
+// buildClipboardIcon marca visualmente o botão de localização como "clique
+// para copiar" — a borda picotada sozinha (herdada de .navi-copy) não deixa
+// isso claro quando o texto ao lado (o nome da loja, que NÃO é copiável) tem
+// a mesma aparência de texto clicável.
+function buildClipboardIcon() {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const rect = document.createElementNS(NS, "rect");
+  rect.setAttribute("x", "8");
+  rect.setAttribute("y", "2");
+  rect.setAttribute("width", "8");
+  rect.setAttribute("height", "4");
+  rect.setAttribute("rx", "1");
+  const path = document.createElementNS(NS, "path");
+  path.setAttribute("d", "M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2");
+  svg.appendChild(rect);
+  svg.appendChild(path);
+  return svg;
+}
+
+// searchEntryAgain é o botão de lupa de cada linha: preenche a barra de
+// pesquisa como se o usuário tivesse digitado o nome do item e apertado
+// Enter, e dispara a busca de verdade — sem os filtros de refino/bônus da
+// entrada (a barra não tem como pedir "refino mínimo", só "exatamente
+// igual"), e forçando o servidor da entrada, já que o resultado pode não
+// existir no servidor que a barra estiver mostrando agora.
+//
+// form.requestSubmit() (e não form.submit()) porque dispara o evento
+// "submit" de verdade, que é o que o htmx escuta para interceptar o
+// formulário — form.submit() pula os listeners e recarregaria a página.
+//
+// Os campos são achados por querySelector, e não por form.elements: o campo
+// "item" colide com o método item() que toda HTMLFormControlsCollection já
+// tem — form.elements.item não dá erro nenhum, só devolve o método em vez do
+// campo, e a atribuição vira uma propriedade solta que ninguém lê.
+function searchEntryAgain(entry) {
+  const form = document.querySelector(".search-form");
+  if (!form) return;
+  form.querySelector('select[name="server"]').value = entry.server;
+  form.querySelector('input[name="item"]').value = entrySearchName(entry);
+  form.querySelector('input[name="refine"]').checked = false;
+  form.querySelector('input[name="bonus"]').checked = false;
+  form.requestSubmit();
+}
+
+// MINUTE..YEAR são os limiares do formato relativo "há X" (ver relativeTime),
+// no vocabulário do Reddit/YouTube: minutos/horas abreviados (não inflexionam
+// no singular), dia/mês/ano por extenso (que inflexionam). Mês e ano usam
+// duração fixa (30 e 365 dias) — aproximação de propósito, o mesmo que
+// qualquer formatador relativo desse estilo faz; não precisa bater com o
+// calendário exato para um rótulo discreto de frescor de dado.
+const MINUTE_MS = 60 * 1000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+const MONTH_MS = 30 * DAY_MS;
+const YEAR_MS = 365 * DAY_MS;
+
+function relativeTime(timestampMs, now = Date.now()) {
+  const diff = Math.max(0, now - timestampMs);
+  if (diff < MINUTE_MS) return "agora";
+  if (diff < HOUR_MS) return "há " + Math.floor(diff / MINUTE_MS) + " min.";
+  if (diff < DAY_MS) return "há " + Math.floor(diff / HOUR_MS) + " h";
+  if (diff < MONTH_MS) {
+    const dias = Math.floor(diff / DAY_MS);
+    return "há " + dias + (dias === 1 ? " dia" : " dias");
+  }
+  if (diff < YEAR_MS) {
+    const meses = Math.floor(diff / MONTH_MS);
+    return "há " + meses + (meses === 1 ? " mês" : " meses");
+  }
+  const anos = Math.floor(diff / YEAR_MS);
+  return "há " + anos + (anos === 1 ? " ano" : " anos");
+}
+
+// paintUpdatedAt põe o rótulo ".watchlist-updated-at" no estado que o
+// timestamp pede: escondido enquanto o item nunca foi checado (timestampMs
+// null), ou o texto relativo com o horário exato no title. O
+// data-checked-at é o que refreshUpdatedAtLabels usa para reformatar o texto
+// sozinho com o passar do tempo, sem precisar de nova consulta nenhuma.
+function paintUpdatedAt(el, timestampMs) {
+  if (timestampMs == null) {
+    el.hidden = true;
+    delete el.dataset.checkedAt;
+    el.textContent = "";
+    el.title = "";
+    return;
+  }
+  el.hidden = false;
+  el.dataset.checkedAt = String(timestampMs);
+  el.textContent = relativeTime(timestampMs);
+  el.title = new Date(timestampMs).toLocaleString("pt-BR");
+}
+
+// applyUpdatedAt é paintUpdatedAt a partir da LINHA — usado depois de uma
+// consulta de verdade (fetchLivePrice), quando só se tem a linha em mãos.
+function applyUpdatedAt(row, timestampMs) {
+  const el = row.querySelector(".watchlist-updated-at");
+  if (el) paintUpdatedAt(el, timestampMs);
+}
+
+// refreshUpdatedAtLabels reformata todos os rótulos "há X" já na tela, sem
+// nenhuma consulta — chamado por um timer (ver DOMContentLoaded) para o
+// texto não ficar parado entre uma checagem e a seguinte, que pode demorar
+// minutos.
+function refreshUpdatedAtLabels() {
+  document.querySelectorAll(".watchlist-updated-at[data-checked-at]").forEach((el) => {
+    const ts = Number(el.dataset.checkedAt);
+    if (Number.isFinite(ts)) el.textContent = relativeTime(ts);
+  });
+}
+
 function buildWatchlistRow(entry) {
   const li = document.createElement("li");
   li.className = "watchlist-row";
@@ -824,17 +966,38 @@ function buildWatchlistRow(entry) {
   hitBadge.textContent = isAvailabilityWatch(entry) ? "🎯 Disponível" : "🎯 Alvo atingido";
   hitBadge.hidden = true;
 
-  // A localização (comando "/navi ...") do vendedor mais barato — mesmo
-  // botão/classe da tabela de busca (.navi-copy, copyNavi em app.js), só
-  // aparece junto do badge acima, quando a condição que a linha acompanha
-  // está valendo (ver updateHitState): é a hora de saber pra onde ir
-  // comprar, não em toda checagem sem alvo atingido ainda.
+  // A localização do vendedor mais barato só aparece junto do badge acima,
+  // quando a condição que a linha acompanha está valendo (ver
+  // updateHitState): é a hora de saber pra onde ir comprar, não em toda
+  // checagem sem alvo atingido ainda.
+  //
+  // Nome da loja e comando "/navi" são dois elementos separados, e não um
+  // texto só dentro do botão: só o /navi é copiável, e os dois dentro do
+  // mesmo quadro tracejado davam a entender que o quadro inteiro (nome
+  // incluso) era uma coisa só clicável.
+  const locationGroup = document.createElement("div");
+  locationGroup.className = "watchlist-location-group";
+  locationGroup.hidden = true;
+
+  const storeNameEl = document.createElement("span");
+  storeNameEl.className = "watchlist-store-name";
+
+  // Mesma classe .navi-copy (e copyNavi, em app.js) da tabela de busca, que
+  // é só texto sem ícone — daí o ícone de prancheta entrar aqui, e não em
+  // .navi-copy: reforça que o quadro tracejado é "clique para copiar" sem
+  // repetir a explicação em texto.
   const location = document.createElement("button");
   location.type = "button";
   location.className = "navi-copy watchlist-location";
   location.title = "Clique para copiar o comando de localização";
-  location.hidden = true;
+  location.appendChild(buildClipboardIcon());
+  const locationText = document.createElement("span");
+  locationText.className = "watchlist-location-text";
+  location.appendChild(locationText);
   location.addEventListener("click", () => copyNavi(location, location.dataset.command || ""));
+
+  locationGroup.appendChild(storeNameEl);
+  locationGroup.appendChild(location);
 
   // Único jeito de forçar uma consulta agora, desde que o "↻" global saiu: só
   // atualiza ESTA linha, sem tocar no cronômetro nem no item que o rodízio
@@ -847,10 +1010,38 @@ function buildWatchlistRow(entry) {
   refreshNow.setAttribute("aria-label", "Atualizar preço de " + entry.itemName + " agora");
   refreshNow.addEventListener("click", () => forceEntryUpdate(entry.id));
 
+  // Refaz, na tabela de resultados, a mesma busca que digitar o nome do item
+  // na barra e apertar Enter faria — ver searchEntryAgain.
+  const searchAgain = document.createElement("button");
+  searchAgain.type = "button";
+  searchAgain.className = "watchlist-search-item";
+  searchAgain.title = "Pesquisar este item";
+  searchAgain.setAttribute("aria-label", "Pesquisar " + entry.itemName + " novamente");
+  searchAgain.appendChild(buildSearchIcon());
+  searchAgain.addEventListener("click", () => searchEntryAgain(entry));
+
+  // Discreta de propósito: só dá uma noção de frescor do dado, não compete
+  // com o preço/alvo. Some enquanto o item nunca foi checado (ver
+  // paintUpdatedAt) e se mantém certa sozinha via refreshUpdatedAtLabels.
+  const updatedAt = document.createElement("span");
+  updatedAt.className = "watchlist-updated-at";
+  paintUpdatedAt(updatedAt, entry.lastCheckedAt != null ? entry.lastCheckedAt : null);
+
   pricesRow.appendChild(current);
   pricesRow.appendChild(hitBadge);
-  pricesRow.appendChild(location);
-  pricesRow.appendChild(refreshNow);
+  pricesRow.appendChild(locationGroup);
+
+  // Linha própria, separada de pricesRow: os dois botões e o horário não
+  // podiam ser só mais itens do flex-wrap de pricesRow porque aí cada um
+  // quebrava de linha sozinho, conforme o que mais coubesse ao lado (alvo,
+  // preço, badge) — o resultado eram cards com uma segunda linha só de
+  // botões, outra só com o horário, sem previsibilidade nenhuma. Aqui os
+  // três sempre ficam juntos, sempre na mesma linha, embaixo do preço.
+  const actionsRow = document.createElement("div");
+  actionsRow.className = "watchlist-actions";
+  actionsRow.appendChild(updatedAt);
+  actionsRow.appendChild(refreshNow);
+  actionsRow.appendChild(searchAgain);
 
   // Os bônus aleatórios ganham linha própria, e não um lugar ao lado do nome
   // ou do preço: são frases inteiras ("Conjuração variável -4%"), não cabem
@@ -875,6 +1066,7 @@ function buildWatchlistRow(entry) {
 
   info.appendChild(nameRow);
   info.appendChild(pricesRow);
+  info.appendChild(actionsRow);
   info.appendChild(bonusRow);
 
   const remove = document.createElement("button");
@@ -960,7 +1152,7 @@ function applyPriceResult(row, entry, data) {
     ? "Produto encontrado por " + achado
     : "Atual: " + achado;
   lastKnownPrice.set(entry.id, data.minPrice);
-  updateHitState(row, entry, data.minPrice, data.naviCommand);
+  updateHitState(row, entry, data.minPrice, data.naviCommand, data.storeName);
 }
 
 // fetchLivePrice consulta o preço ao vivo de uma entrada. Por padrão o
@@ -1000,14 +1192,18 @@ async function fetchLivePrice(entry, fresh = false) {
     if (!res.ok) throw new Error("status " + res.status);
     const data = await res.json();
     applyPriceResult(row, entry, data);
-    updateEntry(entry.id, { lastCheckedAt: Date.now(), lastResult: data });
+    const checkedAt = Date.now();
+    updateEntry(entry.id, { lastCheckedAt: checkedAt, lastResult: data });
+    applyUpdatedAt(row, checkedAt);
   } catch {
     currentEl.textContent = "Indisponível";
     // A consulta foi de fato tentada — o rodízio avança para o próximo item
     // mesmo assim, e este volta à vez quando for o mais antigo de novo. O
     // último resultado conhecido (lastResult) não é sobrescrito: continua
     // sendo o dado exibido antes desta tentativa falhar.
-    updateEntry(entry.id, { lastCheckedAt: Date.now() });
+    const checkedAt = Date.now();
+    updateEntry(entry.id, { lastCheckedAt: checkedAt });
+    applyUpdatedAt(row, checkedAt);
   }
 }
 
@@ -1027,24 +1223,31 @@ function isHit(entry, minPrice) {
 // condição deixa de valer.
 //
 // naviCommand só é usado quando hit é true: é o que mostra (e esconde de
-// volta, se a condição deixar de valer) o botão de localização — o servidor
+// volta, se a condição deixar de valer) o grupo de localização — o servidor
 // manda a localização sempre que encontra um anúncio, não sabe qual é o
 // alvo do usuário (ele vive só no navegador), então a decisão de exibir de
-// fato é toda daqui.
-function updateHitState(row, entry, minPrice, naviCommand) {
+// fato é toda daqui. storeName acompanha naviCommand, mas em elemento
+// separado (ver .watchlist-store-name em buildWatchlistRow): só o
+// dataset.command do botão entra no "copiar", o nome da loja é texto comum,
+// sem borda nem clique.
+function updateHitState(row, entry, minPrice, naviCommand, storeName) {
   const hit = isHit(entry, minPrice);
   row.classList.toggle("target-hit", hit);
   const badge = row.querySelector(".watchlist-hit-badge");
   if (badge) badge.hidden = !hit;
 
-  const locationEl = row.querySelector(".watchlist-location");
-  if (locationEl) {
+  const locationGroup = row.querySelector(".watchlist-location-group");
+  if (locationGroup) {
     if (hit && naviCommand) {
-      locationEl.textContent = naviCommand;
+      const locationEl = locationGroup.querySelector(".watchlist-location");
+      locationGroup.querySelector(".watchlist-location-text").textContent = naviCommand;
       locationEl.dataset.command = naviCommand;
-      locationEl.hidden = false;
+      const storeNameEl = locationGroup.querySelector(".watchlist-store-name");
+      storeNameEl.textContent = storeName ? "Loja: " + storeName : "";
+      storeNameEl.hidden = !storeName;
+      locationGroup.hidden = false;
     } else {
-      locationEl.hidden = true;
+      locationGroup.hidden = true;
     }
   }
 
@@ -1080,16 +1283,73 @@ function showToast(message) {
   }, 6000);
 }
 
-// notifyHit sempre mostra o toast (funciona sem nenhuma permissão) e, se o
-// navegador suportar e permitir, também dispara uma notificação nativa do
-// sistema operacional. A permissão só é pedida na hora em que ela de fato faz
-// falta (primeiro aviso), não no carregamento da página.
+// sharedAudioContext é reaproveitado entre acertos: criar um AudioContext
+// por notificação vazaria um a cada aviso, já que nada os fecha sozinho.
+let sharedAudioContext = null;
+
+// primeAudioContext "destrava" o áudio no primeiro gesto do usuário na
+// página. Navegadores só deixam o AudioContext de fato tocar som depois de
+// um gesto — sem isto, um acerto disparado pela checagem automática antes de
+// qualquer clique na página tocaria mudo mesmo com a API funcionando.
+function primeAudioContext() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!sharedAudioContext) sharedAudioContext = new Ctx();
+    if (sharedAudioContext.state === "suspended") sharedAudioContext.resume();
+  } catch {
+    // Sem áudio: o toast e a notificação nativa já bastam.
+  }
+}
+
+// playHitSound toca um tilintar curto de moeda ao notificar um acerto —
+// sintetizado via Web Audio API porque não há nenhum arquivo de áudio (nem
+// dependência) no projeto. Duas notas curtas e agudas, o vocabulário sonoro
+// de "moeda coletada" em jogos.
+function playHitSound() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!sharedAudioContext) sharedAudioContext = new Ctx();
+    const ctx = sharedAudioContext;
+    if (ctx.state === "suspended") ctx.resume();
+
+    const now = ctx.currentTime;
+    const notas = [
+      { freq: 1568, start: 0, dur: 0.09 },
+      { freq: 2093, start: 0.08, dur: 0.16 },
+    ];
+    for (const nota of notas) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "square";
+      osc.frequency.value = nota.freq;
+      gain.gain.setValueAtTime(0, now + nota.start);
+      gain.gain.linearRampToValueAtTime(0.15, now + nota.start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + nota.start + nota.dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + nota.start);
+      osc.stop(now + nota.start + nota.dur + 0.02);
+    }
+  } catch {
+    // Autoplay bloqueado ou API indisponível: o toast e a notificação nativa
+    // já bastam sem o som.
+  }
+}
+
+// notifyHit sempre mostra o toast e toca o alerta sonoro (funcionam sem
+// nenhuma permissão) e, se o navegador suportar e permitir, também dispara
+// uma notificação nativa do sistema operacional. A permissão só é pedida na
+// hora em que ela de fato faz falta (primeiro aviso), não no carregamento da
+// página.
 async function notifyHit(entry, minPrice) {
   const message = isAvailabilityWatch(entry)
     ? entry.itemName + " foi encontrado no mercado por " + formatMoney(minPrice)
     : entry.itemName + " atingiu o alvo: " + formatMoney(minPrice) +
       " (alvo: " + formatMoney(entry.targetPrice) + ")";
   showToast(message);
+  playHitSound();
 
   if (!("Notification" in window)) return;
   let permission = Notification.permission;
@@ -1256,6 +1516,8 @@ document.addEventListener("DOMContentLoaded", () => {
   runMonitoringTick();
   scheduleMonitoring();
   setInterval(updateCountdownDisplay, 1000);
+  setInterval(refreshUpdatedAtLabels, 60 * 1000);
+  document.addEventListener("pointerdown", primeAudioContext, { once: true });
 
   const expandButton = document.getElementById("watchlist-expand");
   if (expandButton) {

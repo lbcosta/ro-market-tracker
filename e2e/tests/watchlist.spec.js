@@ -421,7 +421,9 @@ test("um alvo acima do preço atual dispara o aviso", async ({ page }) => {
   await expect(linha.locator(".watchlist-hit-badge")).toHaveText("🎯 Alvo atingido");
   await expect(linha).toHaveClass(/target-hit/);
 
-  // A localização da loja mais barata aparece junto do badge.
+  // A localização da loja mais barata aparece junto do badge — nome da loja
+  // e comando /navi em elementos separados, já que só o segundo é copiável.
+  await expect(linha.locator(".watchlist-store-name")).toHaveText("Loja: Vendinha do Zé");
   await expect(linha.locator(".watchlist-location")).toHaveText("/navi prt_mk.gat 114/180");
 
   // O toast aparece sempre, sem depender de permissão do navegador.
@@ -451,14 +453,20 @@ test("o botão de localização da watchlist copia o comando /navi", async ({ pa
   await linha.locator(".watchlist-target-input").press("Enter");
 
   const botao = linha.locator(".watchlist-location");
+  await expect(linha.locator(".watchlist-store-name")).toHaveText("Loja: Vendinha do Zé");
   await expect(botao).toHaveText("/navi prt_mk.gat 114/180");
   await botao.click();
 
   await expect(botao).toHaveText("Copiado!");
+  // Só o comando /navi vai para a área de transferência — o nome da loja é
+  // um elemento separado, fora do botão (ver watchlist-store-name).
   const areaDeTransferencia = await page.evaluate(() => navigator.clipboard.readText());
   expect(areaDeTransferencia).toBe("/navi prt_mk.gat 114/180");
 
+  // O texto (com o ícone de prancheta) volta depois de "Copiado!" — não fica
+  // só "Copiado!" grudado, nem perde o ícone (ver innerHTML em copyNavi).
   await expect(botao).toHaveText("/navi prt_mk.gat 114/180", { timeout: 3000 });
+  await expect(botao.locator("svg")).toBeVisible();
 });
 
 // Exigir um refino muda o que a linha acompanha: passa a ser o menor preço
@@ -654,6 +662,47 @@ test("o botão de atualizar agora de um item não reinicia o cronômetro nem mex
 
   // Continua contando de onde estava — não voltou para 01:00.
   await expect(cronometro).not.toHaveText("01:00");
+});
+
+// A lupa refaz, na tabela de resultados, a mesma busca que digitar o nome do
+// item e apertar Enter faria — inclusive forçando de volta o servidor da
+// entrada, mesmo que a barra esteja mostrando outro no momento do clique.
+test("a lupa do card refaz a pesquisa do item", async ({ page }) => {
+  const linha = await adicionarEspadaPrimordial(page);
+
+  await page.selectOption('select[name="server"]', "FREYA");
+  await buscar(page, "Selo de Loki");
+
+  const resposta = page.waitForResponse((r) => {
+    const url = new URL(r.url());
+    return url.pathname === "/web/search" && url.searchParams.get("item") === "Espada Primordial";
+  });
+  await linha.locator(".watchlist-search-item").click();
+  const requisicao = await resposta;
+
+  const url = new URL(requisicao.url());
+  expect(url.searchParams.get("server")).toBe("NIDHOGG");
+  expect(url.searchParams.get("refine")).toBeNull();
+  expect(url.searchParams.get("bonus")).toBeNull();
+
+  await expect(page.locator('input[name="item"]')).toHaveValue("Espada Primordial");
+  await expect(page.locator('select[name="server"]')).toHaveValue("NIDHOGG");
+  await page.waitForSelector(".results-table");
+  await expect(page.locator(".results-table")).toContainText("Espada Primordial");
+});
+
+// O rótulo é discreto e no formato relativo (ver relativeTime em
+// watchlist.js); "agora" é o único valor determinístico de se testar sem
+// manipular o relógio do navegador.
+test("o card mostra há quanto tempo foi a última atualização", async ({ page }) => {
+  const linha = await adicionarEspadaPrimordial(page);
+  await expect(linha.locator(".watchlist-current")).toHaveText("Atual: 129.999.999 z", ESPERA_PRECO);
+  await expect(linha.locator(".watchlist-updated-at")).toHaveText("agora");
+
+  const resposta = page.waitForResponse((r) => new URL(r.url()).pathname === "/web/watchlist/price");
+  await linha.locator(".watchlist-refresh-item").click();
+  await resposta;
+  await expect(linha.locator(".watchlist-updated-at")).toHaveText("agora");
 });
 
 // --- bônus aleatórios ---

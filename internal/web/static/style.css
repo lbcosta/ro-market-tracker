@@ -713,10 +713,24 @@ h1 {
   border-radius: 4px;
   padding: 0.15rem 0.5rem;
   cursor: pointer;
+  /* inline-flex, e não o padrão do <button>: só a versão da watchlist tem um
+     ícone antes do texto (ver buildClipboardIcon em watchlist.js), mas isto
+     não muda nada na versão da tabela de busca, que é só texto. */
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .navi-copy:hover {
   border-style: solid;
+}
+
+.navi-copy svg {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex-shrink: 0;
+  stroke: currentColor;
+  fill: none;
 }
 
 h4 {
@@ -966,6 +980,28 @@ h4 {
   color: var(--success);
 }
 
+/* Coluna, e não lado a lado: o nome da loja e o botão de copiar precisam
+   parecer duas coisas diferentes, não um texto só — é o próprio pedido que
+   motivou separá-los (ver o comentário em buildWatchlistRow). */
+.watchlist-location-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  flex-basis: 100%;
+}
+
+/* Sem isto o atributo HTML "hidden" não tem efeito, pelo mesmo motivo já
+   documentado em .refine-badge[hidden]. */
+.watchlist-location-group[hidden] {
+  display: none;
+}
+
+.watchlist-store-name {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
 /* Os campos de bônus ocupam uma linha só deles, abaixo do preço: são frases
    inteiras, e podem quebrar para a linha seguinte quando não couberem lado a
    lado — ao contrário do badge "+7", que sempre cabe ao lado do nome. */
@@ -1025,6 +1061,45 @@ h4 {
 .watchlist-refresh-item:hover {
   background: var(--border);
   color: var(--accent);
+}
+
+.watchlist-search-item {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  border: none;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+}
+
+.watchlist-search-item svg {
+  width: 0.8rem;
+  height: 0.8rem;
+  stroke: currentColor;
+  fill: none;
+}
+
+.watchlist-search-item:hover {
+  background: var(--border);
+  color: var(--accent);
+}
+
+/* Linha própria, sempre com o horário e os dois botões juntos — ver o
+   comentário em buildWatchlistRow sobre por que eles não podem ser só mais
+   itens do flex-wrap de .watchlist-prices. */
+.watchlist-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.1rem;
+}
+
+.watchlist-updated-at {
+  font-size: 0.75rem;
+  color: var(--muted);
 }
 
 .watchlist-row.target-hit {

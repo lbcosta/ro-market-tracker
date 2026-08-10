@@ -13,10 +13,13 @@ function toggleRow(row) {
 
 function copyNavi(button, command) {
   navigator.clipboard.writeText(command).then(() => {
-    const original = button.textContent;
+    // innerHTML, e não textContent: a versão da watchlist tem um ícone de
+    // prancheta dentro do botão (ver buildClipboardIcon em watchlist.js), e
+    // textContent apagaria esse ícone ao restaurar.
+    const original = button.innerHTML;
     button.textContent = "Copiado!";
     setTimeout(() => {
-      button.textContent = original;
+      button.innerHTML = original;
     }, 1500);
   });
 }

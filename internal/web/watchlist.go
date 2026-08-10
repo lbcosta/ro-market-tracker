@@ -18,6 +18,7 @@ type watchlistPriceView struct {
 	MinPrice    int64  `json:"minPrice,omitempty"`
 	Refine      *int   `json:"refine,omitempty"`
 	NaviCommand string `json:"naviCommand,omitempty"`
+	StoreName   string `json:"storeName,omitempty"`
 
 	// Partial diz que a checagem não chegou a olhar todos os anúncios: o
 	// orçamento de consultas acabou antes (ver maxDetailFetches). Sem ele,
@@ -69,10 +70,10 @@ func storeKey(item gnjoy.ShopListItem) string {
 // palavra — ver teste com "Espada").
 //
 // Sem o parâmetro opcional "refine", devolve o menor preço entre todas as
-// lojas com esse itemId, o comando "/navi ..." até a loja mais barata (ver
-// naviCommand em navi.go) e, se ela for um equipamento, o refino dela — só
-// informativo, "o que está mais barato agora, onde fica e qual o refino
-// dessa unidade em especial".
+// lojas com esse itemId, o nome e o comando "/navi ..." até a loja mais
+// barata (ver naviCommand em navi.go) e, se ela for um equipamento, o refino
+// dela — só informativo, "o que está mais barato agora, onde fica e qual o
+// refino dessa unidade em especial".
 //
 // Com "refine" e/ou "bonus" informados, a busca passa a ser por uma unidade
 // que satisfaça isso: entre as lojas com esse itemId, ordenadas por preço
@@ -313,6 +314,7 @@ func (h *Handler) watchlistPriceForCheapest(r *http.Request, candidates []gnjoy.
 	budget := 1
 	if detail, _ := h.lookupStoreDetail(r, cheapest, &budget); detail != nil {
 		view.NaviCommand = naviCommand(detail.MapName, detail.Xpos, detail.Ypos)
+		view.StoreName = detail.StoreName
 		if isEquipment(cheapest.DatabaseType) {
 			refine := detail.Refine
 			view.Refine = &refine
@@ -387,6 +389,7 @@ func (h *Handler) watchlistPriceForFilter(r *http.Request, candidates []gnjoy.Sh
 			refine := store.Refine
 			view.Refine = &refine
 			view.NaviCommand = naviCommand(store.MapName, store.Xpos, store.Ypos)
+			view.StoreName = store.StoreName
 		}
 		return view
 	}
