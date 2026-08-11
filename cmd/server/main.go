@@ -11,12 +11,14 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/lbcosta/ro-market-tracker/internal/api"
 	"github.com/lbcosta/ro-market-tracker/internal/gnjoy"
+	"github.com/lbcosta/ro-market-tracker/internal/telegram"
 	"github.com/lbcosta/ro-market-tracker/internal/web"
 )
 
@@ -65,7 +67,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux, client)
-	web.RegisterRoutes(mux, client, version)
+	web.RegisterRoutes(mux, client, version, web.WithTelegramClient(telegramClientFromFile()))
 
 	// Quem tira o programa da suspensão: sonda o site de tempos em tempos e
 	// libera tudo quando ele volta. context.Background() porque não há
@@ -221,6 +223,37 @@ func rateLimitOptionFromEnv() (gnjoy.Option, bool) {
 		return nil, false
 	}
 	return gnjoy.WithRateLimit(rps, burst), true
+}
+
+// telegramClientFromFile lê telegram.txt (ver telegramConfigPath) e monta o
+// client se as duas chaves estiverem preenchidas. nil (integração desligada)
+// é o caso comum — a maioria de quem baixa a release nunca edita esse
+// arquivo — e cobre tanto "nunca configurou" quanto qualquer erro de
+// leitura, que aqui vira só um aviso no log: a integração é opcional, não
+// vale interromper a subida do servidor por causa dela.
+func telegramClientFromFile() *telegram.Client {
+	path := telegramConfigPath()
+	cfg, err := telegram.LoadConfigFile(path)
+	if err != nil {
+		slog.Warn("não foi possível ler o arquivo de configuração do Telegram", "path", path, "error", err)
+		return nil
+	}
+	if !cfg.Configured() {
+		return nil
+	}
+	return telegram.New(cfg.BotToken, cfg.ChatID)
+}
+
+// telegramConfigPath fica sempre ao lado do executável, e não do diretório
+// atual: o programa é aberto com duplo clique ou de qualquer pasta pelo
+// terminal, então o diretório de trabalho não é confiável — mas o caminho do
+// próprio binário é.
+func telegramConfigPath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return "telegram.txt"
+	}
+	return filepath.Join(filepath.Dir(exe), "telegram.txt")
 }
 
 // probeIntervalFromEnv lê de quanto em quanto tempo sondar o site enquanto as

@@ -1255,7 +1255,7 @@ function updateHitState(row, entry, minPrice, naviCommand, storeName) {
   if (hit && !wasNotified) {
     const updated = updateEntry(entry.id, { notified: true });
     if (updated) entry.notified = true;
-    notifyHit(entry, minPrice);
+    notifyHit(entry, minPrice, naviCommand, storeName);
   } else if (!hit && wasNotified) {
     const updated = updateEntry(entry.id, { notified: false });
     if (updated) entry.notified = false;
@@ -1338,18 +1338,65 @@ function playHitSound() {
   }
 }
 
-// notifyHit sempre mostra o toast e toca o alerta sonoro (funcionam sem
-// nenhuma permissão) e, se o navegador suportar e permitir, também dispara
-// uma notificação nativa do sistema operacional. A permissão só é pedida na
-// hora em que ela de fato faz falta (primeiro aviso), não no carregamento da
-// página.
-async function notifyHit(entry, minPrice) {
+// notifyTelegram repassa o texto para o servidor, que manda para o bot
+// configurado em telegram.txt (ver internal/web/telegram.go) — ou não faz
+// nada, se o Telegram não estiver configurado. Fire-and-forget: quem chama
+// (notifyHit) não espera nem confere o resultado, do mesmo jeito que o toast
+// e a notificação nativa não dependem de nenhuma resposta de rede.
+function notifyTelegram(text) {
+  fetch("/web/watchlist/notify-telegram", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  }).catch(() => {
+    // Falha de rede ao chegar no PRÓPRIO servidor local: o toast e a
+    // notificação nativa já avisaram o usuário; falhas do lado do Telegram
+    // (token inválido etc.) já são tratadas e logadas lá, nem chegam aqui.
+  });
+}
+
+// escapeTelegramHtml protege texto dinâmico (nome do item, nome da loja)
+// antes de entrar na mensagem HTML do Telegram (ver buildTelegramText) — sem
+// isto, um nome com "&" ou "<" quebraria as tags de formatação, ou pior,
+// seria interpretado como uma tag.
+function escapeTelegramHtml(text) {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// buildTelegramText monta a mensagem do Telegram em HTML (ver parse_mode em
+// internal/telegram/client.go): nome do item e da loja em negrito, e a
+// localização em bloco de código — separados em parágrafos (linha em
+// branco), diferente do toast, que é uma frase só de propósito (é lido de
+// relance, na hora, na própria página; o Telegram é lido longe dela).
+function buildTelegramText(entry, minPrice, naviCommand, storeName) {
+  const nome = "<b>" + escapeTelegramHtml(entry.itemName) + "</b>";
+  let text = isAvailabilityWatch(entry)
+    ? nome + " foi encontrado no mercado por " + formatMoney(minPrice)
+    : nome + " atingiu o alvo: " + formatMoney(minPrice) +
+      " (alvo: " + formatMoney(entry.targetPrice) + ")";
+
+  // Loja e localização são vistas longe do navegador (celular, notificação
+  // push), então vão junto — sem elas, dava pra saber QUE achou, mas não pra
+  // onde ir comprar.
+  if (storeName) text += "\n\nLoja: <b>" + escapeTelegramHtml(storeName) + "</b>";
+  if (naviCommand) text += "\n\nLoc: <code>" + escapeTelegramHtml(naviCommand) + "</code>";
+  return text;
+}
+
+// notifyHit sempre mostra o toast, toca o alerta sonoro e tenta notificar o
+// Telegram (funcionam sem nenhuma permissão) e, se o navegador suportar e
+// permitir, também dispara uma notificação nativa do sistema operacional. A
+// permissão só é pedida na hora em que ela de fato faz falta (primeiro
+// aviso), não no carregamento da página.
+async function notifyHit(entry, minPrice, naviCommand, storeName) {
   const message = isAvailabilityWatch(entry)
     ? entry.itemName + " foi encontrado no mercado por " + formatMoney(minPrice)
     : entry.itemName + " atingiu o alvo: " + formatMoney(minPrice) +
       " (alvo: " + formatMoney(entry.targetPrice) + ")";
   showToast(message);
   playHitSound();
+
+  notifyTelegram(buildTelegramText(entry, minPrice, naviCommand, storeName));
 
   if (!("Notification" in window)) return;
   let permission = Notification.permission;

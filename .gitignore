@@ -12,3 +12,12 @@ coverage.out
 # Recurso de ícone/versão do Windows, gerado pelo release.yml a partir de
 # build/windows/ — não faz sentido versionar um binário derivado.
 cmd/server/*.syso
+
+# Binário compilado localmente (ex: "go build -o ro-market-tracker
+# ./cmd/server", para testar a integração com o Telegram, que precisa do
+# binário de verdade — "go run" não serve, ver internal/telegram) e o
+# telegram.txt de teste que fica ao lado dele. O modelo vazio que vai na
+# release é docs/telegram.txt, versionado normalmente.
+/ro-market-tracker
+/ro-market-tracker.exe
+/telegram.txt

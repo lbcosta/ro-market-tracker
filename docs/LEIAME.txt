@@ -205,7 +205,10 @@ O QUE DÁ PARA FAZER NA PÁGINA
 
     Importante: a watchlist fica salva no seu navegador, não em uma conta.
     Ela continua lá se você fechar e abrir de novo, mas é só nesse navegador
-    e nesse computador. E os avisos só chegam com a página aberta.
+    e nesse computador. E os avisos só chegam com a página aberta — inclusive
+    o do Telegram, se você configurar um (ver "CONFIGURAÇÃO", abaixo): quem
+    faz a verificação é o navegador, então com a página fechada nada é
+    checado.
 
   Acompanhar o que o programa está fazendo
     A barra na parte de baixo da página mostra a consulta em andamento.
@@ -239,6 +242,16 @@ CONFIGURAÇÃO (OPCIONAL)
 
     Windows       set LOG_LEVEL=debug && ro-market-tracker.exe
     Linux/macOS   LOG_LEVEL=debug ./ro-market-tracker
+
+  Aviso da watchlist no Telegram
+    Além do aviso na página (e da notificação do sistema, se você permitir),
+    dá para receber uma mensagem no Telegram toda vez que a watchlist bater
+    o alvo. É opcional: veja o passo a passo em "README_TELEGRAM.txt", que
+    veio junto deste LEIAME. Sem configurar nada, tudo continua funcionando
+    normalmente, só sem o aviso do Telegram.
+
+    Depois de editar o arquivo "telegram.txt", feche e abra o programa de
+    novo para a mudança valer.
 
 
 COMO ENCERRAR

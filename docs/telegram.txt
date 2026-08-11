@@ -1,0 +1,5 @@
+# Aviso da watchlist no Telegram — veja README_TELEGRAM.txt para instruções
+# passo a passo de como preencher as duas linhas abaixo.
+
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=

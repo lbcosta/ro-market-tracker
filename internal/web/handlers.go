@@ -14,10 +14,16 @@ import (
 	"time"
 
 	"github.com/lbcosta/ro-market-tracker/internal/gnjoy"
+	"github.com/lbcosta/ro-market-tracker/internal/telegram"
 )
 
 type Handler struct {
 	client *gnjoy.Client
+
+	// telegramClient é nil quando a integração não foi configurada (ver
+	// cmd/server/main.go) — NotifyTelegram trata isso como um no-op, não como
+	// erro: a maioria de quem baixa a release nunca configura isto.
+	telegramClient *telegram.Client
 
 	// version é a versão do binário (ver main.version em cmd/server),
 	// mostrada num canto discreto da página — é o que o navegador compara
@@ -55,8 +61,22 @@ type Handler struct {
 	itemDetailMemo  *ttlCache[*gnjoy.ItemDetail]
 }
 
-func NewHandler(client *gnjoy.Client, version string) *Handler {
-	return &Handler{
+// HandlerOption configura extras opcionais do Handler — hoje só
+// WithTelegramClient. Variádico, e não mais um parâmetro fixo em NewHandler,
+// para as chamadas existentes (produção e testes) continuarem válidas sem
+// mudar: a integração é opcional, e a maioria delas nunca vai precisar dela.
+type HandlerOption func(*Handler)
+
+// WithTelegramClient liga o repasse de avisos da watchlist para o Telegram
+// (ver NotifyTelegram, em telegram.go). client nil (integração não
+// configurada) é aceito de propósito — HandlerOption não precisa saber
+// disso, quem decide é telegramClientFromFile em cmd/server/main.go.
+func WithTelegramClient(client *telegram.Client) HandlerOption {
+	return func(h *Handler) { h.telegramClient = client }
+}
+
+func NewHandler(client *gnjoy.Client, version string, opts ...HandlerOption) *Handler {
+	h := &Handler{
 		client:           client,
 		version:          version,
 		searchCache:      newTTLCache[*gnjoy.ShopSearchResult](searchCacheSize),
@@ -64,6 +84,10 @@ func NewHandler(client *gnjoy.Client, version string) *Handler {
 		storeDetailMemo:  newTTLCache[*gnjoy.StoreDetail](storeDetailMemoSize),
 		itemDetailMemo:   newTTLCache[*gnjoy.ItemDetail](itemDetailMemoSize),
 	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
 }
 
 // cachedSearchShops é o único caminho pelo qual o frontend busca lojas no
