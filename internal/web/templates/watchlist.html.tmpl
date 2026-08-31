@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  {{template "head-comum" .}}
+</head>
+<body>
+  {{template "banner-suspensao" .}}
+
+  <main class="page">
+    {{template "cabecalho" .}}
+    {{/* A única parte que a troca de aba substitui. Tudo em volta — cabeçalho,
+         menu, barra de atividades, versão — permanece no DOM, e com ele o
+         EventSource da barra e o motor da watchlist. */}}
+    <div id="page-content">{{template "watchlist-body" .}}</div>
+  </main>
+
+  {{template "rodape" .}}
+</body>
+</html>

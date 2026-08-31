@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  {{template "head-comum" .}}
+</head>
+<body>
+  {{template "banner-suspensao" .}}
+
+  <main class="page">
+    {{template "cabecalho" .}}
+    <div id="page-content">{{template "estoque-body" .}}</div>
+  </main>
+
+  {{template "rodape" .}}
+</body>
+</html>

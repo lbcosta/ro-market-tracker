@@ -91,23 +91,30 @@ body {
   color: var(--text);
 }
 
-/* Grid de áreas nomeadas em vez de duas colunas flex simples: título,
-   subtítulo e busca ocupam só a coluna "results" (mesma largura da
-   tabela/watchlist-button), e a watchlist começa exatamente na mesma linha
-   da grade em que a coluna de resultados começa — sem precisar calcular a
-   altura do bloco de busca ou usar calc()/media query para casar larguras. */
+/* A .page é só a moldura: largura, centralização e respiro. Ela guarda o
+   cabeçalho (que é o mesmo em todas as páginas e nunca é trocado) e o
+   #page-content, a única parte que a navegação entre abas substitui — ver
+   internal/web/static/navegacao.js. Cada página monta o próprio layout no
+   .page-body de dentro, então o grid da Watchlist não é mais o grid da
+   página inteira e não impõe nada à do Estoque. */
 .page {
-  display: grid;
-  grid-template-columns: minmax(280px, 1fr) 300px;
-  grid-template-areas:
-    "title      title"
-    "subtitle   subtitle"
-    "search     ."
-    "results    watchlist";
-  column-gap: 2rem;
   max-width: 1200px;
   margin: 0 auto;
   padding: 2rem 1rem 4rem;
+}
+
+/* Grid de áreas nomeadas em vez de duas colunas flex simples: a busca ocupa
+   só a coluna "results" (mesma largura da tabela/watchlist-button), e a
+   watchlist começa exatamente na mesma linha da grade em que a coluna de
+   resultados começa — sem precisar calcular a altura do bloco de busca ou
+   usar calc()/media query para casar larguras. */
+.page-body--watchlist {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) 300px;
+  grid-template-areas:
+    "search     ."
+    "results    watchlist";
+  column-gap: 2rem;
 }
 
 .results-column {
@@ -122,11 +129,9 @@ body {
    colunas declaradas e áreas de um nome por linha, a segunda coluna fica
    órfã e a página encolhe para metade da largura. É o que o bloco do
    breakpoint de 680px abaixo já faz, pelo mesmo motivo. */
-:root[data-watchlist-expandida="1"] .page {
+:root[data-watchlist-expandida="1"] .page-body--watchlist {
   grid-template-columns: 1fr;
   grid-template-areas:
-    "title"
-    "subtitle"
     "search"
     "watchlist"
     "results";
@@ -190,7 +195,6 @@ body {
 }
 
 .page-header {
-  grid-area: title;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -246,10 +250,66 @@ h1 {
 :root[data-theme="light"] .theme-toggle .icon-moon { display: block; }
 
 .subtitle {
-  grid-area: subtitle;
   color: var(--muted);
   margin-top: 0;
   margin-bottom: 1.5rem;
+}
+
+/* Menu de páginas (Estoque | Watchlist). Abas de verdade, e não só um par de
+   links coloridos: a aba ativa tem a mesma borda do resto da página, exceto
+   embaixo — ali a borda vira da cor do fundo e, com o margin-bottom negativo,
+   cobre a linha do .page-nav. É isso que dá a leitura de "esta aba está
+   aberta sobre o conteúdo", em vez de "este link está selecionado".
+
+   As abas inativas ganham a mesma borda de 1px em transparent para nascerem
+   exatamente da mesma altura da ativa; sem isso elas subiriam 2px ao trocar
+   de página. */
+.page-nav {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1.5rem;
+}
+
+.page-tab {
+  padding: 0.5rem 1.1rem;
+  margin-bottom: -1px;
+  border: 1px solid transparent;
+  border-radius: 8px 8px 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.page-tab:hover {
+  color: var(--text);
+}
+
+.page-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.page-tab.is-active {
+  background: var(--bg-card);
+  border-color: var(--border);
+  border-bottom-color: var(--bg-card);
+  color: var(--accent);
+}
+
+/* Casca desta etapa (só a mudança de interface). A borda picotada é o que
+   diz "aqui ainda não tem conteúdo" — um texto solto no canto superior
+   esquerdo pareceria a página ter quebrado ao carregar. */
+.estoque-placeholder {
+  margin: 0;
+  padding: 3rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--muted);
+  text-align: center;
 }
 
 .search-form {
@@ -261,11 +321,9 @@ h1 {
 }
 
 @media (max-width: 680px) {
-  .page {
+  .page-body--watchlist {
     grid-template-columns: 1fr;
     grid-template-areas:
-      "title"
-      "subtitle"
       "search"
       "results"
       "watchlist";

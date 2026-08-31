@@ -1,0 +1,161 @@
+{{/* Partes que as duas páginas (Watchlist e Estoque) compartilham: o <head>
+     comum, o banner de suspensão, o cabeçalho (título, tema, subtítulo e o
+     menu de páginas) e o rodapé fixo (barra de atividades e versão).
+
+     São {{define}} soltos, e não um "layout" único que envolve o conteúdo,
+     porque {{template}} não aceita nome dinâmico: um layout envolvente
+     precisaria de um if/else listando as páginas aqui dentro, e cada página
+     nova mexeria neste arquivo. Do jeito abaixo, cada página é um documento
+     completo que chama os pedaços comuns, e cada uma escolhe os próprios
+     scripts (watchlist.js, por exemplo, só faz sentido na Watchlist).
+
+     Todos recebem o mesmo pageView (ver internal/web/handlers.go). */}}
+
+{{define "head-comum"}}
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RO Market Tracker</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // Aplica a escolha manual de tema (ver theme.js) antes da primeira
+    // pintura — sem isto, a página desenharia com o tema padrão por um
+    // instante e só depois trocaria pro escolhido, um flash perceptível a
+    // cada carregamento.
+    (function () {
+      try {
+        var tema = localStorage.getItem("ro-market-tracker:theme");
+        if (tema === "light" || tema === "dark") {
+          document.documentElement.dataset.theme = tema;
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <script>
+    // Pelo mesmo motivo do bloco acima: a watchlist expandida reorganiza o
+    // corpo da página, e aplicá-la depois faria a tela saltar do layout de
+    // duas colunas para o de uma a cada carregamento. Vai no <html> porque a
+    // .page ainda não existe quando este script roda.
+    //
+    // Sem preferência salva, o padrão é expandida: um carregamento novo da
+    // página sempre começa com #results vazio (nenhuma busca ainda foi
+    // enviada nesta instância), então não há por que reservar aquele espaço
+    // para uma tabela que ainda não existe. Isso NÃO é gravado aqui — é só o
+    // padrão até a primeira busca, que recolhe a watchlist sozinha (ver
+    // watchlist.js); uma preferência explícita (o usuário já clicou no botão
+    // "«"/"»" alguma vez) sempre vale sobre esse padrão.
+    (function () {
+      try {
+        var watchlistPref = localStorage.getItem("ro-market-tracker:watchlist-expandida");
+        if (watchlistPref === "1" || watchlistPref === null) {
+          document.documentElement.dataset.watchlistExpandida = "1";
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <script src="/static/htmx.min.js"></script>
+  <script src="/static/theme.js" defer></script>
+  <script src="/static/activity-bar.js" defer></script>
+  {{/* Carregados nas duas abas, e uma vez só: o documento não recarrega mais
+       ao trocar de aba (ver navegacao.js), então o motor da watchlist segue
+       rodando com o Estoque aberto — que é o ponto, porque é ele quem avisa
+       no Telegram. */}}
+  <script src="/static/app.js" defer></script>
+  <script src="/static/watchlist.js" defer></script>
+  <script src="/static/navegacao.js" defer></script>
+{{end}}
+
+{{define "banner-suspensao"}}
+  {{/* Fora da .page e grudado no topo: quando o site limita as consultas,
+       nada mais na tela funciona, e o aviso precisa continuar visível
+       enquanto se rola a página. aria-live="polite" para o leitor de tela
+       anunciar sem cortar o que estiver lendo. */}}
+  <div id="suspension-banner" class="suspension-banner" role="status" aria-live="polite" hidden>
+    <strong>O site limitou as consultas.</strong>
+    <span id="suspension-detail">As buscas e a watchlist estão pausadas. O programa verifica sozinho de tempos em tempos e volta ao normal assim que o site liberar.</span>
+  </div>
+{{end}}
+
+{{define "cabecalho"}}
+  <div class="page-header">
+    <h1>RO Market Tracker</h1>
+    <button type="button" id="theme-toggle" class="theme-toggle" aria-label="Alternar entre tema claro e escuro" title="Alternar tema">
+      <svg class="icon-sun" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4"></circle>
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+      </svg>
+      <svg class="icon-moon" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"></path>
+      </svg>
+    </button>
+  </div>
+  <p class="subtitle">Preços do mercado de comércio do Ragnarok Online LATAM</p>
+
+  {{/* Links de verdade, e não botões com JS: cada página é uma URL própria
+       (ver internal/web/router.go), então a aba aberta sobrevive a um
+       recarregar, dá para abrir a outra em nova guia e o botão "voltar" do
+       navegador funciona sozinho.
+
+       A aba ativa é marcada duas vezes de propósito: .is-active carrega o
+       visual e aria-current="page" carrega o significado, que é o que o
+       leitor de tela anuncia — cor e borda não chegam até ele. */}}
+  {{template "menu" .}}
+{{end}}
+
+{{/* O menu fica FORA do #page-content (é cabeçalho, não conteúdo), então uma
+     troca de aba não o substituiria junto. Em vez de corrigir a aba ativa no
+     cliente, a resposta da troca traz o menu de novo com hx-swap-oob: quem
+     decide qual aba está aberta continua sendo o servidor, num lugar só, e o
+     HTML do menu não passa a existir em duas versões.
+
+     O hx-swap-oob só entra no fragmento (.Fragment): no documento completo
+     ele apareceria numa resposta que o htmx nem processa, e o atributo seria
+     lixo no HTML.
+
+     Os links são links comuns, de propósito — sem hx-get. Quem intercepta o
+     clique é o navegacao.js, porque o histórico do htmx trabalha no <body>
+     inteiro: no "voltar" ele restauraria o body a partir do snapshot e
+     levaria junto a barra de atividades, que é justamente o que não pode ser
+     re-renderizada. Sem JS, o href continua funcionando como navegação
+     normal. */}}
+{{define "menu"}}
+  <nav id="page-nav" class="page-nav" aria-label="Páginas"{{if .Fragment}} hx-swap-oob="true"{{end}}>
+    {{range .Tabs}}
+      {{/* A aba ativa é marcada duas vezes de propósito: .is-active carrega o
+           visual e aria-current="page" carrega o significado, que é o que o
+           leitor de tela anuncia — cor e borda não chegam até ele. */}}
+      <a class="page-tab{{if .Ativa}} is-active{{end}}" href="{{.Href}}"
+        {{if .Ativa}}aria-current="page"{{end}}>{{.Rotulo}}</a>
+    {{end}}
+  </nav>
+{{end}}
+
+{{define "rodape"}}
+  {{/* Fora do #page-content de propósito: a barra é a janela para o motor
+       compartilhado do lado do servidor (ver navegacao.js), e é o único
+       elemento da tela que precisa sobreviver intacto a uma troca de aba —
+       junto com ela sobrevive o EventSource que a alimenta. */}}
+  <div id="activity-bar" class="activity-bar" role="button" tabindex="0" aria-expanded="false" aria-label="Barra de atividades — clique para expandir ou recolher">
+    <ul id="activity-history" class="activity-history"></ul>
+    <div class="activity-bar-header">
+      <span class="activity-line">
+        <span id="activity-current-time" class="activity-time"></span>
+        <span id="activity-current-label">Nenhuma atividade ainda.</span>
+        <span id="activity-spinner" class="spinner" hidden aria-hidden="true"></span>
+      </span>
+      <span class="activity-bar-icon" aria-hidden="true">▲</span>
+    </div>
+  </div>
+
+  {{/* Canto discreto de propósito: pointer-events:none no CSS tira até o
+       cursor de "isto é clicável" da versão em si — só o link de
+       atualização (que o JS revela) volta a responder ao mouse. Fica acima
+       do "activity-bar" e longe do "toast-container" (que usa o canto
+       oposto), os dois únicos outros elementos fixos da tela. */}}
+  <div id="version-badge" class="version-badge" title="Versão em uso">
+    <span id="version-current">{{.Version}}</span>
+    <a id="version-update-link" class="version-update-link"
+        href="https://github.com/lbcosta/ro-market-tracker/releases/latest"
+        target="_blank" rel="noopener" hidden>· atualização disponível</a>
+  </div>
+  <script src="/static/version.js" defer></script>
+{{end}}

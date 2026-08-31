@@ -177,7 +177,19 @@ function connectActivityStream() {
 // Travar a interface não é o que impede as requisições — quem impede é o
 // servidor, que recusa tudo na porta enquanto estiver suspenso. Aqui é para o
 // usuário não ficar clicando em coisas que não vão funcionar.
+// Último estado recebido do servidor. Guardado porque a troca de aba
+// substitui o corpo da página (ver navegacao.js) e o formulário de busca e os
+// botões da watchlist voltam habilitados: sem reaplicar, uma página trocada
+// durante uma suspensão nasceria com os controles liberados, e o próximo
+// evento SSE só chegaria quando o site liberasse.
+let lastSuspensionState = { suspended: false };
+
+function reapplySuspension() {
+  applySuspension(lastSuspensionState);
+}
+
 function applySuspension(state) {
+  lastSuspensionState = state;
   const suspended = Boolean(state && state.suspended);
   document.documentElement.dataset.suspended = suspended ? "1" : "";
 

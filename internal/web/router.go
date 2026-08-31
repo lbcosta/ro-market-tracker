@@ -6,15 +6,16 @@ import (
 	"github.com/lbcosta/ro-market-tracker/internal/gnjoy"
 )
 
-// RegisterRoutes registra as rotas do frontend HTMX (página, busca, expand
-// e assets estáticos) no mux informado. version é a versão do binário (ver
+// RegisterRoutes registra as rotas do frontend HTMX (as duas páginas, busca,
+// expand e assets estáticos) no mux informado. version é a versão do binário (ver
 // main.version em cmd/server) — mostrada num canto discreto da página, é o
 // que o navegador compara com a última release do GitHub. opts é onde entra
 // WithTelegramClient, quando a integração estiver configurada.
 func RegisterRoutes(mux *http.ServeMux, client *gnjoy.Client, version string, opts ...HandlerOption) {
 	h := NewHandler(client, version, opts...)
 
-	mux.HandleFunc("GET /{$}", h.Index)
+	mux.HandleFunc("GET /{$}", h.Watchlist)
+	mux.HandleFunc("GET /estoque", h.Estoque)
 	mux.HandleFunc("GET /web/search", h.Search)
 	mux.HandleFunc("GET /web/search/variants", h.Variants)
 	mux.HandleFunc("GET /web/shops/{svrId}/{mapId}/{ssi}/expand", h.Expand)

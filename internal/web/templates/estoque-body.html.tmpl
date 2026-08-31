@@ -1,0 +1,14 @@
+{{/* O corpo da aba Estoque — mesmo papel duplo do watchlist-body. */}}
+{{define "estoque-body"}}
+<div class="page-body page-body--estoque">
+  {{/* Casca vazia de propósito: esta etapa é só a mudança de interface
+       (menu + duas páginas). O conteúdo do estoque da loja entra depois. */}}
+  <section class="estoque-column" aria-label="Estoque">
+    <p class="estoque-placeholder">Estoque</p>
+  </section>
+</div>
+{{/* Só no fragmento: no documento completo o menu já está no cabeçalho, e
+     mandá-lo de novo aqui o desenharia duas vezes. Ver o comentário do
+     {{define "menu"}} em layout.html.tmpl. */}}
+{{if .Fragment}}{{template "menu" .}}{{end}}
+{{end}}

@@ -21,8 +21,8 @@ internal/gnjoy/                 client para as rotas internas do GnJoy LATAM
   suspend.go                      suspensão de todas as consultas após um 429
 internal/api/                   API REST própria (JSON) — handlers + roteador
 internal/web/                   frontend HTMX — handlers + roteador
-  templates/                      *.html.tmpl (página, fragmentos de busca/expand)
-  static/                         CSS, JS (app.js, watchlist.js, theme.js, activity-bar.js, version.js) e htmx.min.js vendorizado
+  templates/                      layout (cabeçalho/rodapé comuns), as duas páginas e os fragmentos de busca/expand
+  static/                         CSS, JS (app.js, watchlist.js, navegacao.js, theme.js, activity-bar.js, version.js) e htmx.min.js vendorizado
   watchlist.go                    endpoint JSON de preço/refino ao vivo p/ a watchlist
   bonus.go                        varredura de refino/bônus por anúncio, sob demanda, memoizada
   suspension.go                   sonda que reabre as consultas quando o site volta
@@ -125,7 +125,63 @@ para não virarem o download padrão da página do projeto.
 
 ## Frontend (HTMX)
 
-Página de busca em `/`: escolha o servidor (`NIDHOGG` ou `FREYA`, `NIDHOGG`
+### As duas páginas
+
+O site tem duas páginas, alternadas pelo menu em abas logo abaixo do
+subtítulo:
+
+| Aba | Rota | Conteúdo |
+| --- | --- | --- |
+| Estoque | `GET /estoque` | estoque da loja do usuário — hoje só a casca |
+| Watchlist | `GET /{$}` | busca + watchlist (descritos no resto desta seção) |
+
+**Trocar de aba não recarrega o documento.** Só o `#page-content` é
+substituído (`internal/web/static/navegacao.js`); cabeçalho, menu, barra de
+atividades e a versão no canto ficam no mesmo DOM do começo ao fim da sessão.
+Isso não é preferência de estilo — é requisito. Quem fala com o site da GnJoy
+é um motor só, no servidor, e recarregar a página a cada clique no menu
+quebrava três coisas ao mesmo tempo:
+
+- **Uma conexão SSE nova por navegação** (medido: duas por ida e volta entre
+  as abas), com as anteriores penduradas até o navegador recolhê-las. O
+  HTTP/1.1 permite seis conexões por host, então depois de algumas trocas a
+  próxima página ficava esperando um socket vagar — carregando para sempre.
+- **O log do rodapé zerado a cada troca**, sendo que ele é justamente o
+  histórico do que o motor compartilhado andou fazendo.
+- **O rodízio de preços reiniciado**: cada volta à aba Watchlist gastava uma
+  consulta ao site e recomeçava o cronômetro de um minuto do zero. Trocar de
+  aba rápido consultava muito mais que uma vez por minuto — caminho curto
+  para o `429`.
+
+Como funciona: os links do menu são `href` comuns (sem JS, a navegação é a do
+navegador e a página inteira chega do servidor). O `navegacao.js` intercepta o
+clique, faz `history.pushState` e pede o corpo da página via `htmx.ajax`. O
+servidor responde ao mesmo `GET /` ou `GET /estoque` com o documento inteiro
+numa navegação comum e só com o corpo quando o cabeçalho `HX-Request` está
+presente — um HTML só para os dois casos, então abrir a URL direto e chegar
+pelo menu dão a mesma tela.
+
+O menu mora no cabeçalho, fora do pedaço trocado, e volta junto da resposta
+com `hx-swap-oob`: qual aba está aberta continua sendo decisão do servidor.
+O histórico (`pushState`/`popstate`) é tocado à mão em vez de com
+`hx-push-url` porque o histórico do htmx trabalha no `<body>` inteiro — no
+"voltar" ele restauraria o body a partir de um snapshot e levaria junto a
+barra de atividades.
+
+Depois de cada troca, `religarCorpo()` redesenha o painel da watchlist a
+partir do `localStorage` e reaplica o estado de suspensão: o corpo que chega
+é DOM novo, sem linhas e sem ouvintes.
+
+O cabeçalho (título, subtítulo, botão de tema e o menu) e o rodapé (barra de
+atividades e versão) são os mesmos nas duas páginas: ficam em
+`templates/layout.html.tmpl`, como `{{define}}` que cada página inclui. Não é
+um layout que envolve o conteúdo porque `{{template}}` não aceita nome
+dinâmico — cada página nova precisaria ser listada em um if/else dentro do
+layout.
+
+### Busca
+
+Escolha o servidor (`NIDHOGG` ou `FREYA`, `NIDHOGG`
 por padrão), digite o nome do item e clique na lupa. A busca sempre procura
 lojas comprando o item (ou seja, anúncios de jogadores vendendo o item) —
 não há seletor de tipo de negociação na UI. A busca (`GET /web/search`)
@@ -535,7 +591,7 @@ O HTMX é vendorizado localmente em `internal/web/static/htmx.min.js`
 Segue a preferência do sistema (`prefers-color-scheme`) por padrão. O botão
 no topo da página força um dos dois independente do sistema, guardando a
 escolha em `localStorage` (`internal/web/static/theme.js`); um script
-inline em `index.html.tmpl`, antes do `<link>` da folha de estilo, aplica
+inline em `layout.html.tmpl`, antes do `<link>` da folha de estilo, aplica
 essa escolha antes da primeira pintura, para não piscar o tema errado a
 cada carregamento. Todas as cores do `style.css` são variáveis (`--bg`,
 `--text`, `--accent` etc.) redefinidas para os dois modos — não há cor fixa

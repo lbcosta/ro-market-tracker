@@ -120,15 +120,77 @@ func (h *Handler) cachedSearchShops(ctx context.Context, server, item string, ma
 	}, nil
 }
 
-type indexView struct {
+// pageView é o que todo template de página recebe. Só carrega o que o
+// cabeçalho, o menu e o rodapé compartilhados precisam (ver
+// templates/layout.html.tmpl); o que é específico de uma página fica no
+// template dela.
+type pageView struct {
 	// Version é a versão do binário rodando agora — ver o comentário do
 	// campo homônimo em Handler.
 	Version string
+	// Page identifica a página aberta ("watchlist" ou "estoque"). O menu
+	// compara com isto para marcar a aba ativa.
+	Page string
+	// Fragment diz que a resposta é só o corpo da página, pedido pelo htmx
+	// numa troca de aba, e não o documento inteiro. O menu usa isso para
+	// decidir se volta junto, fora de banda.
+	Fragment bool
 }
 
-func (h *Handler) Index(w http.ResponseWriter, r *http.Request) {
+// tabView é uma aba do menu já resolvida: o template só desenha, não decide
+// qual está aberta.
+type tabView struct {
+	Href   string
+	Rotulo string
+	Ativa  bool
+}
+
+// Tabs são as abas na ordem em que aparecem no menu. Uma lista, e não dois
+// blocos de HTML repetidos no template: os atributos de um link de aba
+// existem em um lugar só.
+func (v pageView) Tabs() []tabView {
+	return []tabView{
+		{Href: "/estoque", Rotulo: "Estoque", Ativa: v.Page == "estoque"},
+		{Href: "/", Rotulo: "Watchlist", Ativa: v.Page == "watchlist"},
+	}
+}
+
+// renderPage responde uma das páginas: o documento inteiro numa navegação
+// comum (link direto, favorito, F5) e só o corpo quando o pedido vem do htmx
+// trocando de aba.
+//
+// A troca de aba NÃO recarrega o documento de propósito. O que fala com a
+// GnJoy é um motor só, do lado do servidor, e a barra de atividades no rodapé
+// é a janela para ele: recarregar a página a cada clique no menu derrubava o
+// EventSource da barra (uma conexão nova por navegação), zerava o log na tela
+// e fazia o watchlist.js reiniciar o rodízio de consultas — ou seja, cada
+// troca de aba gastava uma consulta ao site e reiniciava o cronômetro de um
+// minuto, o caminho mais curto para tomar 429.
+func (h *Handler) renderPage(w http.ResponseWriter, r *http.Request, page string) {
+	view := pageView{Version: h.version, Page: page, Fragment: r.Header.Get("HX-Request") == "true"}
+	if view.Fragment {
+		render(w, page+"-body", view)
+		return
+	}
+	render(w, page+".html.tmpl", view)
+}
+
+// Watchlist trata GET / e serve a busca + watchlist — o conteúdo que o
+// programa teve como página única até ganhar o menu.
+func (h *Handler) Watchlist(w http.ResponseWriter, r *http.Request) {
 	h.warmupActionID()
-	render(w, "index.html.tmpl", indexView{Version: h.version})
+	h.renderPage(w, r, "watchlist")
+}
+
+// Estoque trata GET /estoque e serve a página do estoque da loja do usuário.
+// Por enquanto só a casca: esta etapa entrega a mudança de interface (menu e
+// duas páginas), e o conteúdo vem depois.
+//
+// Não chama warmupActionID: a página ainda não consulta a GnJoy, e aquecer a
+// chave aqui gastaria uma requisição sem ninguém para aproveitá-la. Quem
+// abrir a Watchlist dispara o aquecimento.
+func (h *Handler) Estoque(w http.ResponseWriter, r *http.Request) {
+	h.renderPage(w, r, "estoque")
 }
 
 // warmupActionID testa o action id da Server Action do Next.js em segundo

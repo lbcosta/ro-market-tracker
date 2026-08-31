@@ -1554,17 +1554,16 @@ function renderWatchlist() {
   updateEmptyState();
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+// montarPainelDaWatchlist liga o painel que acabou de entrar no DOM: desenha
+// as linhas a partir do localStorage e reconecta os ouvintes de evento.
+//
+// É chamada no carregamento e de novo a cada troca de aba (ver
+// navegacao.js), porque o painel é substituído junto com o corpo da página.
+// Só mexe em DOM: nada aqui dispara consulta, e nada aqui mexe nos timers do
+// rodízio — o motor continua rodando por baixo, inclusive com a aba do
+// Estoque aberta, que é o que mantém o aviso no Telegram funcionando.
+function montarPainelDaWatchlist() {
   renderWatchlist();
-  // A primeira consulta de verdade sai na hora — só a do item escolhido pelo
-  // rodízio (pickNextEntry) —, não uma em rajada por item: quem abriu a
-  // página já viu o último preço conhecido no passo acima. Da segunda
-  // consulta em diante, o ritmo de MONITOR_TICK_MS passa a valer.
-  runMonitoringTick();
-  scheduleMonitoring();
-  setInterval(updateCountdownDisplay, 1000);
-  setInterval(refreshUpdatedAtLabels, 60 * 1000);
-  document.addEventListener("pointerdown", primeAudioContext, { once: true });
 
   const expandButton = document.getElementById("watchlist-expand");
   if (expandButton) {
@@ -1582,11 +1581,33 @@ document.addEventListener("DOMContentLoaded", () => {
   // Ver colapsarWatchlistParaNovaBusca.
   const searchForm = document.querySelector(".search-form");
   if (searchForm) searchForm.addEventListener("htmx:beforeRequest", colapsarWatchlistParaNovaBusca);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  montarPainelDaWatchlist();
+
+  // Daqui para baixo é o motor, e ele sobe UMA vez por documento. Como trocar
+  // de aba não recarrega mais a página, este bloco não roda de novo a cada
+  // clique no menu — antes rodava, e cada volta à Watchlist gastava uma
+  // consulta ao site e reiniciava o cronômetro de um minuto do zero.
+  //
+  // A primeira consulta de verdade sai na hora — só a do item escolhido pelo
+  // rodízio (pickNextEntry) —, não uma em rajada por item: quem abriu a
+  // página já viu o último preço conhecido no passo acima. Da segunda
+  // consulta em diante, o ritmo de MONITOR_TICK_MS passa a valer.
+  runMonitoringTick();
+  scheduleMonitoring();
+  setInterval(updateCountdownDisplay, 1000);
+  setInterval(refreshUpdatedAtLabels, 60 * 1000);
+  document.addEventListener("pointerdown", primeAudioContext, { once: true });
 
   // Tira a classe da animação de troca de layout assim que ela termina — ver
   // dispararAnimacaoDeTrocaDeLayout. Sem isto ela não atrapalharia nada (é só
   // a presença da classe que dispara o @keyframes, remover e recolocar é o
   // que reinicia), mas deixar a classe presa no elemento seria sujeira.
+  //
+  // Fica na .page, que sobrevive à troca de aba, e não no corpo trocado: um
+  // ouvinte por documento, não um por navegação.
   document.querySelector(".page")?.addEventListener("animationend", (ev) => {
     if (ev.animationName === "watchlist-layout-fade") {
       ev.currentTarget.classList.remove("watchlist-layout-mudando");

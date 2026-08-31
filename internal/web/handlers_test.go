@@ -97,12 +97,125 @@ func TestIndex(t *testing.T) {
 		// não de um valor fixo no template.
 		`id="version-current">test<`,
 		`id="version-update-link"`,
+		// O menu está nas duas páginas, com a aba da página aberta marcada.
+		`href="/estoque"`,
+		`class="page-tab is-active" href="/"`,
 	)
 
 	// Abrir a página dispara, em segundo plano, o aquecimento do action id
 	// (ver TestIndexAquecePreviamenteOActionID) — então, ao contrário da
 	// busca em si, ela pode custar requisições ao upstream, só que
 	// assíncronas e fora do caminho crítico da resposta.
+}
+
+// TestPaginaEstoque garante que /estoque responde com a casca da página: o
+// mesmo cabeçalho, subtítulo, menu e rodapé das outras páginas, mas com a aba
+// do Estoque marcada como a aberta e sem nada da Watchlist na tela.
+func TestPaginaEstoque(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	resp, html := getHTML(t, srv, "/estoque")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, quero 200", resp.StatusCode)
+	}
+
+	wantContains(t, html,
+		"RO Market Tracker",
+		"Preços do mercado de comércio do Ragnarok Online LATAM",
+		`class="page-tab is-active" href="/estoque"`,
+		`href="/"`,
+		`id="activity-bar"`,
+		`id="version-current">test<`,
+		">Estoque<",
+	)
+
+	// A página é só a casca: o painel da watchlist e o formulário de busca
+	// não vêm junto.
+	for _, naoQuero := range []string{`id="watchlist-list"`, `hx-get="/web/search"`} {
+		if strings.Contains(html, naoQuero) {
+			t.Errorf("HTML da página do estoque contém %q, mas não deveria", naoQuero)
+		}
+	}
+
+	// O watchlist.js, por outro lado, VEM: ele é o motor do rodízio de
+	// preços (e, por tabela, do aviso no Telegram), e trocar de aba não pode
+	// pará-lo. Ver o comentário no topo de static/navegacao.js.
+	wantContains(t, html, "watchlist.js")
+}
+
+// TestTrocaDeAbaDevolveSoOCorpo garante que o pedido que o htmx faz ao clicar
+// no menu volta só com o miolo da página. É o que preserva o resto do DOM —
+// e, com ele, a conexão SSE da barra de atividades e os timers da watchlist,
+// que uma navegação comum derrubaria a cada clique.
+func TestTrocaDeAbaDevolveSoOCorpo(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	for _, caso := range []struct{ nome, path, marca string }{
+		{"estoque", "/estoque", `class="estoque-placeholder"`},
+		{"watchlist", "/", `id="watchlist-list"`},
+	} {
+		t.Run(caso.nome, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, srv.URL+caso.path, nil)
+			if err != nil {
+				t.Fatalf("montando requisição: %v", err)
+			}
+			req.Header.Set("HX-Request", "true")
+			resp, err := srv.Client().Do(req)
+			if err != nil {
+				t.Fatalf("GET %s: %v", caso.path, err)
+			}
+			defer resp.Body.Close()
+			corpo, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("lendo corpo: %v", err)
+			}
+			html := string(corpo)
+
+			// O conteúdo da aba pedida veio, e o menu veio junto fora de
+			// banda — é assim que a aba ativa continua sendo decidida no
+			// servidor, mesmo o menu morando fora do pedaço trocado.
+			wantContains(t, html, caso.marca, `hx-swap-oob="true"`, `id="page-nav"`)
+
+			// E nada do documento em volta: mandar o <head> e o rodapé de
+			// novo recriaria o EventSource e zeraria o log na tela, que é o
+			// problema que esta rota existe para não ter.
+			for _, naoQuero := range []string{"<!doctype", "<html", `id="activity-bar"`, `id="version-badge"`, "watchlist.js"} {
+				if strings.Contains(strings.ToLower(html), strings.ToLower(naoQuero)) {
+					t.Errorf("fragmento de %s contém %q, mas devia ser só o corpo", caso.path, naoQuero)
+				}
+			}
+		})
+	}
+}
+
+// TestDocumentoCompletoNaoLevaMenuForaDeBanda garante o outro lado: numa
+// navegação comum (link direto, favorito, F5) o menu vai no lugar dele, sem o
+// hx-swap-oob — que ali só seria lixo, numa resposta que o htmx nem processa.
+func TestDocumentoCompletoNaoLevaMenuForaDeBanda(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	for _, path := range []string{"/", "/estoque"} {
+		_, html := getHTML(t, srv, path)
+		if strings.Contains(html, "hx-swap-oob") {
+			t.Errorf("documento completo de %s contém hx-swap-oob, mas não deveria", path)
+		}
+		wantContains(t, html, "<!doctype html>", `id="page-content"`, `id="page-nav"`)
+	}
+}
+
+// TestPaginaEstoqueNaoAqueceOActionID garante que abrir o Estoque não gasta
+// requisição nenhuma no site da GnJoy: a página ainda não consulta nada, e
+// cada requisição a mais aproxima o bloqueio por excesso (429).
+func TestPaginaEstoqueNaoAqueceOActionID(t *testing.T) {
+	srv, mock := newWebServer(t)
+
+	if _, err := srv.Client().Get(srv.URL + "/estoque"); err != nil {
+		t.Fatalf("GET /estoque: %v", err)
+	}
+
+	if n := mock.RequestCount(); n != 0 {
+		t.Errorf("requisições ao upstream = %d, quero 0", n)
+	}
 }
 
 // TestIndexAquecePreviamenteOActionID garante que abrir a página já dispara
