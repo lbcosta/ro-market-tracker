@@ -29,7 +29,7 @@ test("o menu troca de aba e marca a aberta", async ({ page }) => {
 
   await abaEstoque(page).click();
   await expect(page).toHaveURL(/\/estoque$/);
-  await expect(page.locator(".estoque-placeholder")).toHaveText("Estoque");
+  await expect(page.locator("#estoque-form")).toBeVisible();
   await esperarAba(page, "estoque");
 
   await abaWatchlist(page).click();
@@ -52,10 +52,11 @@ test("cabeçalho, subtítulo e rodapé continuam em todas as páginas", async ({
   }
 });
 
-test("a página do Estoque traz só o texto de espaço reservado", async ({ page }) => {
+test("a página do Estoque não traz nada da Watchlist", async ({ page }) => {
   await abaEstoque(page).click();
 
-  await expect(page.locator(".estoque-placeholder")).toHaveText("Estoque");
+  await expect(page.locator("#estoque-form")).toBeVisible();
+  await expect(page.locator("#estoque-list")).toBeAttached();
   await expect(page.locator("#watchlist-list")).toHaveCount(0);
   await expect(page.locator(".search-form")).toHaveCount(0);
 });
@@ -77,7 +78,7 @@ test("o log do rodapé sobrevive à troca de aba, sem reconectar", async ({ page
 
   for (let i = 0; i < 5; i++) {
     await abaEstoque(page).click();
-    await expect(page.locator(".estoque-placeholder")).toBeVisible();
+    await expect(page.locator("#estoque-form")).toBeVisible();
     await abaWatchlist(page).click();
     await expect(page.locator(".search-form")).toBeVisible();
   }
@@ -102,7 +103,7 @@ test("trocar de aba não dispara consulta ao mercado", async ({ page }) => {
 
   for (let i = 0; i < 5; i++) {
     await abaEstoque(page).click();
-    await expect(page.locator(".estoque-placeholder")).toBeVisible();
+    await expect(page.locator("#estoque-form")).toBeVisible();
     await abaWatchlist(page).click();
     await expect(page.locator(".search-form")).toBeVisible();
   }
@@ -118,7 +119,7 @@ test("a watchlist volta preenchida ao voltar para a aba", async ({ page }) => {
   await expect(page.locator(".watchlist-row")).toHaveCount(1);
 
   await abaEstoque(page).click();
-  await expect(page.locator(".estoque-placeholder")).toBeVisible();
+  await expect(page.locator("#estoque-form")).toBeVisible();
   await abaWatchlist(page).click();
 
   await expect(page.locator(".watchlist-row")).toHaveCount(1);
@@ -131,7 +132,7 @@ test("recarregar mantém a aba do Estoque aberta", async ({ page }) => {
 
   await page.reload();
 
-  await expect(page.locator(".estoque-placeholder")).toBeVisible();
+  await expect(page.locator("#estoque-form")).toBeVisible();
   await esperarAba(page, "estoque");
 });
 
@@ -146,7 +147,7 @@ test("o voltar e o avançar do navegador trocam a aba", async ({ page }) => {
 
   await page.goForward();
   await expect(page).toHaveURL(/\/estoque$/);
-  await expect(page.locator(".estoque-placeholder")).toBeVisible();
+  await expect(page.locator("#estoque-form")).toBeVisible();
   await esperarAba(page, "estoque");
 });
 

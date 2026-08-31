@@ -129,6 +129,15 @@ func TestPaginaEstoque(t *testing.T) {
 		">Estoque<",
 	)
 
+	// O formulário de adicionar e a lista, que são a tela em si.
+	wantContains(t, html,
+		`id="estoque-form"`,
+		`id="estoque-servidor"`,
+		`id="estoque-item"`,
+		`id="estoque-list"`,
+		`id="estoque-empty"`,
+	)
+
 	// A página é só a casca: o painel da watchlist e o formulário de busca
 	// não vêm junto.
 	for _, naoQuero := range []string{`id="watchlist-list"`, `hx-get="/web/search"`} {
@@ -137,10 +146,10 @@ func TestPaginaEstoque(t *testing.T) {
 		}
 	}
 
-	// O watchlist.js, por outro lado, VEM: ele é o motor do rodízio de
-	// preços (e, por tabela, do aviso no Telegram), e trocar de aba não pode
-	// pará-lo. Ver o comentário no topo de static/navegacao.js.
-	wantContains(t, html, "watchlist.js")
+	// Os scripts das duas telas, por outro lado, VÊM nas duas páginas: o
+	// motor do rodízio de preços não pode parar ao trocar de aba. Ver o
+	// comentário no topo de static/navegacao.js.
+	wantContains(t, html, "watchlist.js", "estoque.js")
 }
 
 // TestTrocaDeAbaDevolveSoOCorpo garante que o pedido que o htmx faz ao clicar
@@ -151,7 +160,7 @@ func TestTrocaDeAbaDevolveSoOCorpo(t *testing.T) {
 	srv, _ := newWebServer(t)
 
 	for _, caso := range []struct{ nome, path, marca string }{
-		{"estoque", "/estoque", `class="estoque-placeholder"`},
+		{"estoque", "/estoque", `id="estoque-list"`},
 		{"watchlist", "/", `id="watchlist-list"`},
 	} {
 		t.Run(caso.nome, func(t *testing.T) {

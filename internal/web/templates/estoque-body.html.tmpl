@@ -1,10 +1,29 @@
-{{/* O corpo da aba Estoque — mesmo papel duplo do watchlist-body. */}}
+{{/* O corpo da aba Estoque — mesmo papel duplo do watchlist-body: vale como
+     documento completo e como fragmento da troca de aba. */}}
 {{define "estoque-body"}}
 <div class="page-body page-body--estoque">
-  {{/* Casca vazia de propósito: esta etapa é só a mudança de interface
-       (menu + duas páginas). O conteúdo do estoque da loja entra depois. */}}
+  {{/* Um <form> de verdade, e não um input solto: é o que faz o Enter
+       funcionar sozinho e o que deixa o campo ser anunciado como campo de
+       busca. O envio é sempre cancelado no JS — adicionar ao estoque não
+       fala com o servidor (ver static/estoque.js). */}}
+  <form class="estoque-form" id="estoque-form">
+    {{/* O servidor é da tela inteira, não de cada item: a loja do usuário
+         fica em um servidor só. Ainda assim ele é gravado em cada item, para
+         uma troca futura não corromper os que já existem. */}}
+    <select id="estoque-servidor" name="server" aria-label="Servidor da sua loja">
+      <option value="NIDHOGG">NIDHOGG</option>
+      <option value="FREYA">FREYA</option>
+    </select>
+    <input type="text" id="estoque-item" name="item" placeholder="Nome do item que você vende"
+      aria-label="Nome do item para adicionar ao estoque" autocomplete="off" required>
+    <button type="submit" class="estoque-adicionar">Adicionar</button>
+  </form>
+
   <section class="estoque-column" aria-label="Estoque">
-    <p class="estoque-placeholder">Estoque</p>
+    <ul id="estoque-list" class="estoque-list"></ul>
+    <p id="estoque-empty" class="empty">
+      Nenhum item no estoque. Digite o nome de um item que você vende e aperte Enter.
+    </p>
   </section>
 </div>
 {{/* Só no fragmento: no documento completo o menu já está no cabeçalho, e

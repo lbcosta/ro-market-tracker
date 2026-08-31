@@ -214,10 +214,6 @@ function parseBonusData(raw) {
     .slice(0, BONUS_FILTER_SLOTS);
 }
 
-function cssEscape(value) {
-  return window.CSS && CSS.escape ? CSS.escape(String(value)) : String(value).replace(/["\\]/g, "\\$&");
-}
-
 function findRow(id) {
   return document.querySelector('.watchlist-row[data-id="' + cssEscape(id) + '"]');
 }
@@ -225,10 +221,6 @@ function findRow(id) {
 function updateEmptyState() {
   const empty = document.getElementById("watchlist-empty");
   if (empty) empty.hidden = loadWatchlist().length > 0;
-}
-
-function formatMoney(n) {
-  return n.toLocaleString("pt-BR") + " z";
 }
 
 function targetLabel(targetPrice) {
@@ -1260,27 +1252,6 @@ function updateHitState(row, entry, minPrice, naviCommand, storeName) {
     const updated = updateEntry(entry.id, { notified: false });
     if (updated) entry.notified = false;
   }
-}
-
-function showToast(message) {
-  let container = document.getElementById("toast-container");
-  if (!container) {
-    container = document.createElement("div");
-    container.id = "toast-container";
-    container.className = "toast-container";
-    document.body.appendChild(container);
-  }
-
-  const toast = document.createElement("div");
-  toast.className = "toast";
-  toast.textContent = message;
-  container.appendChild(toast);
-
-  requestAnimationFrame(() => toast.classList.add("show"));
-  setTimeout(() => {
-    toast.classList.remove("show");
-    setTimeout(() => toast.remove(), 300);
-  }, 6000);
 }
 
 // sharedAudioContext é reaproveitado entre acertos: criar um AudioContext

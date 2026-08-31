@@ -299,17 +299,222 @@ h1 {
   color: var(--accent);
 }
 
-/* Casca desta etapa (só a mudança de interface). A borda picotada é o que
-   diz "aqui ainda não tem conteúdo" — um texto solto no canto superior
-   esquerdo pareceria a página ter quebrado ao carregar. */
-.estoque-placeholder {
+/* Formulário de adicionar. Mesma pegada da .search-form (select do servidor +
+   campo + botão), para as duas telas do site não parecerem de projetos
+   diferentes. */
+.estoque-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.estoque-form select,
+.estoque-form input {
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.estoque-form input {
+  flex: 1;
+  min-width: 200px;
+}
+
+.estoque-adicionar {
+  padding: 0 1.1rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.estoque-adicionar:hover {
+  filter: brightness(1.08);
+}
+
+/* Uma grade, e não uma coluna: o card do estoque é largo (preço de venda,
+   mercado, histórico) e a aba não tem painel lateral disputando espaço, então
+   cabem dois ou três por linha em tela grande. */
+.estoque-list {
+  list-style: none;
   margin: 0;
-  padding: 3rem 1rem;
-  border: 1px dashed var(--border);
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.estoque-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--bg-card);
+}
+
+.estoque-card-topo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Só o nome encolhe e trunca; o selo de status e o "×" nunca somem, porque
+   são eles que dizem o que fazer com a linha. */
+.estoque-nome {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.estoque-status {
+  flex-shrink: 0;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.estoque-status-nao-validado { color: var(--muted); }
+.estoque-status-validado { color: var(--success); }
+
+/* Vermelho é o ponto: "validado com erro" é o único estado que exige ação do
+   usuário (excluir e cadastrar de novo com o nome certo). */
+.estoque-status-erro { color: var(--danger); }
+
+.estoque-remover {
+  flex-shrink: 0;
+  border: none;
+  background: none;
   color: var(--muted);
-  text-align: center;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 0.25rem;
+  cursor: pointer;
+}
+
+.estoque-remover:hover {
+  color: var(--danger);
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.estoque-precos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.8rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* Sublinhado picotado = "isto é editável clicando", a mesma pista visual do
+   "Alvo:" da watchlist. */
+.estoque-preco-venda {
+  border-bottom: 1px dashed var(--muted);
+  cursor: pointer;
+}
+
+.estoque-preco-venda:hover,
+.estoque-preco-venda:focus-visible {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.estoque-preco-input {
+  width: 7rem;
+  padding: 0.1rem 0.3rem;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+
+.estoque-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.estoque-toggle {
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+/* O :not(.is-on) não é enfeite: sem ele esta regra (0,3,0) vence a do .is-on
+   logo abaixo (0,2,0) e pinta o texto de --accent em cima do fundo --accent —
+   o botão ligado fica com o rótulo invisível assim que o mouse encosta nele.
+   Mesma armadilha de especificidade que o resto do arquivo já documenta para
+   o [hidden]. */
+.estoque-toggle:hover:not(:disabled):not(.is-on) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.estoque-toggle.is-on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.estoque-toggle.is-on:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.estoque-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.estoque-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.estoque-janela {
+  padding: 0.2rem 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.estoque-validar {
+  padding: 0.2rem 0.7rem;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: none;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.estoque-validar:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.estoque-validar:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .search-form {

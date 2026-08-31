@@ -57,6 +57,7 @@ async function irPara(url) {
 // morrer num ReferenceError.
 function religarCorpo() {
   if (typeof montarPainelDaWatchlist === "function") montarPainelDaWatchlist();
+  if (typeof montarPainelDoEstoque === "function") montarPainelDoEstoque();
   if (typeof reapplySuspension === "function") reapplySuspension();
 }
 

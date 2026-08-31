@@ -22,7 +22,7 @@ internal/gnjoy/                 client para as rotas internas do GnJoy LATAM
 internal/api/                   API REST própria (JSON) — handlers + roteador
 internal/web/                   frontend HTMX — handlers + roteador
   templates/                      layout (cabeçalho/rodapé comuns), as duas páginas e os fragmentos de busca/expand
-  static/                         CSS, JS (app.js, watchlist.js, navegacao.js, theme.js, activity-bar.js, version.js) e htmx.min.js vendorizado
+  static/                         CSS, JS (app.js, watchlist.js, estoque.js, navegacao.js, theme.js, activity-bar.js, version.js) e htmx.min.js vendorizado
   watchlist.go                    endpoint JSON de preço/refino ao vivo p/ a watchlist
   bonus.go                        varredura de refino/bônus por anúncio, sob demanda, memoizada
   suspension.go                   sonda que reabre as consultas quando o site volta
@@ -132,7 +132,7 @@ subtítulo:
 
 | Aba | Rota | Conteúdo |
 | --- | --- | --- |
-| Estoque | `GET /estoque` | estoque da loja do usuário — hoje só a casca |
+| Estoque | `GET /estoque` | o que o usuário vende: cadastro, preço de venda e (em construção) os dados do mercado |
 | Watchlist | `GET /{$}` | busca + watchlist (descritos no resto desta seção) |
 
 **Trocar de aba não recarrega o documento.** Só o `#page-content` é
@@ -178,6 +178,44 @@ atividades e versão) são os mesmos nas duas páginas: ficam em
 um layout que envolve o conteúdo porque `{{template}}` não aceita nome
 dinâmico — cada página nova precisaria ser listada em um if/else dentro do
 layout.
+
+### Estoque
+
+O outro lado do programa: a busca e a watchlist servem a quem **compra**, o
+Estoque serve a quem **vende**. O usuário digita o nome de um item que anuncia,
+aperta Enter, e ele entra na lista.
+
+Como a watchlist, o estoque vive inteiro no `localStorage`
+(`ro-market-tracker:estoque`) — não há conta de usuário nem persistência no
+servidor, e a ordem do array é a ordem da tela. O servidor da loja é da tela
+inteira (`ro-market-tracker:estoque-servidor`), porque a loja de alguém fica em
+um servidor só, mas é gravado também em cada item para uma troca futura não
+corromper os que já existem.
+
+Cada card mostra:
+
+- O nome — o que o usuário digitou até a validação acontecer, e o nome canônico
+  depois dela. Preservar o digitado é o que deixa ele reconhecer a linha que
+  precisa corrigir quando o nome está errado.
+- Um selo de validação: **NÃO VALIDADO**, **VALIDADO** ou **VALIDADO COM ERRO**
+  (este em vermelho — é o único estado que exige ação: excluir e cadastrar de
+  novo com o nome certo).
+- **Vendo por:**, o preço que o usuário está pedindo, editável clicando — mesmo
+  gesto e mesma receita do "Alvo:" da watchlist.
+- **Na loja / Fora da loja** e **Undercutting**, ligados pelo usuário. O
+  undercutting fica desabilitado enquanto o item está fora da loja: não há o que
+  comparar com o mercado se você não está vendendo. Sair da loja desliga a flag
+  junto, para ela não voltar a valer sozinha na próxima vez que o item entrar.
+- A **janela do histórico** (último dia / 7 dias / 30 dias / todo o histórico),
+  **por item**. Ela é por item, e não da tela, porque trocá-la custa uma consulta
+  ao site: um seletor global cobraria isso de todos os itens de uma vez e
+  estouraria o ritmo de uma requisição por minuto que o programa respeita.
+
+**Nesta etapa, nenhuma ação da tela fala com o GnJoy.** Adicionar, editar o
+preço, ligar as flags, trocar a janela e excluir são só `localStorage` + DOM — o
+que os testes conferem com o contador de requisições ao upstream, porque "zero
+requisição" aqui é requisito, não acaso. Validar contra o mercado, buscar preços
+e avisar sobre undercutting entram nas etapas seguintes.
 
 ### Busca
 
