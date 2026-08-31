@@ -22,7 +22,7 @@ internal/gnjoy/                 client para as rotas internas do GnJoy LATAM
 internal/api/                   API REST própria (JSON) — handlers + roteador
 internal/web/                   frontend HTMX — handlers + roteador
   templates/                      layout (cabeçalho/rodapé comuns), as duas páginas e os fragmentos de busca/expand
-  static/                         CSS, JS (app.js, watchlist.js, estoque.js, navegacao.js, theme.js, activity-bar.js, version.js) e htmx.min.js vendorizado
+  static/                         CSS, JS (app.js, monitor.js, watchlist.js, estoque.js, navegacao.js, theme.js, activity-bar.js, version.js) e htmx.min.js vendorizado
   watchlist.go                    endpoint JSON de preço/refino ao vivo p/ a watchlist
   bonus.go                        varredura de refino/bônus por anúncio, sob demanda, memoizada
   suspension.go                   sonda que reabre as consultas quando o site volta
@@ -565,38 +565,50 @@ tratadas como acompanhamento de preço, que era o único comportamento.
 
 #### Monitoramento e alertas
 
-Enquanto a página estiver aberta, a cada minuto (`MONITOR_TICK_MS` em
-`watchlist.js`) UM item entre os com o indicador ligado (verde) tem o preço
-reconsultado — nunca a lista inteira de uma vez. O escolhido é sempre o que
-está há mais tempo sem consulta (`pickNextEntry`: o `lastCheckedAt` mais
-antigo entre os monitorados, nunca consultado contando como o mais antigo de
-todos, com empate desfeito pela ordem de exibição); isso faz os itens
-revezarem sozinhos, sem um cursor/fila separado para acompanhar
-adições e remoções — remover um item da lista simplesmente tira-o da
-disputa, e um item recém-adicionado (ou recolocado) entra na frente por
-nunca ter sido consultado. É esse rodízio, e não mais um ciclo de vários
-minutos despachando tudo de uma vez em série, que garante o ritmo constante
-de uma requisição por minuto não importa quantos itens a watchlist tenha.
+O rodízio é do **programa inteiro**, não da watchlist:
+`internal/web/static/monitor.js` é o único relógio, e cada tela que vigia
+preço se registra nele como uma *fonte*. A cada minuto (`MONITOR_TICK_MS`)
+ele escolhe UMA entrada — a que está há mais tempo sem consulta, entre todas
+as fontes — e consulta só ela. Nunca a lista inteira, e nunca uma por minuto
+para cada tela: o teto que importa é o do site, e ele é do processo.
+
+O escolhido é sempre o de `lastCheckedAt` mais antigo (nunca consultado conta
+como o mais antigo de todos, empate desfeito pela ordem de exibição); isso faz
+os itens revezarem sozinhos, sem um cursor/fila separado para acompanhar
+adições e remoções — remover um item simplesmente tira-o da disputa, e um item
+recém-adicionado entra na frente por nunca ter sido consultado. O intervalo
+entre duas consultas do MESMO item é, portanto, ~N × 1 min, e é isso que o
+teto conjunto `MONITOR_MAX_ITENS` (50 itens **vigiados**, somando as telas)
+protege. Guardar itens desligados é livre: eles não disputam a vez.
+
+**Uma regra que o motor não pode quebrar: uma fonte nunca desiste de uma
+consulta porque a linha não está na tela.** Qual aba está aberta é escolha de
+quem olha; o que é vigiado é escolha de quem configurou. Por isso
+`fetchLivePrice` procura a linha só DEPOIS da resposta — antes, ela poderia
+não existir (outra aba aberta) ou ainda não ter nascido (o tick sai antes de o
+painel terminar de desenhar), e nos dois casos o resultado ficava guardado sem
+nunca ser pintado. Pelo mesmo motivo `updateHitState` é dividido em
+`pintarHit` (só com linha) e `avaliarHit` (sempre): é `avaliarHit` quem
+dispara o aviso, e um item vigiado que só avisasse com a aba dele aberta seria
+o oposto de vigiar.
 
 Cada linha nasce com o último resultado conhecido — persistido na própria
 entrada (`lastResult`, junto de `lastCheckedAt`) — pintado na hora, sem
-nenhuma requisição; a única consulta de verdade do carregamento é a do item
-escolhido pelo rodízio, disparada imediatamente (sem esperar o primeiro
-minuto). O botão "↻" de cada linha (ver acima) força uma consulta só
-daquele item a qualquer momento, sem tocar no cronômetro nem no item que o
-tick automático escolheria a seguir — o `lastCheckedAt` dele também é
-atualizado, então ele naturalmente sai da frente da fila até voltar a ser o
-mais antigo.
+nenhuma requisição; a única consulta de verdade do carregamento é a da entrada
+mais atrasada, disparada imediatamente (sem esperar o primeiro minuto). O
+botão "↻" de cada linha força uma consulta só daquele item a qualquer momento,
+sem tocar no cronômetro nem no item que o tick escolheria a seguir.
+
+O cronômetro é achado por atributo (`data-cronometro-do-rodizio`), e não por
+id: o relógio é do rodízio, não de uma tela, e qualquer página pode mostrá-lo
+sem o monitor conhecer os ids dela.
 
 Se a condição que o item acompanha passar a valer, o usuário é avisado de
-duas formas:
-
-- Um toast no canto inferior direito da página (sempre aparece, não
-  depende de nenhuma permissão do navegador).
-- Uma notificação nativa do sistema operacional, via `Notification` do
-  navegador — a permissão só é pedida na hora em que ela faz falta (o
-  primeiro aviso), não no carregamento da página; se for negada ou o
-  navegador não suportar, só o toast é mostrado.
+quatro formas, sempre nesta ordem: um **toast** no canto inferior direito
+(sempre aparece, não depende de permissão nenhuma), um **som** curto, uma
+mensagem no **Telegram** (se configurado) e uma **notificação nativa** do
+sistema — cuja permissão só é pedida na hora em que ela faz falta (o primeiro
+aviso), não no carregamento da página.
 
 Cada item só notifica uma vez por "cruzamento" da condição: enquanto ela
 continuar valendo, as checagens seguintes não repetem o aviso (o card e o
@@ -611,15 +623,16 @@ permanecerem — eles ainda têm o preço atualizado ao carregar a página (do
 cache) ou ao serem adicionados, só não voltam a ser consultados
 automaticamente enquanto desligados.
 
-Como a watchlist vive só no navegador, o monitoramento também só roda
-enquanto uma aba com a página estiver aberta; fechar a aba interrompe as
-checagens até ela ser reaberta (quando o rodízio retoma de onde parou,
-graças ao `lastCheckedAt` persistido, e a primeira consulta sai na hora, sem
-esperar o primeiro minuto). Várias abas abertas rodam cada uma o próprio
-tick, mas como o array da watchlist mora no mesmo `localStorage`
-compartilhado entre elas, tendem a escolher o mesmo item por vez — e o
-cache do servidor absorve essa sobreposição, sem coordenação explícita entre
-abas.
+Como as listas vivem só no navegador, o monitoramento também só roda enquanto
+uma aba com o programa estiver aberta — mas **qualquer** aba serve: trocar
+entre Estoque e Watchlist não interrompe nada, porque o motor é o mesmo e não
+depende de qual painel está na tela. Fechar a aba interrompe as checagens até
+ela ser reaberta (quando o rodízio retoma de onde parou, graças ao
+`lastCheckedAt` persistido, e a primeira consulta sai na hora). Várias abas
+abertas rodam cada uma o próprio tick, mas como as listas moram no mesmo
+`localStorage` compartilhado entre elas, tendem a escolher a mesma entrada por
+vez — e o cache do servidor absorve essa sobreposição, sem coordenação
+explícita entre abas.
 
 O HTMX é vendorizado localmente em `internal/web/static/htmx.min.js`
 (embutido no binário via `go:embed`) — não depende de CDN em runtime.

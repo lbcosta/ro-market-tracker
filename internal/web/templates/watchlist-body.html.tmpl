@@ -57,8 +57,13 @@
   <aside class="watchlist-panel" aria-label="Watchlist">
     <div class="watchlist-header">
       <h2>Watchlist</h2>
-      <div id="watchlist-timer" class="watchlist-timer" title="Tempo até a próxima checagem automática de preços">
-        <span id="watchlist-countdown">--:--</span>
+      {{/* Os atributos data-cronometro-do-rodizio* são como o monitor acha
+           este relógio: ele é do rodízio inteiro, não da watchlist, e
+           qualquer tela pode mostrá-lo sem o monitor conhecer ids de página
+           (ver static/monitor.js). */}}
+      <div id="watchlist-timer" class="watchlist-timer" data-cronometro-do-rodizio-titulo
+        title="Tempo até a próxima checagem automática de preços">
+        <span id="watchlist-countdown" data-cronometro-do-rodizio>--:--</span>
         <button type="button" id="watchlist-expand" aria-expanded="false" aria-label="Expandir a watchlist sobre a área de resultados" title="Expandir">«</button>
       </div>
     </div>

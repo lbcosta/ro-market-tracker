@@ -8,40 +8,43 @@
 // barata (GET /web/watchlist/price), respeitando o rate limiting já
 // aplicado no client Go.
 //
-// Monitoramento: a cada MONITOR_TICK_MS, UM item entre os com
-// monitoring=true tem o preço reconsultado — o escolhido é sempre o que está
-// há mais tempo sem consulta (ver pickNextEntry), revezando entre todos ao
-// longo do tempo em vez de despachar a lista inteira de uma vez. Quando a
-// condição que o item acompanha passa a valer, o usuário é avisado (toast +
-// notificação do SO) e a linha é destacada. Só existe uma notificação por
-// "cruzamento" da condição — enquanto ela continuar valendo, não notifica de
-// novo a cada checagem; só volta a notificar se ela deixar de valer e voltar
-// a valer depois (ver campo "notified" da entrada, persistido).
+// Monitoramento: as entradas com a luz ligada são vigiadas pelo rodízio
+// compartilhado do programa (ver static/monitor.js) — UMA consulta por minuto
+// no TOTAL, revezando entre todas as telas que vigiam preço, e não uma por
+// minuto para cada tela. A watchlist só se registra como fonte e diz quais
+// entradas estão elegíveis; quem escolhe a vez e segura o relógio é o
+// monitor. Quando a condição que o item acompanha passa a valer, o usuário é
+// avisado (toast + som + notificação do SO + Telegram) e a linha é
+// destacada. Só existe uma notificação por "cruzamento" da condição —
+// enquanto ela continuar valendo, não notifica de novo a cada checagem; só
+// volta a notificar se ela deixar de valer e voltar a valer depois (ver o
+// campo "notified" da entrada, persistido, e avaliarHit).
 //
 // Ao carregar a página, cada linha nasce já com o último resultado conhecido
 // (campo "lastResult" da entrada, persistido) — sem nenhuma requisição —, e
-// só o item escolhido pelo rodízio acima é consultado de verdade, na hora
-// (ver DOMContentLoaded).
+// só o item escolhido pelo rodízio é consultado de verdade, na hora.
 const WATCHLIST_KEY = "ro-market-tracker:watchlist";
 
-// MONITOR_TICK_MS é o intervalo entre uma consulta automática e a seguinte —
-// sempre UMA só, nunca a lista inteira de uma vez (ver pickNextEntry e
-// runMonitoringTick). Isto troca o antigo ciclo de 5 minutos, que despachava
-// todos os itens monitorados em série e em rajada, por um ritmo constante:
-// não importa quantos itens a watchlist tenha, o navegador nunca pede mais
-// que uma consulta por minuto.
-const MONITOR_TICK_MS = 60 * 1000;
-
-// WATCHLIST_MAX_ITEMS é o teto de itens que a watchlist aceita.
+// WATCHLIST_MAX_ITEMS é o teto de itens que a watchlist GUARDA.
 //
-// O ritmo automático é sempre de UMA consulta por minuto, revezando entre os
-// itens monitorados — então o intervalo entre duas consultas do MESMO item
-// cresce com o tamanho da lista (aproximadamente N × MONITOR_TICK_MS). Sem
-// teto, uma watchlist muito grande faria cada item demorar cada vez mais
-// para ser reconsultado; 50 itens já significa quase uma hora entre uma
-// consulta e a seguinte do mesmo item — grande o bastante para acompanhar
-// listas razoáveis sem o intervalo virar impraticável.
+// É diferente do MONITOR_MAX_ITENS do monitor, que é o teto de itens
+// VIGIADOS somando todas as telas: guardar um item desligado não custa
+// consulta nenhuma, e é o revezamento — o intervalo entre duas consultas do
+// mesmo item — que o outro teto protege.
 const WATCHLIST_MAX_ITEMS = 50;
+
+// A watchlist entra no rodízio compartilhado como uma fonte. O registro é no
+// topo do arquivo, e não dentro do DOMContentLoaded, porque o monitor monta a
+// lista de fontes justamente nesse evento — registrar lá dentro seria uma
+// corrida entre dois ouvintes do mesmo evento.
+//
+// listar() devolve só as entradas com a luz ligada: as desligadas continuam na
+// tela, mas não disputam a vez nem contam para o teto do monitor.
+registrarFonte({
+  nome: "watchlist",
+  listar: () => loadWatchlist().filter((e) => e.monitoring),
+  consultar: (entrada, fresh) => fetchLivePrice(entrada, fresh),
+});
 
 // Uma entrada da watchlist acompanha uma de duas condições, conforme de onde
 // ela foi adicionada:
@@ -112,13 +115,6 @@ function entryBonusFilters(entry) {
 // (sem esperar a próxima consulta) quando o usuário edita o preço alvo.
 const lastKnownPrice = new Map();
 
-// nextMonitorRunAt (em memória, não persistido) é o timestamp da próxima
-// checagem automática — usado só para renderizar o cronômetro regressivo do
-// painel. monitorTimerId guarda o setTimeout atual para poder cancelá-lo ao
-// forçar uma atualização manual.
-let nextMonitorRunAt = null;
-let monitorTimerId = null;
-
 function loadWatchlist() {
   try {
     const raw = localStorage.getItem(WATCHLIST_KEY);
@@ -129,7 +125,14 @@ function loadWatchlist() {
 }
 
 function saveWatchlist(list) {
-  localStorage.setItem(WATCHLIST_KEY, JSON.stringify(list));
+  try {
+    localStorage.setItem(WATCHLIST_KEY, JSON.stringify(list));
+  } catch {
+    // localStorage indisponível ou cheio. Sem o try/catch a exceção subiria
+    // por updateEntry, dentro de fetchLivePrice, dentro do tick — e derrubaria
+    // o rodízio inteiro, silenciosamente, por causa de UMA entrada. A sessão
+    // continua com o que está na tela; só não sobrevive ao recarregar.
+  }
 }
 
 // updateEntry aplica "changes" à entrada com o id informado e persiste.
@@ -293,6 +296,19 @@ function removeFromWatchlist(id) {
 function toggleMonitoring(id) {
   const entry = updateEntry(id, {});
   if (!entry) return;
+
+  // Ligar a luz é entrar no rodízio, e o teto do rodízio é do programa
+  // inteiro, não da watchlist (ver MONITOR_MAX_ITENS em monitor.js): o que
+  // ele protege é o intervalo de revezamento, que não sabe de que tela o
+  // item veio. Desligar nunca é barrado.
+  if (!entry.monitoring && !podeMonitorarMais()) {
+    showToast(
+      "Já são " + MONITOR_MAX_ITENS + " itens sendo vigiados entre a watchlist e o estoque. " +
+        "Desligue algum para vigiar este.",
+    );
+    return;
+  }
+
   const updated = updateEntry(id, { monitoring: !entry.monitoring });
   if (!updated) return;
 
@@ -870,6 +886,7 @@ function paintUpdatedAt(el, timestampMs) {
 // applyUpdatedAt é paintUpdatedAt a partir da LINHA — usado depois de uma
 // consulta de verdade (fetchLivePrice), quando só se tem a linha em mãos.
 function applyUpdatedAt(row, timestampMs) {
+  if (!row) return;
   const el = row.querySelector(".watchlist-updated-at");
   if (el) paintUpdatedAt(el, timestampMs);
 }
@@ -1088,19 +1105,24 @@ function buildWatchlistRow(entry) {
 // lido do cache persistido em localStorage (buildWatchlistRow, no
 // carregamento da página, sem nenhuma requisição).
 function applyPriceResult(row, entry, data) {
-  const currentEl = row.querySelector(".watchlist-current");
-  const refineEl = row.querySelector(".watchlist-refine");
+  // row pode ser null (a outra aba está aberta). O que é DADO — persistir o
+  // isEquipment, atualizar o último preço conhecido, avaliar o alvo e avisar —
+  // acontece de qualquer jeito; só a pintura depende de haver linha na tela.
+  const currentEl = row ? row.querySelector(".watchlist-current") : null;
+  const refineEl = row ? row.querySelector(".watchlist-refine") : null;
 
   // Com refino exigido pelo usuário, o badge sempre mostra esse valor
   // (é a intenção dele, independente de ter achado anúncio agora ou
   // não); sem exigência, o badge reflete o refino ao vivo da loja mais
   // barata, quando o item for um equipamento.
-  if (entry.refineFilter != null) {
-    refineEl.hidden = false;
-    refineEl.textContent = refineFilterLabel(entry.refineFilter);
-  } else if (data.refine !== undefined && data.refine !== null) {
-    refineEl.hidden = false;
-    refineEl.textContent = "+" + data.refine;
+  if (refineEl) {
+    if (entry.refineFilter != null) {
+      refineEl.hidden = false;
+      refineEl.textContent = refineFilterLabel(entry.refineFilter);
+    } else if (data.refine !== undefined && data.refine !== null) {
+      refineEl.hidden = false;
+      refineEl.textContent = "+" + data.refine;
+    }
   }
 
   // O tipo do item vem sempre que houver anúncio, mesmo quando o filtro não
@@ -1109,8 +1131,10 @@ function applyPriceResult(row, entry, data) {
   // já se sabia continua valendo: perder os campos levaria junto os filtros
   // que o usuário digitou neles.
   if (data.equipment !== undefined) {
-    const bonusRow = row.querySelector(".watchlist-bonus");
-    if (bonusRow) bonusRow.hidden = !data.equipment;
+    if (row) {
+      const bonusRow = row.querySelector(".watchlist-bonus");
+      if (bonusRow) bonusRow.hidden = !data.equipment;
+    }
     if (entry.isEquipment !== data.equipment) {
       updateEntry(entry.id, { isEquipment: data.equipment });
       entry.isEquipment = data.equipment;
@@ -1122,27 +1146,32 @@ function applyPriceResult(row, entry, data) {
     // anúncios — o orçamento de consultas acabou antes. Dizer "Sem anúncios"
     // aí seria mentira: a cobertura ainda está crescendo, e o próximo ciclo
     // continua de onde este parou.
-    if (data.partial) {
-      currentEl.textContent = "Verificando…";
-      currentEl.title = "O site é consultado aos poucos para não ser bloqueado; a busca continua no próximo ciclo.";
-    } else {
-      currentEl.textContent = isAvailabilityWatch(entry) ? "Nenhum anúncio" : "Sem anúncios";
-      currentEl.title = "";
+    if (currentEl) {
+      if (data.partial) {
+        currentEl.textContent = "Verificando…";
+        currentEl.title = "O site é consultado aos poucos para não ser bloqueado; a busca continua no próximo ciclo.";
+      } else {
+        currentEl.textContent = isAvailabilityWatch(entry) ? "Nenhum anúncio" : "Sem anúncios";
+        currentEl.title = "";
+      }
     }
     lastKnownPrice.set(entry.id, null);
     updateHitState(row, entry, null, null);
     return;
   }
-  currentEl.title = "";
-  // Com refino exigido, o badge mostra o PISO, então o refino que o anúncio
-  // encontrado tem de fato não caberia em lugar nenhum — e ele importa: quem
-  // pede "+7 ou mais" precisa saber se o que apareceu barato é um +7 ou um
-  // +9 antes de ir comprar. Sem exigência os dois números são o mesmo, e o
-  // badge já basta.
-  const achado = formatMoney(data.minPrice) + refineSuffix(entry, data);
-  currentEl.textContent = isAvailabilityWatch(entry)
-    ? "Produto encontrado por " + achado
-    : "Atual: " + achado;
+
+  if (currentEl) {
+    currentEl.title = "";
+    // Com refino exigido, o badge mostra o PISO, então o refino que o anúncio
+    // encontrado tem de fato não caberia em lugar nenhum — e ele importa: quem
+    // pede "+7 ou mais" precisa saber se o que apareceu barato é um +7 ou um
+    // +9 antes de ir comprar. Sem exigência os dois números são o mesmo, e o
+    // badge já basta.
+    const achado = formatMoney(data.minPrice) + refineSuffix(entry, data);
+    currentEl.textContent = isAvailabilityWatch(entry)
+      ? "Produto encontrado por " + achado
+      : "Atual: " + achado;
+  }
   lastKnownPrice.set(entry.id, data.minPrice);
   updateHitState(row, entry, data.minPrice, data.naviCommand, data.storeName);
 }
@@ -1150,17 +1179,21 @@ function applyPriceResult(row, entry, data) {
 // fetchLivePrice consulta o preço ao vivo de uma entrada. Por padrão o
 // servidor pode responder do cache dele (bom para o tick automático e para
 // recarregamentos de página — várias abas não multiplicam o tráfego ao
-// GnJoy); com fresh=true (o "↻" de cada linha), o cache é ignorado e a
-// consulta vai ao mercado de verdade.
-//
-// O resultado é persistido na entrada (lastCheckedAt, lastResult): é o que
-// alimenta tanto o rodízio automático (pickNextEntry escolhe pelo
-// lastCheckedAt mais antigo) quanto a pintura instantânea da linha num
-// carregamento futuro (buildWatchlistRow).
+// upstream); fresh=1 ignora esse cache, e é o que o botão "↻" de cada linha
+// manda: quem apertou quer o estado de agora.
 async function fetchLivePrice(entry, fresh = false) {
-  const row = findRow(entry.id);
-  if (!row) return;
-  const currentEl = row.querySelector(".watchlist-current");
+  // A linha é procurada só DEPOIS da resposta, nunca antes, por dois motivos:
+  //
+  //   1. Ela pode não existir — com a outra aba aberta o painel da watchlist
+  //      nem está no DOM. Desistir aqui era o que fazia o rodízio virar um
+  //      nada com o Estoque aberto: sem consultar, sem avançar o
+  //      lastCheckedAt e sem nunca disparar o aviso no Telegram. Qual aba
+  //      está aberta é escolha de quem olha; o que é vigiado é escolha de
+  //      quem configurou (ver monitor.js).
+  //   2. Ela pode NASCER durante a requisição. O tick do monitor sai antes de
+  //      a watchlist terminar de desenhar o painel, então uma linha capturada
+  //      no começo seria null e o resultado ficaria guardado sem nunca ser
+  //      pintado — a tela mostraria o dado velho até um recarregar.
   try {
     let url =
       "/web/watchlist/price?server=" + encodeURIComponent(entry.server) +
@@ -1183,12 +1216,17 @@ async function fetchLivePrice(entry, fresh = false) {
     const res = await fetch(url);
     if (!res.ok) throw new Error("status " + res.status);
     const data = await res.json();
-    applyPriceResult(row, entry, data);
+    // Persistir ANTES de pintar: o dado é o que precisa sobreviver, e uma
+    // falha na pintura não pode fazer uma consulta bem-sucedida parecer erro.
     const checkedAt = Date.now();
     updateEntry(entry.id, { lastCheckedAt: checkedAt, lastResult: data });
+    const row = findRow(entry.id);
+    applyPriceResult(row, entry, data);
     applyUpdatedAt(row, checkedAt);
   } catch {
-    currentEl.textContent = "Indisponível";
+    const row = findRow(entry.id);
+    const currentEl = row ? row.querySelector(".watchlist-current") : null;
+    if (currentEl) currentEl.textContent = "Indisponível";
     // A consulta foi de fato tentada — o rodízio avança para o próximo item
     // mesmo assim, e este volta à vez quando for o mais antigo de novo. O
     // último resultado conhecido (lastResult) não é sobrescrito: continua
@@ -1224,31 +1262,49 @@ function isHit(entry, minPrice) {
 // sem borda nem clique.
 function updateHitState(row, entry, minPrice, naviCommand, storeName) {
   const hit = isHit(entry, minPrice);
+  if (row) pintarHit(row, hit, naviCommand, storeName);
+  avaliarHit(entry, hit, minPrice, naviCommand, storeName);
+}
+
+// pintarHit é só aparência: destaque da linha, badge e o bloco de
+// localização. Nada aqui decide nem persiste — é o que permite chamá-lo só
+// quando a linha existe.
+function pintarHit(row, hit, naviCommand, storeName) {
   row.classList.toggle("target-hit", hit);
   const badge = row.querySelector(".watchlist-hit-badge");
   if (badge) badge.hidden = !hit;
 
   const locationGroup = row.querySelector(".watchlist-location-group");
-  if (locationGroup) {
-    if (hit && naviCommand) {
-      const locationEl = locationGroup.querySelector(".watchlist-location");
-      locationGroup.querySelector(".watchlist-location-text").textContent = naviCommand;
-      locationEl.dataset.command = naviCommand;
-      const storeNameEl = locationGroup.querySelector(".watchlist-store-name");
-      storeNameEl.textContent = storeName ? "Loja: " + storeName : "";
-      storeNameEl.hidden = !storeName;
-      locationGroup.hidden = false;
-    } else {
-      locationGroup.hidden = true;
-    }
-  }
+  if (!locationGroup) return;
 
-  const wasNotified = Boolean(entry.notified);
-  if (hit && !wasNotified) {
+  if (hit && naviCommand) {
+    const locationEl = locationGroup.querySelector(".watchlist-location");
+    locationGroup.querySelector(".watchlist-location-text").textContent = naviCommand;
+    locationEl.dataset.command = naviCommand;
+    const storeNameEl = locationGroup.querySelector(".watchlist-store-name");
+    storeNameEl.textContent = storeName ? "Loja: " + storeName : "";
+    storeNameEl.hidden = !storeName;
+    locationGroup.hidden = false;
+  } else {
+    locationGroup.hidden = true;
+  }
+}
+
+// avaliarHit é a decisão e o aviso, e roda SEM DEPENDER DA TELA: é ela que
+// dispara o toast, o som, a notificação do sistema e o Telegram. Fosse parte
+// da pintura, um item vigiado só avisaria enquanto a aba dele estivesse
+// aberta — que é o oposto do ponto de vigiar.
+//
+// "notified" é o que evita repetir o aviso a cada checagem enquanto a
+// condição continua valendo, e é rearmado quando ela deixa de valer: um aviso
+// por cruzamento.
+function avaliarHit(entry, hit, minPrice, naviCommand, storeName) {
+  const jaAvisado = Boolean(entry.notified);
+  if (hit && !jaAvisado) {
     const updated = updateEntry(entry.id, { notified: true });
     if (updated) entry.notified = true;
     notifyHit(entry, minPrice, naviCommand, storeName);
-  } else if (!hit && wasNotified) {
+  } else if (!hit && jaAvisado) {
     const updated = updateEntry(entry.id, { notified: false });
     if (updated) entry.notified = false;
   }
@@ -1386,97 +1442,6 @@ async function notifyHit(entry, minPrice, naviCommand, storeName) {
 // monitorCheckRunning impede dois ticks de checagem simultâneos (o timer
 // disparando em cima de uma consulta ainda em andamento) — o segundo é
 // simplesmente ignorado, o próximo tick tenta de novo.
-let monitorCheckRunning = false;
-
-// pickNextEntry escolhe o próximo item a consultar automaticamente: entre os
-// com monitoring ativado (é o que o "ligado/desligado" da luz da watchlist
-// significa), o que está há mais tempo sem consulta — lastCheckedAt mais
-// antigo, e nunca consultado conta como o mais antigo de todos. Empate é
-// desfeito pela ordem da lista, a mesma que já é a ordem de exibição.
-//
-// Isto substitui um índice/cursor de rodízio explícito: o revezamento entre
-// A, B, C se ajusta sozinho a remoções e adições, porque cada entrada carrega
-// consigo mesma "quando foi a última vez" — não há estado externo para
-// reconciliar com a lista atual.
-function pickNextEntry(list) {
-  let chosen = null;
-  for (const entry of list) {
-    if (!entry.monitoring) continue;
-    if (chosen == null || (entry.lastCheckedAt || 0) < (chosen.lastCheckedAt || 0)) {
-      chosen = entry;
-    }
-  }
-  return chosen;
-}
-
-// runMonitoringTick é o tick automático: consulta só UM item — o escolhido
-// por pickNextEntry —, nunca a lista inteira de uma vez. É o que garante o
-// ritmo constante de uma consulta por minuto (MONITOR_TICK_MS), não importa
-// quantos itens a watchlist tenha.
-async function runMonitoringTick(fresh = false) {
-  if (monitorCheckRunning || watchlistSuspended) return;
-  monitorCheckRunning = true;
-  try {
-    const entry = pickNextEntry(loadWatchlist());
-    if (entry) await fetchLivePrice(entry, fresh);
-  } finally {
-    monitorCheckRunning = false;
-  }
-}
-
-// watchlistSuspended espelha o estado que o servidor publica pelo stream de
-// atividade (ver activity-bar.js): enquanto o site estiver limitando as
-// consultas, o ciclo automático para de sair.
-let watchlistSuspended = false;
-
-function setWatchlistSuspended(suspended) {
-  const era = watchlistSuspended;
-  watchlistSuspended = suspended;
-
-  const timer = document.getElementById("watchlist-timer");
-
-  if (suspended) {
-    // Sem cancelar o setTimeout pendente, ele dispara mesmo assim: encontra
-    // runMonitoringTick recusando (correto, sem custo — ver acima), mas
-    // reagenda outro tick de qualquer forma, e o cronômetro volta a contar
-    // como se a checagem automática continuasse rodando normalmente. É
-    // exatamente essa contagem fantasma que confundia quem olhava a
-    // watchlist durante um bloqueio.
-    if (monitorTimerId) clearTimeout(monitorTimerId);
-    monitorTimerId = null;
-    nextMonitorRunAt = null;
-    updateCountdownDisplay();
-    if (timer) timer.title = "Pausado: o site está limitando as consultas";
-    return;
-  }
-
-  if (timer) timer.title = "Tempo até a próxima checagem automática de preços";
-  // Ao voltar ao normal, uma checagem imediata: a última pode ter sido
-  // interrompida no meio, e esperar mais um minuto por um dado que já dá
-  // para buscar seria gratuito. Também é o que tira o cronômetro do "--:--"
-  // e volta a contar.
-  if (era) {
-    runMonitoringTick(true);
-    scheduleMonitoring();
-  }
-}
-
-// scheduleMonitoring (re)agenda o próximo tick automático usando setTimeout
-// (em vez de setInterval) para que retomar de uma suspensão possa cancelar a
-// espera pendente e recomeçar a contagem do zero, sem deixar um tick
-// duplicado rodando em paralelo. O tick seguinte só é agendado quando o
-// atual termina, então uma consulta lenta (site devagar) atrasa o próximo em
-// vez de se sobrepor a ele.
-function scheduleMonitoring(delayMs = MONITOR_TICK_MS) {
-  if (monitorTimerId) clearTimeout(monitorTimerId);
-  nextMonitorRunAt = Date.now() + delayMs;
-  monitorTimerId = setTimeout(async () => {
-    await runMonitoringTick();
-    scheduleMonitoring();
-  }, delayMs);
-  updateCountdownDisplay();
-}
-
 // forceEntryUpdate é o botão "↻" de cada linha da watchlist: consulta só
 // aquele item, na hora, ignorando o cache do servidor (fresh) — sem tocar no
 // cronômetro nem no item que o tick automático escolheria a seguir.
@@ -1484,23 +1449,6 @@ function forceEntryUpdate(id) {
   const entry = loadWatchlist().find((e) => e.id === id);
   if (!entry) return;
   fetchLivePrice(entry, true);
-}
-
-function updateCountdownDisplay() {
-  const el = document.getElementById("watchlist-countdown");
-  if (!el) return;
-  if (nextMonitorRunAt == null) {
-    // Sem ciclo agendado — nem antes do primeiro (ver DOMContentLoaded), nem
-    // durante uma suspensão (ver setWatchlistSuspended). Mesmo texto dos dois
-    // casos: não há nada de fato contando.
-    el.textContent = "--:--";
-    return;
-  }
-  const remainingMs = Math.max(0, nextMonitorRunAt - Date.now());
-  const totalSeconds = Math.ceil(remainingMs / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  el.textContent = String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
 }
 
 // renderWatchlist reconstrói o painel inteiro a partir do localStorage —
@@ -1557,18 +1505,9 @@ function montarPainelDaWatchlist() {
 document.addEventListener("DOMContentLoaded", () => {
   montarPainelDaWatchlist();
 
-  // Daqui para baixo é o motor, e ele sobe UMA vez por documento. Como trocar
-  // de aba não recarrega mais a página, este bloco não roda de novo a cada
-  // clique no menu — antes rodava, e cada volta à Watchlist gastava uma
-  // consulta ao site e reiniciava o cronômetro de um minuto do zero.
-  //
-  // A primeira consulta de verdade sai na hora — só a do item escolhido pelo
-  // rodízio (pickNextEntry) —, não uma em rajada por item: quem abriu a
-  // página já viu o último preço conhecido no passo acima. Da segunda
-  // consulta em diante, o ritmo de MONITOR_TICK_MS passa a valer.
-  runMonitoringTick();
-  scheduleMonitoring();
-  setInterval(updateCountdownDisplay, 1000);
+  // O rodízio em si (o tick, o cronômetro, a primeira consulta) sobe no
+  // monitor.js, uma vez por documento e para todas as telas juntas. Aqui
+  // ficou só o que é da watchlist.
   setInterval(refreshUpdatedAtLabels, 60 * 1000);
   document.addEventListener("pointerdown", primeAudioContext, { once: true });
 

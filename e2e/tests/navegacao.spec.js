@@ -1,5 +1,11 @@
 const { test, expect } = require("@playwright/test");
-const { resetPage, buscar, clicarWatchlistDoItem } = require("./helpers");
+const {
+  resetPage,
+  buscar,
+  clicarWatchlistDoItem,
+  contarRequisicoesAoUpstream,
+  zerarContagemDoUpstream,
+} = require("./helpers");
 
 // Trocar de aba NÃO recarrega o documento: troca só o miolo (#page-content).
 // O que está em jogo é o motor compartilhado do lado do servidor — a barra de
@@ -124,6 +130,32 @@ test("a watchlist volta preenchida ao voltar para a aba", async ({ page }) => {
 
   await expect(page.locator(".watchlist-row")).toHaveCount(1);
   await expect(page.locator(".watchlist-row")).toContainText("Espada Primordial");
+});
+
+// Regressão: o rodízio é do programa, não da aba aberta. fetchLivePrice fazia
+// findRow() e DESISTIA antes do fetch quando a linha não estava na tela — com
+// o Estoque aberto, cada tick virava um nada: sem consulta, sem avançar o
+// lastCheckedAt e sem nunca disparar o aviso no Telegram, apesar de o
+// watchlist.js estar carregado nas duas abas.
+test("o rodízio continua consultando com a aba Estoque aberta", async ({ page, request }) => {
+  await buscar(page, "Espada");
+  await clicarWatchlistDoItem(page, "Espada Primordial");
+  await page.waitForTimeout(1200);
+
+  await abaEstoque(page).click();
+  await expect(page.locator("#estoque-form")).toBeVisible();
+
+  const relogio = () =>
+    page.evaluate(() => JSON.parse(localStorage.getItem("ro-market-tracker:watchlist"))[0].lastCheckedAt);
+  const antes = await relogio();
+  await zerarContagemDoUpstream(request);
+
+  // fresh: o que está em teste é se a consulta SAI, não se o servidor a
+  // responde do cache dele.
+  await page.evaluate(() => rodarTick(true));
+  await expect.poll(relogio).toBeGreaterThan(antes);
+
+  expect(await contarRequisicoesAoUpstream(request)).toBeGreaterThan(0);
 });
 
 test("recarregar mantém a aba do Estoque aberta", async ({ page }) => {

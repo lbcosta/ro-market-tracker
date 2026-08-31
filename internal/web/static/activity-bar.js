@@ -212,7 +212,13 @@ function applySuspension(state) {
   document.querySelectorAll("#watchlist-list button")
     .forEach((el) => { el.disabled = suspended; });
 
-  if (typeof setWatchlistSuspended === "function") setWatchlistSuspended(suspended);
+  // Mesma coisa para o estoque: validar e atualizar falam com o site.
+  document.querySelectorAll("#estoque-list button, .estoque-form button, .estoque-form input")
+    .forEach((el) => { el.disabled = suspended; });
+
+  // O rodízio inteiro para, não só o da watchlist: o limite é do site, e vale
+  // para toda tela que consulta (ver monitor.js).
+  if (typeof suspenderRodizio === "function") suspenderRodizio(suspended);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
