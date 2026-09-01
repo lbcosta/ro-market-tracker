@@ -5,7 +5,7 @@ import (
 	"unicode"
 )
 
-// O backend de busca do GnJoy LATAM só aceita LETRAS, DÍGITOS E ESPAÇOS no
+// O backend de busca do GnJoy Americas só aceita LETRAS, DÍGITOS E ESPAÇOS no
 // termo procurado. Para QUALQUER searchWord que traga outro caractere, as duas
 // páginas de busca — a de comércio e a de preços de mercado — respondem 200
 // com o componente de erro do próprio site ("Tente novamente mais tarde.") no

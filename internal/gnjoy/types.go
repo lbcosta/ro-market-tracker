@@ -1,6 +1,6 @@
 // Package gnjoy implementa um cliente para as rotas internas (não
 // documentadas oficialmente) usadas pela página de busca de mercado do
-// Ragnarok Online LATAM (https://ro.gnjoylatam.com).
+// Ragnarok Online LATAM (https://ro.gnjoyamericas.com).
 //
 // O site é construído em Next.js e as rotas consultadas pelo navegador não
 // respondem JSON puro: usam o formato "React Server Components Flight",

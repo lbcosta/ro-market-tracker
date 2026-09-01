@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	// DefaultBaseURL é o domínio do site GnJoy LATAM do Ragnarok Online.
-	DefaultBaseURL = "https://ro.gnjoylatam.com"
+	// DefaultBaseURL é o domínio do site GnJoy Americas do Ragnarok Online.
+	DefaultBaseURL = "https://ro.gnjoyamericas.com"
 
 	// DefaultLocale é o idioma padrão usado nas rotas ("pt", "en" ou "es").
 	DefaultLocale = "pt"
@@ -52,10 +52,10 @@ const (
 	// detecta a falha sozinho e redescobre o hash atual automaticamente
 	// (veja discover.go) — não é necessário atualizar esta constante nem
 	// reiniciar o processo.
-	DefaultActionID = "40a3f7a2ade1ce8f0b65438f43a533e65968363fe9"
+	DefaultActionID = "402088d0ac5af21ae9748c4ac647cf464aa8d9578d"
 
 	// DefaultRateLimitRPS e DefaultRateLimitBurst controlam o ritmo padrão
-	// de requisições enviadas ao GnJoy LATAM. O site tem um rate limiter
+	// de requisições enviadas ao GnJoy Americas. O site tem um rate limiter
 	// que responde 429 quando ultrapassado, mas seus parâmetros exatos não
 	// são conhecidos publicamente — por isso o padrão aqui é
 	// deliberadamente conservador (uma requisição por segundo, sem rajada)
@@ -79,7 +79,7 @@ const (
 	activityLogCapacity = 200
 )
 
-// Client consulta as rotas internas do site do GnJoy LATAM usadas pela
+// Client consulta as rotas internas do site do GnJoy Americas usadas pela
 // página de busca de mercado.
 //
 // Essas rotas não são uma API pública documentada: são simplesmente o que o

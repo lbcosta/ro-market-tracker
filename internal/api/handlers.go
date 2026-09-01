@@ -1,5 +1,5 @@
 // Package api expõe, em formato REST/JSON, os dados de mercado obtidos do
-// site do GnJoy LATAM através do pacote internal/gnjoy.
+// site do GnJoy Americas através do pacote internal/gnjoy.
 package api
 
 import (

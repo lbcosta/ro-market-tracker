@@ -5,7 +5,7 @@
 Tracker de preços do mercado RO LATAM
 
 Client HTTP em Go, com uma API REST própria e um frontend em HTMX, que
-consulta as rotas internas do site do GnJoy LATAM (reverse-engineered a
+consulta as rotas internas do site do GnJoy Americas (reverse-engineered a
 partir do DevTools, ver anexo no fim deste arquivo) e expõe os dados de
 mercado.
 
@@ -13,7 +13,7 @@ mercado.
 
 ```
 cmd/server/main.go              binário do servidor HTTP
-internal/gnjoy/                 client para as rotas internas do GnJoy LATAM
+internal/gnjoy/                 client para as rotas internas do GnJoy Americas
   client.go, flight.go            requisições, rate limiting, parser do formato RSC Flight
   discover.go                     descoberta/auto-refresh do action id da Server Action
   refine.go, types.go             parsing de refino, tipos de dados devolvidos pelo client
@@ -85,7 +85,7 @@ go test ./...      # client, API REST e frontend
 cd e2e && npm test # testes de navegador (ver e2e/README.md)
 ```
 
-**Nenhum teste toca a API real.** O site do GnJoy LATAM tem rate limiting
+**Nenhum teste toca a API real.** O site do GnJoy Americas tem rate limiting
 próprio e não é uma API pública documentada, então uma suíte batendo nele
 seria frágil e um jeito rápido de tomar bloqueio. No lugar dele há
 `internal/gnjoytest`: um mock que fala o mesmo protocolo das rotas internas
@@ -145,7 +145,7 @@ spinner enquanto carrega) e expande a linha em um card com:
   copia o comando para a área de transferência.
 - Estatísticas dos últimos 7 dias (mínimo, médio, máximo, quantidade
   vendida e desvio padrão), calculadas a partir dos agregados diários que o
-  GnJoy LATAM devolve (`GetPriceHistory` com `Limit: 7`) — a média e o
+  GnJoy Americas devolve (`GetPriceHistory` com `Limit: 7`) — a média e o
   desvio padrão são ponderados pela quantidade negociada em cada dia, já
   que só temos a média diária, não o preço de cada venda individual.
 
@@ -565,7 +565,7 @@ Variáveis de ambiente (todas opcionais):
 | Variável                             | Padrão                                | Descrição                                          |
 |---------------------------------------|----------------------------------------|-----------------------------------------------------|
 | `PORT`                                | `8080`                                 | Porta HTTP do servidor                               |
-| `GNJOY_BASE_URL`                      | `https://ro.gnjoylatam.com`            | Domínio base do site do GnJoy LATAM                  |
+| `GNJOY_BASE_URL`                      | `https://ro.gnjoyamericas.com`         | Domínio base do site do GnJoy Americas               |
 | `GNJOY_LOCALE`                        | `pt`                                   | Locale usado nas rotas (`pt`, `en` ou `es`)          |
 | `GNJOY_ACTION_ID`                     | ver `gnjoy.DefaultActionID` no código  | Hash da Next.js Server Action (ver aviso abaixo)     |
 | `GNJOY_RATE_LIMIT_RPS`                | `1` (`gnjoy.DefaultRateLimitRPS`)      | Requisições por segundo permitidas ao upstream       |
@@ -595,7 +595,7 @@ padrão: o log é volumoso e traz a resposta inteira do upstream.
 
 ## Rate limiting
 
-O site do GnJoy LATAM tem um rate limiter próprio que responde `429 Too Many
+O site do GnJoy Americas tem um rate limiter próprio que responde `429 Too Many
 Requests` quando ultrapassado — e seus parâmetros exatos não são públicos.
 Para nunca esbarrar nele, toda requisição enviada ao upstream (busca,
 detalhe de loja/item, histórico de preço e a descoberta de action id)

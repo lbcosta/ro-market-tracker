@@ -38,13 +38,13 @@ func writeUpstreamError(w http.ResponseWriter, err error) {
 	if errors.As(err, &httpErr) {
 		if httpErr.StatusCode == http.StatusTooManyRequests {
 			slog.Warn("upstream manteve o rate limiting mesmo após as tentativas com backoff")
-			writeErrorMsg(w, http.StatusServiceUnavailable, "o servidor de mercado do GnJoy LATAM está limitando a taxa de requisições no momento; tente novamente em instantes")
+			writeErrorMsg(w, http.StatusServiceUnavailable, "o servidor de mercado do GnJoy Americas está limitando a taxa de requisições no momento; tente novamente em instantes")
 			return
 		}
 		slog.Error("upstream retornou status inesperado", "status", httpErr.StatusCode, "body", httpErr.Body)
-		writeErrorMsg(w, http.StatusBadGateway, "o servidor de mercado do GnJoy LATAM retornou uma resposta inesperada")
+		writeErrorMsg(w, http.StatusBadGateway, "o servidor de mercado do GnJoy Americas retornou uma resposta inesperada")
 		return
 	}
 	slog.Error("falha consultando upstream", "error", err)
-	writeErrorMsg(w, http.StatusBadGateway, "falha ao consultar o servidor de mercado do GnJoy LATAM")
+	writeErrorMsg(w, http.StatusBadGateway, "falha ao consultar o servidor de mercado do GnJoy Americas")
 }

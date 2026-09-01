@@ -1,5 +1,12 @@
 # API GnJoy LATAM (pesquisa original no DevTools)
 
+> **Nota (2026-09-01):** esta captura é anterior à migração de domínio. O site
+> mudou de `ro.gnjoylatam.com` para `ro.gnjoyamericas.com` (o antigo agora
+> responde 301 para o novo). As URLs abaixo estão preservadas como foram
+> capturadas, de propósito — reescrevê-las falsificaria o registro. Todas as
+> rotas, query params, headers e formatos de resposta documentados aqui foram
+> revalidados no domínio novo e continuam idênticos; só o host mudou.
+
 Esses são os endpoints derivados das páginas do site GnJoy LATAM, que são páginas web. Ao entrar no site do mercado acessando "https://ro.gnjoylatam.com/pt/intro/shop-search/trading" é retornada uma página que dá acesso a outras pesquisas.
 
 ## Rotas da Página Principal
