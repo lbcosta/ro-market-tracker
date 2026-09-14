@@ -8,7 +8,7 @@ import (
 
 // sevenDayStats resume o comportamento de preço de um item nos últimos dias
 // (no máximo 7, buscados via gnjoy.PriceHistoryParams{Limit: 7}), a partir
-// dos agregados diários que o próprio GnJoy LATAM já calcula. Não temos o
+// dos agregados diários que o próprio GnJoy Americas já calcula. Não temos o
 // preço de cada transação individual, só min/média/máx por dia — por isso
 // a média e o desvio padrão aqui são ponderados pela quantidade negociada
 // em cada dia (ItemCnt), o que é mais fiel ao real do que uma média simples

@@ -3,7 +3,7 @@
 Testes ponta a ponta do frontend, dirigindo um Chromium de verdade contra o
 servidor real (`cmd/server`).
 
-## Nada aqui toca a API do GnJoy LATAM
+## Nada aqui toca a API do GnJoy Americas
 
 O `globalSetup` sobe dois processos antes da suíte:
 

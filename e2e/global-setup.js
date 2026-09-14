@@ -17,7 +17,7 @@ const repoRoot = path.resolve(__dirname, "..");
 
 // globalSetup sobe a pilha inteira antes da suíte: o site falso do GnJoy
 // (internal/gnjoytest) e o servidor real apontado para ele. Nenhum teste toca
-// a API de verdade — o site do GnJoy LATAM tem rate limiting próprio e não é
+// a API de verdade — o site do GnJoy Americas tem rate limiting próprio e não é
 // uma API pública, então uma suíte batendo nele seria frágil e um jeito rápido
 // de tomar bloqueio.
 //

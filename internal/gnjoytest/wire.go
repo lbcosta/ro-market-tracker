@@ -1,12 +1,13 @@
-// Package gnjoytest implementa um mock do site do GnJoy LATAM: um servidor
+// Package gnjoytest implementa um mock do site do GnJoy Americas: um servidor
 // HTTP que fala o mesmo protocolo das rotas internas consumidas por
 // internal/gnjoy — busca no formato RSC Flight, Server Actions do Next.js e a
 // descoberta do action id varrendo os chunks JS da página.
 //
 // Existe para que os testes (tanto os de Go quanto os de navegador) nunca
-// toquem a API real: o site do GnJoy LATAM tem rate limiting próprio e não é
-// uma API pública documentada, então bater nele a partir de uma suíte de
-// testes é ao mesmo tempo frágil e um jeito rápido de tomar bloqueio.
+// toquem a API real: o site do GnJoy Americas tem rate limiting próprio e
+// não é uma API pública documentada, então bater nele a partir de uma
+// suíte de testes é ao mesmo tempo frágil e um jeito rápido de tomar
+// bloqueio.
 //
 // Os tipos deste arquivo são declarados de forma INDEPENDENTE dos tipos de
 // internal/gnjoy de propósito: eles descrevem o formato que o site de fato

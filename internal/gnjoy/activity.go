@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// ActivityStatus é o estado de uma chamada ao upstream do GnJoy LATAM, do
+// ActivityStatus é o estado de uma chamada ao upstream do GnJoy Americas, do
 // ponto de vista de quem está observando a atividade do Client (a barra de
 // atividades do frontend, ver internal/web/activity.go).
 type ActivityStatus string

@@ -1,4 +1,4 @@
-// Comando mockgnjoy sobe o site falso do GnJoy LATAM
+// Comando mockgnjoy sobe o site falso do GnJoy Americas
 // (internal/gnjoytest) como um processo de verdade, para que os testes de
 // navegador possam apontar o servidor real (cmd/server, via GNJOY_BASE_URL)
 // para ele em vez da API real.

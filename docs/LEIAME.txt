@@ -263,7 +263,7 @@ PROBLEMAS E SUGESTÕES
 
   https://github.com/lbcosta/ro-market-tracker/issues
 
-  Este programa lê o site do GnJoy LATAM da mesma forma que o seu navegador
+  Este programa lê o site do GnJoy Americas da mesma forma que o seu navegador
   leria. Como não existe uma API oficial, uma mudança no site pode quebrá-lo
   sem aviso — se as buscas pararem de funcionar, é provavelmente isso, e vale
   abrir uma issue no endereço acima.
