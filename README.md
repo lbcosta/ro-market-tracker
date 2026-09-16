@@ -246,7 +246,7 @@ Os três desfechos:
 | Resultado | Estado do card |
 | --- | --- |
 | 1 candidato | **VALIDADO** na hora, fixando `itemId` e `svrId` |
-| vários candidatos | lista de escolha dentro do card; clicar fixa (0 requisições) |
+| vários candidatos | um `<select>` com os candidatos e um botão de confirmar, dentro do card |
 | nenhum candidato | **INVÁLIDO**, com o motivo |
 
 E o caso que não é desfecho nenhum: **falha ao consultar não mexe no estado do
@@ -256,6 +256,13 @@ bloqueio do site não podem mandar isso — por isso essas situações respondem
 estava, com um toast explicando. Um item inválido também pode ser revalidado
 pelo botão, que vira "Tentar de novo": custa uma requisição (zero dentro do
 cache), então obrigar a recadastrar por causa de um tropeço seria gratuito.
+
+A escolha é um dropdown, e não uma lista de botões, porque os cards dividem
+uma grade: uma lista crescia o card em uma linha por candidato e desalinhava a
+linha inteira. O dropdown tem altura fixa — dois candidatos ou dez, o card
+mede o mesmo. Como dentro de um `<option>` não há formatação, o resumo
+(itemId e faixa de preço) entra no próprio texto: sem ele, dois candidatos
+vindos do histórico apareceriam com o mesmo nome e seriam indistinguíveis.
 
 A lista de candidatos é persistida no `localStorage`: trocar de aba no meio da
 escolha e voltar não pode custar outra consulta ao site.

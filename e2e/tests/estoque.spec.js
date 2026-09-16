@@ -275,15 +275,18 @@ test("um nome ambíguo pede a escolha, e escolher não custa requisição", asyn
   await adicionar(page, "Rapidez");
   await botaoValidar(page, "Rapidez").click();
 
-  const candidatos = card(page, "Rapidez").locator(".estoque-candidato");
-  await expect(candidatos).toHaveCount(2);
+  // Dropdown, e não uma lista de botões: os cards dividem uma grade, e uma
+  // lista crescia o card proporcionalmente ao número de candidatos.
+  const seletor = card(page, "Rapidez").locator(".estoque-candidatos-select");
+  await expect(seletor.locator("option")).toHaveCount(2);
   await expect(selo(page, "Rapidez")).toHaveText("Não validado");
 
   await zerarContagemDoUpstream(request);
-  await candidatos.filter({ hasText: "Módulo de S-Rapidez" }).first().click();
+  await seletor.selectOption("25690");
+  await card(page, "Rapidez").locator(".estoque-escolha-ok").click();
 
   await expect(selo(page, "Rapidez")).toHaveText("Validado");
-  await expect(card(page, "Rapidez").locator(".estoque-candidato")).toHaveCount(0);
+  await expect(card(page, "Rapidez").locator(".estoque-escolha")).toHaveCount(0);
 
   // Escolher em si não custa nada — o itemId já tinha vindo na validação. A
   // requisição que sai é a primeira consulta de mercado do card, que o
@@ -305,15 +308,33 @@ test("um nome ambíguo pede a escolha, e escolher não custa requisição", asyn
 test("a lista de candidatos sobrevive à troca de aba", async ({ page, request }) => {
   await adicionar(page, "Rapidez");
   await botaoValidar(page, "Rapidez").click();
-  await expect(card(page, "Rapidez").locator(".estoque-candidato")).toHaveCount(2);
+  const opcoes = card(page, "Rapidez").locator(".estoque-candidatos-select option");
+  await expect(opcoes).toHaveCount(2);
 
   await zerarContagemDoUpstream(request);
   await page.getByRole("link", { name: "Watchlist" }).click();
   await expect(page.locator(".search-form")).toBeVisible();
   await page.getByRole("link", { name: "Estoque" }).click();
 
-  await expect(card(page, "Rapidez").locator(".estoque-candidato")).toHaveCount(2);
+  await expect(card(page, "Rapidez").locator(".estoque-candidatos-select option")).toHaveCount(2);
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
+});
+
+// O motivo de o dropdown existir: a lista antiga crescia o card em uma linha
+// por candidato, e como os cards dividem uma grade, um item ambíguo
+// desalinhava a linha inteira.
+test("o card com escolha não fica muito mais alto que os outros", async ({ page }) => {
+  await adicionar(page, "Rapidez");
+  await adicionar(page, "Bota do Andarilho");
+  const alturaSimples = (await card(page, "Bota do Andarilho").boundingBox()).height;
+
+  await botaoValidar(page, "Rapidez").click();
+  await expect(card(page, "Rapidez").locator(".estoque-candidatos-select")).toBeVisible();
+
+  const alturaComEscolha = (await card(page, "Rapidez").boundingBox()).height;
+  // Uma linha de título mais uma de seletor, independentemente de quantos
+  // candidatos houver — que é o ponto da mudança.
+  expect(alturaComEscolha - alturaSimples).toBeLessThan(80);
 });
 
 test("um item que nunca existiu fica inválido e explica o motivo", async ({ page }) => {

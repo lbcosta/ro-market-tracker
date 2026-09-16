@@ -404,44 +404,72 @@ function resumoDoCandidato(candidato) {
   }
   const vendas = candidato.vol === 1 ? "1 venda" : candidato.vol + " vendas";
   return (
-    "#" + candidato.itemId + " · ninguém anuncia agora · já vendido entre " +
+    "#" + candidato.itemId + " · sem anúncio · já vendido entre " +
     formatMoney(candidato.min) + " e " + formatMoney(candidato.max) + " (" + vendas + ")"
   );
 }
 
-function buildListaDeCandidatos(item) {
+// buildCheckIcon é o "ok" da escolha de candidato. Ícone, e não a palavra:
+// ele fica colado no seletor numa linha só, e qualquer texto ali espremeria o
+// dropdown, que é justamente quem precisa da largura.
+function buildCheckIcon() {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("stroke-width", "2.6");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(NS, "path");
+  path.setAttribute("d", "M4 12.5 9.5 18 20 6.5");
+  svg.appendChild(path);
+  return svg;
+}
+
+// buildEscolhaDeCandidato desenha a desambiguação como um <select> mais um
+// botão de confirmar, e não como uma lista de botões.
+//
+// A lista crescia o card na vertical proporcionalmente ao número de
+// candidatos, e como os cards dividem uma grade, um item ambíguo deixava a
+// linha inteira desalinhada. O dropdown ocupa altura fixa: dois candidatos ou
+// dez, o card tem o mesmo tamanho.
+//
+// Todo o resumo do candidato vira o texto da opção — dentro de um <select>
+// não há como formatar. É por isso que resumoDoCandidato existe: sem o preço
+// e o itemId ali, dois candidatos vindos do histórico (que não traz o sufixo
+// de slots) apareceriam com o mesmo texto e seriam indistinguíveis.
+function buildEscolhaDeCandidato(item) {
   const bloco = document.createElement("div");
+  bloco.className = "estoque-escolha";
 
   const titulo = document.createElement("p");
   titulo.className = "estoque-candidatos-titulo";
-  titulo.textContent =
-    item.candidatos.length + " itens casam «" + item.nomeDigitado + "». Qual é o seu?";
+  titulo.textContent = item.candidatos.length + " itens casam «" + item.nomeDigitado + "». Qual é o seu?";
   bloco.appendChild(titulo);
 
-  const lista = document.createElement("ul");
-  lista.className = "estoque-candidatos";
+  const linha = document.createElement("div");
+  linha.className = "estoque-escolha-linha";
+
+  const seletor = document.createElement("select");
+  seletor.className = "estoque-candidatos-select";
+  seletor.setAttribute("aria-label", "Escolha qual item é «" + item.nomeDigitado + "»");
   for (const candidato of item.candidatos) {
-    const li = document.createElement("li");
-
-    const botao = document.createElement("button");
-    botao.type = "button";
-    botao.className = "estoque-candidato";
-    botao.dataset.itemId = String(candidato.itemId);
-
-    const nome = document.createElement("span");
-    nome.className = "estoque-candidato-nome";
-    nome.textContent = candidato.itemName;
-    botao.appendChild(nome);
-
-    const dados = document.createElement("span");
-    dados.className = "estoque-candidato-dados";
-    dados.textContent = resumoDoCandidato(candidato);
-    botao.appendChild(dados);
-
-    li.appendChild(botao);
-    lista.appendChild(li);
+    const opcao = document.createElement("option");
+    opcao.value = String(candidato.itemId);
+    opcao.textContent = candidato.itemName + " · " + resumoDoCandidato(candidato);
+    seletor.appendChild(opcao);
   }
-  bloco.appendChild(lista);
+  linha.appendChild(seletor);
+
+  const ok = document.createElement("button");
+  ok.type = "button";
+  ok.className = "estoque-escolha-ok";
+  ok.title = "Confirmar o item escolhido";
+  ok.setAttribute("aria-label", "Confirmar o item escolhido para " + item.nomeDigitado);
+  ok.appendChild(buildCheckIcon());
+  linha.appendChild(ok);
+
+  bloco.appendChild(linha);
   return bloco;
 }
 
@@ -696,11 +724,11 @@ function buildEstoqueCard(item) {
     li.appendChild(motivo);
   }
 
-  // A lista de escolha fica DENTRO do card, e não num diálogo: ela é sobre
-  // este item, e quem está cadastrando vários seguidos não deve ser
-  // interrompido por uma janela modal a cada nome ambíguo.
+  // A escolha fica DENTRO do card, e não num diálogo: ela é sobre este item, e
+  // quem está cadastrando vários seguidos não deve ser interrompido por uma
+  // janela modal a cada nome ambíguo.
   if (Array.isArray(item.candidatos) && item.candidatos.length > 0) {
-    li.appendChild(buildListaDeCandidatos(item));
+    li.appendChild(buildEscolhaDeCandidato(item));
   }
 
   aplicarDisponibilidadeDoUndercut(li, item);
@@ -861,13 +889,12 @@ function montarPainelDoEstoque() {
       return;
     }
 
-    const botaoCandidato = ev.target.closest(".estoque-candidato");
-    if (botaoCandidato) {
+    if (ev.target.closest(".estoque-escolha-ok")) {
       const atual = loadEstoque().find((e) => e.id === id);
       if (!atual || !Array.isArray(atual.candidatos)) return;
-      const escolhido = atual.candidatos.find(
-        (c) => String(c.itemId) === botaoCandidato.dataset.itemId,
-      );
+      const seletor = card.querySelector(".estoque-candidatos-select");
+      if (!seletor) return;
+      const escolhido = atual.candidatos.find((c) => String(c.itemId) === seletor.value);
       if (escolhido) escolherCandidato(id, escolhido);
       return;
     }
