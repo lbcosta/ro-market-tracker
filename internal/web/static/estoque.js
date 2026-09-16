@@ -7,8 +7,9 @@
 // edição (preço, ligar/desligar, remover) fala com o servidor. Ver
 // static/watchlist.js.
 //
-// Esta é a primeira etapa: só o cadastro local. Validar contra o mercado,
-// buscar preços e avisar sobre undercutting entram depois.
+// Duas coisas falam com o servidor nesta etapa, e só sob clique do usuário:
+// o botão "Validar" e a escolha de um candidato. Buscar preços de mercado,
+// montar o histórico e avisar sobre undercutting entram depois.
 
 const ESTOQUE_KEY = "ro-market-tracker:estoque";
 const ESTOQUE_SERVIDOR_KEY = "ro-market-tracker:estoque-servidor";
@@ -16,16 +17,18 @@ const ESTOQUE_SERVIDOR_KEY = "ro-market-tracker:estoque-servidor";
 const ESTOQUE_SERVIDOR_PADRAO = "NIDHOGG";
 
 // Estados da validação. O item nasce NAO_VALIDADO; "Validar" o leva a
-// VALIDADO (achado no mercado ou no histórico) ou a ERRO (não existe — o
-// usuário provavelmente errou o nome).
+// VALIDADO (achado no mercado ou no histórico) ou a INVALIDO — e este último
+// só é alcançado quando as DUAS consultas responderam que o item não existe.
+// Uma falha de rede deixa o item onde estava: inválido é o estado que manda
+// o usuário apagar o cadastro, e um tropeço do site não pode mandar isso.
 const VALIDACAO_PENDENTE = "nao-validado";
 const VALIDACAO_OK = "validado";
-const VALIDACAO_ERRO = "erro";
+const VALIDACAO_INVALIDO = "invalido";
 
 const ROTULO_VALIDACAO = {
   [VALIDACAO_PENDENTE]: "Não validado",
   [VALIDACAO_OK]: "Validado",
-  [VALIDACAO_ERRO]: "Validado com erro",
+  [VALIDACAO_INVALIDO]: "Inválido",
 };
 
 // Janela do histórico de preços praticados. Os valores são os que o próprio
@@ -131,6 +134,12 @@ function adicionarAoEstoque(nomeDigitado) {
     itemId: null,
     svrId: null,
     validacao: VALIDACAO_PENDENTE,
+    databaseType: null,
+    // motivo só é preenchido no estado inválido; candidatos, só enquanto a
+    // escolha estiver pendente. Os dois voltam a null assim que a validação
+    // se resolve, para o card não carregar sobra de uma tentativa anterior.
+    motivo: null,
+    candidatos: null,
     precoVenda: null,
     naLoja: false,
     undercut: false,
@@ -221,6 +230,144 @@ function startEditingPrecoVenda(span, id) {
   input.addEventListener("blur", () => {
     if (!confirmado) span.textContent = precoVendaLabel(item.precoVenda);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Validação
+// ---------------------------------------------------------------------------
+
+// validarItem pergunta ao servidor quais itens do servidor casam com o nome
+// digitado. O servidor procura primeiro nos anúncios de agora e, só se
+// ninguém estiver vendendo, no histórico de vendas — ver EstoqueValidar em
+// internal/web/estoque.go.
+//
+// Três desfechos, e o terceiro é o que exige cuidado:
+//
+//   1 candidato   -> valida na hora, fixando o itemId
+//   N candidatos  -> o card vira uma lista de escolha; quem decide é o usuário
+//   0 candidatos  -> o item é dado como INVÁLIDO
+//
+// Qualquer falha de rede ou do site NÃO cai em nenhum dos três: o item fica
+// exatamente como estava, e o usuário vê um toast. Inválido é o estado que
+// manda apagar o cadastro, e um timeout não pode mandar isso.
+async function validarItem(id) {
+  const item = loadEstoque().find((e) => e.id === id);
+  if (!item) return;
+
+  const card = findEstoqueCard(id);
+  const botao = card ? card.querySelector(".estoque-validar") : null;
+  if (botao) {
+    botao.disabled = true;
+    botao.textContent = "Validando…";
+  }
+
+  try {
+    const url =
+      "/web/estoque/validar?server=" + encodeURIComponent(item.server) +
+      "&item=" + encodeURIComponent(item.nomeDigitado);
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(await res.text());
+
+    const data = await res.json();
+    const candidatos = data.candidates || [];
+
+    if (candidatos.length === 1) {
+      escolherCandidato(id, candidatos[0]);
+      return;
+    }
+    if (candidatos.length === 0) {
+      repintarCard(updateEstoqueItem(id, {
+        validacao: VALIDACAO_INVALIDO,
+        motivo: data.message || "Este item não foi encontrado no servidor.",
+        candidatos: null,
+      }));
+      return;
+    }
+    // Os candidatos são persistidos, e não guardados só em memória: trocar de
+    // aba no meio da escolha e voltar não pode custar outra consulta ao site.
+    repintarCard(updateEstoqueItem(id, { candidatos, motivo: null }));
+  } catch (err) {
+    showToast(String(err.message || err).trim() || "Não foi possível validar agora.");
+    repintarCard(loadEstoque().find((e) => e.id === id));
+  }
+}
+
+// escolherCandidato fixa qual item do catálogo é este — o itemId e o svrId
+// que todas as consultas seguintes vão usar. Não custa requisição nenhuma: os
+// dados já vieram na validação.
+function escolherCandidato(id, candidato) {
+  repintarCard(updateEstoqueItem(id, {
+    validacao: VALIDACAO_OK,
+    itemId: candidato.itemId,
+    svrId: candidato.svrId,
+    itemName: candidato.itemName,
+    searchName: candidato.searchName,
+    databaseType: candidato.databaseType,
+    candidatos: null,
+    motivo: null,
+  }));
+}
+
+// repintarCard troca o card inteiro pelo estado novo. Reconstruir é mais
+// simples (e menos sujeito a esquecer um pedaço) do que remendar campo a
+// campo, e é barato: o card não guarda estado nenhum fora do localStorage.
+function repintarCard(item) {
+  if (!item) return;
+  const antigo = findEstoqueCard(item.id);
+  if (!antigo) return;
+  antigo.replaceWith(buildEstoqueCard(item));
+}
+
+// resumoDoCandidato é a linha que ajuda o usuário a reconhecer o item dele.
+// Vinda do mercado ela mostra o que está à venda agora; vinda do histórico,
+// a faixa de preço praticada — que é o único jeito de separar dois candidatos
+// quando o histórico não traz o sufixo de slots e os nomes vêm iguais.
+function resumoDoCandidato(candidato) {
+  if (candidato.inMarket) {
+    const unidades = candidato.units === 1 ? "1 à venda" : candidato.units + " à venda";
+    return "#" + candidato.itemId + " · a partir de " + formatMoney(candidato.minPrice) + " · " + unidades;
+  }
+  const vendas = candidato.vol === 1 ? "1 venda" : candidato.vol + " vendas";
+  return (
+    "#" + candidato.itemId + " · ninguém anuncia agora · já vendido entre " +
+    formatMoney(candidato.min) + " e " + formatMoney(candidato.max) + " (" + vendas + ")"
+  );
+}
+
+function buildListaDeCandidatos(item) {
+  const bloco = document.createElement("div");
+
+  const titulo = document.createElement("p");
+  titulo.className = "estoque-candidatos-titulo";
+  titulo.textContent =
+    item.candidatos.length + " itens casam «" + item.nomeDigitado + "». Qual é o seu?";
+  bloco.appendChild(titulo);
+
+  const lista = document.createElement("ul");
+  lista.className = "estoque-candidatos";
+  for (const candidato of item.candidatos) {
+    const li = document.createElement("li");
+
+    const botao = document.createElement("button");
+    botao.type = "button";
+    botao.className = "estoque-candidato";
+    botao.dataset.itemId = String(candidato.itemId);
+
+    const nome = document.createElement("span");
+    nome.className = "estoque-candidato-nome";
+    nome.textContent = candidato.itemName;
+    botao.appendChild(nome);
+
+    const dados = document.createElement("span");
+    dados.className = "estoque-candidato-dados";
+    dados.textContent = resumoDoCandidato(candidato);
+    botao.appendChild(dados);
+
+    li.appendChild(botao);
+    lista.appendChild(li);
+  }
+  bloco.appendChild(lista);
+  return bloco;
 }
 
 // ---------------------------------------------------------------------------
@@ -330,10 +477,29 @@ function buildEstoqueCard(item) {
   const validar = document.createElement("button");
   validar.type = "button";
   validar.className = "estoque-validar";
-  validar.textContent = "Validar";
+  // "Tentar de novo" num item inválido: revalidar custa uma requisição (zero,
+  // se for dentro do cache de 30s), então não faz sentido obrigar a apagar e
+  // recadastrar quando o site apenas estava fora do ar na primeira tentativa.
+  validar.textContent = item.validacao === VALIDACAO_INVALIDO ? "Tentar de novo" : "Validar";
   acoes.appendChild(validar);
 
   li.appendChild(acoes);
+
+  // O motivo só existe no estado inválido: o selo vermelho chama a atenção, e
+  // esta linha é quem diz o que aconteceu e o que fazer.
+  if (item.validacao === VALIDACAO_INVALIDO && item.motivo) {
+    const motivo = document.createElement("p");
+    motivo.className = "estoque-motivo";
+    motivo.textContent = item.motivo;
+    li.appendChild(motivo);
+  }
+
+  // A lista de escolha fica DENTRO do card, e não num diálogo: ela é sobre
+  // este item, e quem está cadastrando vários seguidos não deve ser
+  // interrompido por uma janela modal a cada nome ambíguo.
+  if (Array.isArray(item.candidatos) && item.candidatos.length > 0) {
+    li.appendChild(buildListaDeCandidatos(item));
+  }
 
   aplicarDisponibilidadeDoUndercut(li, item);
   return li;
@@ -396,6 +562,22 @@ function montarPainelDoEstoque() {
 
     if (ev.target.closest(".estoque-remover")) {
       removerDoEstoque(id);
+      return;
+    }
+
+    if (ev.target.closest(".estoque-validar")) {
+      validarItem(id);
+      return;
+    }
+
+    const botaoCandidato = ev.target.closest(".estoque-candidato");
+    if (botaoCandidato) {
+      const atual = loadEstoque().find((e) => e.id === id);
+      if (!atual || !Array.isArray(atual.candidatos)) return;
+      const escolhido = atual.candidatos.find(
+        (c) => String(c.itemId) === botaoCandidato.dataset.itemId,
+      );
+      if (escolhido) escolherCandidato(id, escolhido);
       return;
     }
 

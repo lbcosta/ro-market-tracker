@@ -1,5 +1,11 @@
 const { test, expect } = require("@playwright/test");
-const { resetPage, contarRequisicoesAoUpstream, zerarContagemDoUpstream } = require("./helpers");
+const {
+  resetPage,
+  contarRequisicoesAoUpstream,
+  zerarContagemDoUpstream,
+  falharProximasRequisicoes,
+  atrasarProximasRequisicoes,
+} = require("./helpers");
 
 // Primeira etapa da tela de Estoque: só o cadastro local. NADA aqui fala com
 // o site da GnJoy — validar, buscar preços e avisar sobre undercutting entram
@@ -217,4 +223,154 @@ test("a ordem de cadastro é a ordem da tela", async ({ page }) => {
   await adicionar(page, "Terceiro");
 
   await expect(cards(page).locator(".estoque-nome")).toHaveText(["Primeiro", "Segundo", "Terceiro"]);
+});
+
+
+// ---------------------------------------------------------------------------
+// Validação
+// ---------------------------------------------------------------------------
+//
+// O servidor procura o item primeiro nos anúncios de agora e, só se ninguém
+// estiver vendendo, no histórico de vendas. Os testes abaixo cobrem os três
+// desfechos — e o quarto, que não é desfecho nenhum: falhar a consulta não
+// pode mexer no estado do item.
+
+const selo = (page, nome) => card(page, nome).locator(".estoque-status");
+const botaoValidar = (page, nome) => card(page, nome).locator(".estoque-validar");
+
+test("validar um item anunciado fixa o item e marca como validado", async ({ page, request }) => {
+  await adicionar(page, "Bota do Andarilho");
+  await zerarContagemDoUpstream(request);
+
+  await botaoValidar(page, "Bota do Andarilho").click();
+
+  await expect(selo(page, "Bota do Andarilho")).toHaveText("Validado");
+
+  // O itemId e o svrId são o que todas as consultas seguintes vão usar: sem
+  // eles, validar não serviu para nada.
+  const gravado = await page.evaluate(
+    () => JSON.parse(localStorage.getItem("ro-market-tracker:estoque"))[0],
+  );
+  expect(gravado.itemId).toBe(610003);
+  expect(gravado.svrId).toBeGreaterThan(0);
+  expect(gravado.validacao).toBe("validado");
+
+  // "Bota do Andarilho" não está anunciada: o servidor cai no histórico, e
+  // isso são duas requisições.
+  expect(await contarRequisicoesAoUpstream(request)).toBe(2);
+});
+
+test("um item que alguém está anunciando custa só uma requisição", async ({ page, request }) => {
+  await adicionar(page, "Carta Poring Noel");
+  await zerarContagemDoUpstream(request);
+
+  await botaoValidar(page, "Carta Poring Noel").click();
+  await expect(selo(page, "Carta Poring Noel")).toHaveText("Validado");
+
+  // Com o item no mercado, o histórico nem chega a ser consultado.
+  expect(await contarRequisicoesAoUpstream(request)).toBe(1);
+});
+
+test("um nome ambíguo pede a escolha, e escolher não custa requisição", async ({ page, request }) => {
+  await adicionar(page, "Rapidez");
+  await botaoValidar(page, "Rapidez").click();
+
+  const candidatos = card(page, "Rapidez").locator(".estoque-candidato");
+  await expect(candidatos).toHaveCount(2);
+  await expect(selo(page, "Rapidez")).toHaveText("Não validado");
+
+  await zerarContagemDoUpstream(request);
+  await candidatos.filter({ hasText: "Módulo de S-Rapidez" }).first().click();
+
+  await expect(selo(page, "Rapidez")).toHaveText("Validado");
+  await expect(card(page, "Rapidez").locator(".estoque-candidato")).toHaveCount(0);
+  expect(await contarRequisicoesAoUpstream(request)).toBe(0);
+
+  const gravado = await page.evaluate(
+    () => JSON.parse(localStorage.getItem("ro-market-tracker:estoque"))[0],
+  );
+  expect(gravado.itemId).toBe(25690);
+  expect(gravado.candidatos).toBe(null);
+});
+
+// Os candidatos são persistidos justamente para isto: trocar de aba no meio
+// da escolha e voltar não pode custar outra consulta ao site.
+test("a lista de candidatos sobrevive à troca de aba", async ({ page, request }) => {
+  await adicionar(page, "Rapidez");
+  await botaoValidar(page, "Rapidez").click();
+  await expect(card(page, "Rapidez").locator(".estoque-candidato")).toHaveCount(2);
+
+  await zerarContagemDoUpstream(request);
+  await page.getByRole("link", { name: "Watchlist" }).click();
+  await expect(page.locator(".search-form")).toBeVisible();
+  await page.getByRole("link", { name: "Estoque" }).click();
+
+  await expect(card(page, "Rapidez").locator(".estoque-candidato")).toHaveCount(2);
+  expect(await contarRequisicoesAoUpstream(request)).toBe(0);
+});
+
+test("um item que nunca existiu fica inválido e explica o motivo", async ({ page }) => {
+  await adicionar(page, "Item Que Nao Existe");
+
+  await botaoValidar(page, "Item Que Nao Existe").click();
+
+  await expect(selo(page, "Item Que Nao Existe")).toHaveText("Inválido");
+  await expect(card(page, "Item Que Nao Existe").locator(".estoque-motivo")).toContainText(
+    "Confira o nome",
+  );
+  // O caminho que o usuário tem para sair daqui.
+  await expect(botaoValidar(page, "Item Que Nao Existe")).toHaveText("Tentar de novo");
+  await expect(card(page, "Item Que Nao Existe").locator(".estoque-remover")).toBeVisible();
+});
+
+// A asserção mais importante da etapa. Inválido é o estado que manda o
+// usuário apagar o cadastro — um tropeço do site não pode mandar isso.
+test("falha ao consultar não invalida o item", async ({ page, request }) => {
+  await adicionar(page, "Bota do Andarilho");
+  await falharProximasRequisicoes(request, { status: 500, times: 10 });
+
+  await botaoValidar(page, "Bota do Andarilho").click();
+
+  await expect(selo(page, "Bota do Andarilho")).toHaveText("Não validado");
+  await expect(card(page, "Bota do Andarilho").locator(".estoque-motivo")).toHaveCount(0);
+  await expect(page.locator(".toast")).toBeVisible();
+});
+
+// Sem segurar a resposta, esta asserção seria uma corrida com a rede e
+// passaria por acaso. O atraso no site falso é o que torna o estado em voo
+// observável de verdade.
+test("o botão desabilita enquanto a consulta está em voo", async ({ page, request }) => {
+  await adicionar(page, "Bota do Andarilho");
+  await atrasarProximasRequisicoes(request, { ms: 1500, times: 1 });
+
+  const botao = botaoValidar(page, "Bota do Andarilho");
+  await botao.click();
+
+  await expect(botao).toBeDisabled();
+  await expect(botao).toHaveText("Validando…");
+
+  await expect(selo(page, "Bota do Andarilho")).toHaveText("Validado");
+  await expect(botao).toBeEnabled();
+});
+
+test("revalidar um item corrigido sai do estado inválido", async ({ page }) => {
+  await adicionar(page, "Item Que Nao Existe");
+  await botaoValidar(page, "Item Que Nao Existe").click();
+  await expect(selo(page, "Item Que Nao Existe")).toHaveText("Inválido");
+
+  await card(page, "Item Que Nao Existe").locator(".estoque-remover").click();
+  await adicionar(page, "Bota do Andarilho");
+  await botaoValidar(page, "Bota do Andarilho").click();
+
+  await expect(selo(page, "Bota do Andarilho")).toHaveText("Validado");
+});
+
+test("o estado de validação sobrevive a recarregar", async ({ page }) => {
+  await adicionar(page, "Bota do Andarilho");
+  await botaoValidar(page, "Bota do Andarilho").click();
+  await expect(selo(page, "Bota do Andarilho")).toHaveText("Validado");
+
+  await page.reload();
+
+  await expect(selo(page, "Bota do Andarilho")).toHaveText("Validado");
 });

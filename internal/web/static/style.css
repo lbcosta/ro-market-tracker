@@ -391,9 +391,62 @@ h1 {
 .estoque-status-nao-validado { color: var(--muted); }
 .estoque-status-validado { color: var(--success); }
 
-/* Vermelho é o ponto: "validado com erro" é o único estado que exige ação do
-   usuário (excluir e cadastrar de novo com o nome certo). */
-.estoque-status-erro { color: var(--danger); }
+/* Vermelho é o ponto: "inválido" é o único estado que exige ação do usuário
+   (excluir e cadastrar de novo com o nome certo). */
+.estoque-status-invalido { color: var(--danger); }
+
+/* Por que o item foi dado como inválido, e o que fazer. O selo vermelho
+   chama a atenção; esta linha é quem explica. */
+.estoque-motivo {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--danger);
+}
+
+/* Lista de desambiguação: o nome digitado casou mais de um item e só o
+   usuário sabe qual é o dele. */
+.estoque-candidatos {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.estoque-candidatos-titulo {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.estoque-candidato {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.estoque-candidato:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--bg-row);
+}
+
+.estoque-candidato-nome {
+  font-weight: 600;
+}
+
+.estoque-candidato-dados {
+  color: var(--muted);
+}
 
 .estoque-remover {
   flex-shrink: 0;

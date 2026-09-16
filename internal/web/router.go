@@ -16,6 +16,7 @@ func RegisterRoutes(mux *http.ServeMux, client *gnjoy.Client, version string, op
 
 	mux.HandleFunc("GET /{$}", h.Watchlist)
 	mux.HandleFunc("GET /estoque", h.Estoque)
+	mux.HandleFunc("GET /web/estoque/validar", h.EstoqueValidar)
 	mux.HandleFunc("GET /web/search", h.Search)
 	mux.HandleFunc("GET /web/search/variants", h.Variants)
 	mux.HandleFunc("GET /web/shops/{svrId}/{mapId}/{ssi}/expand", h.Expand)

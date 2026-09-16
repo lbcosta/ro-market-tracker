@@ -183,12 +183,12 @@ func (h *Handler) Watchlist(w http.ResponseWriter, r *http.Request) {
 }
 
 // Estoque trata GET /estoque e serve a página do estoque da loja do usuário.
-// Por enquanto só a casca: esta etapa entrega a mudança de interface (menu e
-// duas páginas), e o conteúdo vem depois.
 //
-// Não chama warmupActionID: a página ainda não consulta a GnJoy, e aquecer a
-// chave aqui gastaria uma requisição sem ninguém para aproveitá-la. Quem
-// abrir a Watchlist dispara o aquecimento.
+// Não chama warmupActionID, e por um motivo diferente do de antes: a página
+// já consulta a GnJoy (ver EstoqueValidar, em estoque.go), mas só por rotas
+// GET comuns — busca de lojas e preços praticados. O aquecimento existe para
+// a Server Action do Next.js, que aqui ainda não é usada; chamá-lo agora
+// gastaria uma requisição por uma chave que ninguém desta tela precisa.
 func (h *Handler) Estoque(w http.ResponseWriter, r *http.Request) {
 	h.renderPage(w, r, "estoque")
 }

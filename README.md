@@ -197,9 +197,9 @@ Cada card mostra:
 - O nome — o que o usuário digitou até a validação acontecer, e o nome canônico
   depois dela. Preservar o digitado é o que deixa ele reconhecer a linha que
   precisa corrigir quando o nome está errado.
-- Um selo de validação: **NÃO VALIDADO**, **VALIDADO** ou **VALIDADO COM ERRO**
-  (este em vermelho — é o único estado que exige ação: excluir e cadastrar de
-  novo com o nome certo).
+- Um selo de validação: **NÃO VALIDADO**, **VALIDADO** ou **INVÁLIDO** (este
+  em vermelho, com o motivo logo abaixo — é o único estado que exige ação do
+  usuário). Ver "Validar um item" abaixo.
 - **Vendo por:**, o preço que o usuário está pedindo, editável clicando — mesmo
   gesto e mesma receita do "Alvo:" da watchlist.
 - **Na loja / Fora da loja** e **Undercutting**, ligados pelo usuário. O
@@ -211,11 +211,54 @@ Cada card mostra:
   ao site: um seletor global cobraria isso de todos os itens de uma vez e
   estouraria o ritmo de uma requisição por minuto que o programa respeita.
 
-**Nesta etapa, nenhuma ação da tela fala com o GnJoy.** Adicionar, editar o
-preço, ligar as flags, trocar a janela e excluir são só `localStorage` + DOM — o
-que os testes conferem com o contador de requisições ao upstream, porque "zero
-requisição" aqui é requisito, não acaso. Validar contra o mercado, buscar preços
-e avisar sobre undercutting entram nas etapas seguintes.
+Adicionar, editar o preço, ligar as flags, trocar a janela e excluir são só
+`localStorage` + DOM, **sem nenhuma requisição ao GnJoy** — o que os testes
+conferem com o contador de requisições ao upstream, porque "zero requisição"
+aqui é requisito, não acaso. As únicas ações que falam com o site são o botão
+"Validar" e, indiretamente, a escolha de um candidato. Buscar preços de mercado,
+montar o histórico e avisar sobre undercutting entram nas etapas seguintes.
+
+#### Validar um item
+
+`GET /web/estoque/validar?server=…&item=…` responde quais itens do servidor
+casam com o nome digitado. A ordem das duas consultas não é arbitrária:
+
+1. **Mercado** (`SearchShops`) — os anúncios da concorrência agora. É o caminho
+   comum, e o único que traz o nome com o sufixo de slots, o que separa
+   "Selo de Loki" de "Selo de Loki [1]" (itens de catálogo diferentes, com
+   preços muito diferentes).
+2. **Histórico** (`SearchMarketPrice`, janela `ALL`) — só se ninguém no
+   servidor inteiro estiver anunciando o item. "Ninguém está anunciando agora"
+   não quer dizer "não existe", e é justamente o caso de quem vai colocar esse
+   item à venda.
+
+É a mesma cadeia que a busca da página principal já faz, com uma diferença: o
+fallback chama `searchMarketPrice` direto em vez de `priceHistory`, que
+consultaria DUAS janelas para montar uma tabela que esta rota não mostra.
+
+Custo: **1 requisição** quando alguém anuncia o item, **2** quando não; zero em
+qualquer repetição dentro de 30 s (as duas rotas passam por cache). Não existe
+"validar todos" de propósito — é o atalho que mais convida ao `429`, e o botão
+por item já limita o ritmo naturalmente.
+
+Os três desfechos:
+
+| Resultado | Estado do card |
+| --- | --- |
+| 1 candidato | **VALIDADO** na hora, fixando `itemId` e `svrId` |
+| vários candidatos | lista de escolha dentro do card; clicar fixa (0 requisições) |
+| nenhum candidato | **INVÁLIDO**, com o motivo |
+
+E o caso que não é desfecho nenhum: **falha ao consultar não mexe no estado do
+item.** Inválido é o que manda o usuário apagar o cadastro, e um timeout ou um
+bloqueio do site não podem mandar isso — por isso essas situações respondem
+`502` (ou `503` sob suspensão) em vez de uma lista vazia, e o card fica como
+estava, com um toast explicando. Um item inválido também pode ser revalidado
+pelo botão, que vira "Tentar de novo": custa uma requisição (zero dentro do
+cache), então obrigar a recadastrar por causa de um tropeço seria gratuito.
+
+A lista de candidatos é persistida no `localStorage`: trocar de aba no meio da
+escolha e voltar não pode custar outra consulta ao site.
 
 ### Busca
 
