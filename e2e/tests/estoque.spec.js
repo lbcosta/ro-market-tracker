@@ -859,3 +859,54 @@ test("o aviso sobrevive à troca de aba", async ({ page }) => {
 
   await expect(avisoDeLoja(page)).toBeVisible();
 });
+
+// ---------------------------------------------------------------------------
+// Régua de preços
+// ---------------------------------------------------------------------------
+
+const regua = (page, nome) => card(page, nome).locator(".estoque-regua");
+const tiques = (page, nome) => card(page, nome).locator(".estoque-regua-tique");
+
+test("a régua mostra um tique por anúncio e destaca o seu preço", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+  const c = card(page, "Elixir do Mercador");
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("1400");
+  await c.locator("input").press("Enter");
+
+  // Dois concorrentes mais o seu preço.
+  await expect(tiques(page, "Elixir do Mercador")).toHaveCount(3);
+  await expect(c.locator(".estoque-regua-tique.is-seu-preco")).toHaveCount(1);
+  await expect(regua(page, "Elixir do Mercador")).toHaveAttribute("role", "img");
+});
+
+test("a régua marca os seus anúncios separados dos concorrentes", async ({ page }) => {
+  await adicionarPersonagem(page, "Vendedor elixir-a");
+  await validarItem(page, "Elixir do Mercador");
+
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-regua-tique.is-meu")).toHaveCount(1);
+});
+
+// Escala logarítmica: num item cujos anúncios vão de 200k a 88kk, uma escala
+// linear empilharia os baratos num pixel e esconderia justamente a estrutura
+// que a régua existe para mostrar.
+test("a posição dos tiques usa escala logarítmica", async ({ page }) => {
+  await validarItem(page, "Espada Primordial");
+
+  const posicoes = await page.evaluate(() =>
+    [...document.querySelectorAll(".estoque-card .estoque-regua-tique")].map((el) =>
+      parseFloat(el.style.left),
+    ),
+  );
+  expect(posicoes.length).toBeGreaterThanOrEqual(2);
+  // As pontas ancoram em 0% e 100%.
+  expect(Math.min(...posicoes)).toBeCloseTo(0, 1);
+  expect(Math.max(...posicoes)).toBeCloseTo(100, 1);
+});
+
+test("sem concorrência suficiente a régua não aparece", async ({ page }) => {
+  // A Carta Poring Noel tem um anúncio só: não há o que comparar.
+  await validarItem(page, "Carta Poring Noel");
+
+  await expect(regua(page, "Carta Poring Noel")).toHaveCount(0);
+});

@@ -720,6 +720,81 @@ function textoDaJanela(janela) {
 }
 
 // ---------------------------------------------------------------------------
+// Régua de preços
+// ---------------------------------------------------------------------------
+
+// buildReguaDePrecos desenha uma faixa horizontal com um tique por anúncio,
+// posicionado pelo preço, e um marcador destacado no seu.
+//
+// Um objeto só responde quatro perguntas que, em texto, custariam quatro
+// linhas: QUANTOS concorrentes existem, A QUE PREÇOS, ONDE você está entre
+// eles e — porque os vazios ficam visíveis — SE o mercado está partido em
+// faixas. Esse último é o item 4 do tratamento da mistura de refinos: um vazio
+// grande é o próprio mercado dizendo que ali há duas coisas diferentes à
+// venda (ver detectarFaixas, em sugestao.js).
+//
+// A escala é LOGARÍTMICA porque é isso que o problema pede: num item em que os
+// anúncios vão de 200k a 88kk, uma escala linear empilharia os cinco baratos
+// num pixel e deixaria o resto da régua vazia — justamente escondendo a
+// estrutura que a régua existe para mostrar.
+function buildReguaDePrecos(item, sugestao) {
+  const outros = sugestao.concorrencia === null ? [] : separarAnuncios(item.lastResult).outros;
+  const meus = sugestao.meus || [];
+  const marcados = [];
+  for (const a of outros) marcados.push({ preco: a.price, meu: false });
+  for (const a of meus) marcados.push({ preco: a.price, meu: true });
+  if (item.precoVenda != null) marcados.push({ preco: item.precoVenda, meu: true, seuPreco: true });
+
+  const precos = marcados.map((m) => m.preco).filter((p) => p > 0);
+  if (precos.length < 2) return null;
+
+  const menor = Math.min(...precos);
+  const maior = Math.max(...precos);
+  if (maior <= menor) return null;
+
+  const base = Math.log(menor);
+  const amplitude = Math.log(maior) - base;
+  const posicao = (preco) => ((Math.log(preco) - base) / amplitude) * 100;
+
+  const regua = document.createElement("div");
+  regua.className = "estoque-regua";
+  regua.setAttribute("role", "img");
+  regua.setAttribute(
+    "aria-label",
+    "Anúncios entre " + formatMoney(menor) + " e " + formatMoney(maior) +
+      (item.precoVenda != null ? ", com o seu preço em " + formatMoney(item.precoVenda) : ""),
+  );
+
+  const trilho = document.createElement("div");
+  trilho.className = "estoque-regua-trilho";
+  for (const marca of marcados) {
+    if (marca.preco <= 0) continue;
+    const tique = document.createElement("span");
+    tique.className = "estoque-regua-tique";
+    if (marca.seuPreco) tique.classList.add("is-seu-preco");
+    else if (marca.meu) tique.classList.add("is-meu");
+    tique.style.left = posicao(marca.preco).toFixed(2) + "%";
+    tique.title = marca.seuPreco
+      ? "Seu preço de venda: " + formatMoney(marca.preco)
+      : (marca.meu ? "Seu anúncio: " : "Concorrente: ") + formatMoney(marca.preco);
+    trilho.appendChild(tique);
+  }
+  regua.appendChild(trilho);
+
+  const pontas = document.createElement("div");
+  pontas.className = "estoque-regua-pontas";
+  const esquerda = document.createElement("span");
+  esquerda.textContent = formatMoney(menor);
+  const direita = document.createElement("span");
+  direita.textContent = formatMoney(maior);
+  pontas.appendChild(esquerda);
+  pontas.appendChild(direita);
+  regua.appendChild(pontas);
+
+  return regua;
+}
+
+// ---------------------------------------------------------------------------
 // Preço sugerido
 // ---------------------------------------------------------------------------
 
@@ -789,6 +864,9 @@ function buildBlocoDeSugestao(item) {
     seu.textContent = "No seu preço: " + sugestao.tempoNoSeuPreco;
     bloco.appendChild(seu);
   }
+
+  const regua = buildReguaDePrecos(item, sugestao);
+  if (regua) bloco.appendChild(regua);
 
   if (sugestao.cenarios.length > 0) {
     bloco.appendChild(buildCenarios(sugestao.cenarios));

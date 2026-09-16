@@ -756,6 +756,52 @@ h1 {
   line-height: 1.35;
 }
 
+/* Régua de preços: um tique por anúncio, posicionado pelo preço numa escala
+   logarítmica (ver buildReguaDePrecos). Altura fixa e pequena — ela precisa
+   caber no card sem competir com o texto. */
+.estoque-regua {
+  margin: 0.3rem 0 0.1rem;
+}
+
+.estoque-regua-trilho {
+  position: relative;
+  height: 1.1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.estoque-regua-tique {
+  position: absolute;
+  bottom: 0;
+  width: 2px;
+  height: 0.55rem;
+  margin-left: -1px;
+  background: var(--muted);
+  border-radius: 1px;
+}
+
+/* Os seus anúncios já no mercado. */
+.estoque-regua-tique.is-meu {
+  background: var(--accent);
+  height: 0.8rem;
+}
+
+/* O preço que você definiu no card — mais alto e mais largo que os outros,
+   porque é o ponto de referência a partir do qual se lê o resto. */
+.estoque-regua-tique.is-seu-preco {
+  width: 3px;
+  height: 1.1rem;
+  margin-left: -1.5px;
+  background: var(--text);
+}
+
+.estoque-regua-pontas {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.68rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .estoque-cenarios summary {
   cursor: pointer;
   font-size: 0.75rem;

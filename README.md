@@ -22,7 +22,7 @@ internal/gnjoy/                 client para as rotas internas do GnJoy Americas
 internal/api/                   API REST própria (JSON) — handlers + roteador
 internal/web/                   frontend HTMX — handlers + roteador
   templates/                      layout (cabeçalho/rodapé comuns), as duas páginas e os fragmentos de busca/expand
-  static/                         CSS, JS (app.js, monitor.js, watchlist.js, estoque.js, navegacao.js, theme.js, activity-bar.js, version.js) e htmx.min.js vendorizado
+  static/                         CSS, JS (app.js, monitor.js, watchlist.js, sugestao.js, estoque.js, navegacao.js, theme.js, activity-bar.js, version.js) e htmx.min.js vendorizado
   watchlist.go                    endpoint JSON de preço/refino ao vivo p/ a watchlist
   bonus.go                        varredura de refino/bônus por anúncio, sob demanda, memoizada
   suspension.go                   sonda que reabre as consultas quando o site volta
@@ -348,6 +348,96 @@ mostrar.
 
 Como a tela passou a usar a Server Action `price`, `Handler.Estoque` agora
 aquece o action id, como a Watchlist já fazia.
+
+#### Preço sugerido: faixa e cenários, não um número
+
+A decisão de quem vende não é "qual é o preço justo" — é um trade-off: preço
+alto pode não vender, preço baixo vende rápido e deixa dinheiro na mesa. Um
+número sozinho esconderia exatamente a escolha. Então o card mostra uma
+**faixa**, um **selo de confiança** e, dentro de um `<details>`, **três
+estratégias**, cada uma com o tempo esperado até vender e a aposta que embute.
+
+Tudo isso é calculado no navegador (`internal/web/static/sugestao.js`), em
+funções puras sobre dados que o card já tem — por isso mexer no seu preço, na
+lista de personagens ou na janela recalcula a tela inteira **sem requisição
+nenhuma**.
+
+##### O defeito do dado de origem, que manda em tudo
+
+O histórico é indexado por `itemId`, mas **refino e encantamento são
+propriedades da unidade**. Uma bota +0 e uma bota +9 com encantamento raro são
+o mesmo `itemId`, então o histórico de um equipamento não é uma distribuição —
+são várias empilhadas, e a média cai no vazio entre elas. O site não expõe o
+que a unidade tinha quando foi vendida: isso não tem conserto, tem tratamento.
+
+1. **`databaseType` separa quem sofre do problema** (`weapon`, `armor`) de quem
+   não sofre (consumíveis, cartas, materiais).
+2. **Medianas dos mínimos e dos máximos diários no lugar da média.** O mínimo
+   diário é o mais perto que se chega da versão comum do item; o máximo, do que
+   uma unidade boa alcança. Mediana e não média porque um único dia de 88kk
+   destrói uma média e mal move uma mediana.
+3. **Os anúncios de agora revelam as faixas.** Um vazio grande entre preços
+   ordenados é o próprio mercado dizendo que ali há duas coisas diferentes à
+   venda. Não afirmamos *por quê* — só que está partido. Custo zero.
+4. **A confiança é medida e exibida com o motivo**, que é o que conta ao
+   usuário que os números somam unidades diferentes da dele.
+
+##### A precisão da resposta acompanha a confiança do dado
+
+Um "~3 dias" calculado sobre dados contaminados é uma mentira com cara de
+precisão. Por isso:
+
+| Confiança | Tempo até vender | Cenários |
+| --- | --- | --- |
+| alta | `~3 dias` | sim |
+| média | `entre 2 e 5 dias` | sim |
+| baixa | `provavelmente semanas` | **não** — só a faixa e o motivo |
+| nenhuma | — | não |
+
+##### Tempo até vender
+
+```
+vendas por dia     = quantidade vendida na janela ÷ dias com venda
+fila na sua frente = unidades anunciadas mais baratas que a sua
+dias até vender   ≈ fila ÷ vendas por dia
+```
+
+A suposição embutida é que se compra do mais barato para o mais caro, o que é
+aproximadamente verdade no jogo. **A fila é recalculada a cada repintura**,
+nunca guardada: o mercado é dinâmico e a fila de agora não é a de dez minutos
+atrás.
+
+Para equipamento, a liquidez também está contaminada — o volume é de todas as
+unidades do `itemId`. A correção é escalá-la pela fatia do mercado que é
+comparável: se 2 dos 10 anúncios estão na sua faixa, assume-se que ~20% das
+vendas são dela. É uma suposição, e está dita na tela.
+
+##### Régua de preços
+
+Uma faixa horizontal com um tique por anúncio, posicionado pelo preço, e um
+marcador destacado no seu. Um objeto só responde quatro perguntas que em texto
+custariam quatro linhas: quantos concorrentes, a que preços, onde você está, e
+se o mercado está partido. A escala é **logarítmica**: num item cujos anúncios
+vão de 200k a 88kk, uma escala linear empilharia os baratos num pixel e
+esconderia justamente a estrutura que a régua existe para mostrar.
+
+#### Aviso de loja fora do ar
+
+Quando **nenhum** dos itens marcados como "na loja" tem anúncio seu no mercado,
+um aviso aparece no topo do Estoque. O caso que ele existe para pegar é a
+desconexão silenciosa: a loja caiu e você não viu.
+
+Ele **não afirma "loja offline"**. Uma loja fechada e um estoque que vendeu
+tudo somem do mercado exatamente igual, e o site não distingue os dois —
+cravar a causa mandaria o usuário conferir a loja à toa. O texto descreve o que
+foi observado, diz que as duas causas são possíveis e informa de quando são as
+checagens.
+
+Só dispara com sinal forte: personagens cadastrados (sem eles, "nenhum anúncio
+seu" não significa nada), ao menos um item validado e na loja, e evidência de
+até 15 minutos — um item consultado há quarenta minutos não diz nada sobre
+agora. Um único item com anúncio seu já basta para não alarmar. Custo: zero
+requisição, a evidência já está no `lastResult` de cada card.
 
 #### Custo de validar um item, ponta a ponta
 
