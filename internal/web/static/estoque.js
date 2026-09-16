@@ -14,6 +14,12 @@
 const ESTOQUE_KEY = "ro-market-tracker:estoque";
 const ESTOQUE_SERVIDOR_KEY = "ro-market-tracker:estoque-servidor";
 
+// Os personagens do usuário. Lista separada, e não um campo por item: ela é
+// do usuário, não de um item, e vale para o estoque inteiro. É por ela que o
+// programa sabe quais anúncios do mercado são do próprio usuário — sem isso,
+// você competiria consigo mesmo.
+const PERSONAGENS_KEY = "ro-market-tracker:meus-personagens";
+
 const ESTOQUE_SERVIDOR_PADRAO = "NIDHOGG";
 
 // Estados da validação. O item nasce NAO_VALIDADO; "Validar" o leva a
@@ -101,6 +107,59 @@ function gravarServidorDoEstoque(server) {
   } catch {
     // Ver saveEstoque.
   }
+}
+
+function carregarPersonagens() {
+  try {
+    const raw = localStorage.getItem(PERSONAGENS_KEY);
+    const lista = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(lista)) return [];
+    return lista.map((n) => String(n).trim()).filter((n) => n !== "");
+  } catch {
+    return [];
+  }
+}
+
+function salvarPersonagens(lista) {
+  try {
+    localStorage.setItem(PERSONAGENS_KEY, JSON.stringify(lista));
+  } catch {
+    // Ver saveEstoque.
+  }
+}
+
+// ehMeuAnuncio compara o vendedor do anúncio com a lista de personagens.
+// Insensível a caixa e com as pontas aparadas: quem digita o nome do próprio
+// personagem não deveria precisar acertar a capitalização exata do jogo.
+function ehMeuAnuncio(anuncio, personagens) {
+  const vendedor = String(anuncio.seller || "").trim().toLowerCase();
+  if (vendedor === "") return false;
+  return personagens.some((n) => n.toLowerCase() === vendedor);
+}
+
+// separarAnuncios divide o que veio do servidor entre os seus anúncios e os
+// da concorrência.
+//
+// Esta separação acontece AQUI, no navegador, e não no servidor, por um
+// motivo de custo: se o servidor fizesse o desconto, editar a lista de
+// personagens obrigaria cada card a reconsultar o site — vinte itens no
+// estoque seriam vinte requisições e vinte segundos de fila. Do jeito atual,
+// mexer na lista recalcula a tela inteira de graça.
+function separarAnuncios(resultado) {
+  const anuncios = (resultado && resultado.listings) || [];
+  const personagens = carregarPersonagens();
+  const meus = [];
+  const outros = [];
+  for (const anuncio of anuncios) {
+    (ehMeuAnuncio(anuncio, personagens) ? meus : outros).push(anuncio);
+  }
+  // O servidor já manda ordenado por preço crescente, então o primeiro de
+  // cada lado é o mais barato.
+  return { meus, outros };
+}
+
+function somarUnidades(anuncios) {
+  return anuncios.reduce((total, a) => total + (a.units || 0), 0);
 }
 
 // nomeVisivel é o que o card mostra: o nome canônico depois de validado, e o
@@ -306,6 +365,22 @@ function escolherCandidato(id, candidato) {
     candidatos: null,
     motivo: null,
   }));
+  // A primeira consulta de mercado sai junto: acabou de se descobrir QUAL é o
+  // item, e mostrar um card validado e vazio faria o usuário clicar em "↻"
+  // para completar um passo que ele já pediu.
+  //
+  // Exceto quando o candidato veio do HISTÓRICO: nesse caso a validação já
+  // provou que ninguém está anunciando o item (foi por isso que ela caiu no
+  // histórico), e perguntar de novo gastaria uma requisição para receber a
+  // resposta que acabamos de obter. O resultado é semeado à mão.
+  if (candidato.inMarket === false) {
+    repintarCard(updateEstoqueItem(id, {
+      lastResult: { found: false, listings: [] },
+      lastCheckedAt: Date.now(),
+    }));
+    return;
+  }
+  consultarMercado(id);
 }
 
 // repintarCard troca o card inteiro pelo estado novo. Reconstruir é mais
@@ -367,6 +442,112 @@ function buildListaDeCandidatos(item) {
     lista.appendChild(li);
   }
   bloco.appendChild(lista);
+  return bloco;
+}
+
+// ---------------------------------------------------------------------------
+// Mercado
+// ---------------------------------------------------------------------------
+
+// consultarMercado busca os anúncios do item agora. Só é chamada sob clique:
+// ao escolher o item na validação e no botão "↻" do card. O rodízio
+// automático entra na etapa do undercutting.
+//
+// Grava o resultado SEMPRE, inclusive quando o card não está na tela — pelo
+// mesmo motivo que fetchLivePrice (ver monitor.js): o que é vigiado não pode
+// depender de qual aba está aberta.
+async function consultarMercado(id, fresh = false) {
+  const item = loadEstoque().find((e) => e.id === id);
+  if (!item || item.itemId == null) return;
+
+  const botao = () => {
+    const card = findEstoqueCard(id);
+    return card ? card.querySelector(".estoque-atualizar") : null;
+  };
+  const b = botao();
+  if (b) b.disabled = true;
+
+  try {
+    let url =
+      "/web/estoque/mercado?server=" + encodeURIComponent(item.server) +
+      "&itemId=" + encodeURIComponent(item.itemId) +
+      "&item=" + encodeURIComponent(item.searchName || item.nomeDigitado);
+    if (fresh) url += "&fresh=1";
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+
+    const mudancas = { lastResult: data, lastCheckedAt: Date.now(), notified: false };
+    // Um item validado pelo histórico não sabia o sufixo de slots; a primeira
+    // consulta de mercado corrige o nome sem custar requisição nenhuma.
+    if (data.displayName && data.displayName !== item.itemName) {
+      mudancas.itemName = data.displayName;
+    }
+    repintarCard(updateEstoqueItem(id, mudancas));
+  } catch (err) {
+    showToast(String(err.message || err).trim() || "Não foi possível consultar o mercado agora.");
+    const depois = botao();
+    if (depois) depois.disabled = false;
+  }
+}
+
+// buildBlocoDeMercado desenha o que se sabe do mercado agora. São três
+// situações bem diferentes, e a interface não pode confundi-las:
+//
+//   ninguém anuncia        -> não há concorrência (nem referência de preço)
+//   só você anuncia        -> não há concorrência, e isso é bom
+//   terceiros anunciando   -> o menor preço deles é o número que interessa
+function buildBlocoDeMercado(item) {
+  const bloco = document.createElement("div");
+  bloco.className = "estoque-mercado";
+
+  if (!item.lastResult) return bloco;
+
+  const { meus, outros } = separarAnuncios(item.lastResult);
+
+  const linha = document.createElement("span");
+  linha.className = "estoque-mercado-linha";
+
+  if (!item.lastResult.found) {
+    linha.textContent = "Ninguém está anunciando este item.";
+  } else if (outros.length === 0) {
+    linha.textContent = "Você é o único anunciando este item.";
+    linha.classList.add("estoque-mercado-sozinho");
+  } else {
+    const maisBarato = outros[0];
+    const unidades = somarUnidades(outros);
+    linha.textContent =
+      "Mercado: " + formatMoney(maisBarato.price) +
+      " · " + (unidades === 1 ? "1 unidade" : unidades + " unidades") +
+      " em " + (outros.length === 1 ? "1 anúncio" : outros.length + " anúncios");
+    if (maisBarato.storeName) linha.title = "Loja mais barata: " + maisBarato.storeName;
+  }
+  bloco.appendChild(linha);
+
+  if (meus.length > 0) {
+    const seu = document.createElement("span");
+    seu.className = "estoque-mercado-seu";
+    const meuMaisBarato = meus[0];
+    seu.textContent = "Seu anúncio: " + formatMoney(meuMaisBarato.price);
+    // A comparação que interessa a quem vende: alguém está abaixo de você?
+    if (outros.length > 0 && outros[0].price < meuMaisBarato.price) {
+      seu.textContent += " — estão vendendo mais barato";
+      seu.classList.add("estoque-mercado-cortado");
+    }
+    bloco.appendChild(seu);
+  }
+
+  // Honestidade sobre o que não foi olhado: o servidor corta a lista de
+  // anúncios (ver maxAnunciosPorItem), e um item muito popular pode ter mais
+  // do que isso.
+  if (item.lastResult.truncated) {
+    const aviso = document.createElement("span");
+    aviso.className = "estoque-mercado-aviso";
+    aviso.textContent = "Mostrando só os anúncios mais baratos.";
+    bloco.appendChild(aviso);
+  }
+
   return bloco;
 }
 
@@ -474,6 +655,23 @@ function buildEstoqueCard(item) {
   }
   acoes.appendChild(janela);
 
+  // Só faz sentido depois de o item ser validado: sem itemId não há o que
+  // consultar.
+  if (item.validacao === VALIDACAO_OK) {
+    const atualizar = document.createElement("button");
+    atualizar.type = "button";
+    atualizar.className = "estoque-atualizar";
+    atualizar.textContent = "↻";
+    atualizar.title = "Consultar o mercado agora";
+    atualizar.setAttribute("aria-label", "Consultar o mercado agora para " + nomeVisivel(item));
+    acoes.appendChild(atualizar);
+
+    const quando = document.createElement("span");
+    quando.className = "estoque-atualizado-em";
+    paintUpdatedAt(quando, item.lastCheckedAt);
+    acoes.appendChild(quando);
+  }
+
   const validar = document.createElement("button");
   validar.type = "button";
   validar.className = "estoque-validar";
@@ -484,6 +682,10 @@ function buildEstoqueCard(item) {
   acoes.appendChild(validar);
 
   li.appendChild(acoes);
+
+  if (item.validacao === VALIDACAO_OK) {
+    li.appendChild(buildBlocoDeMercado(item));
+  }
 
   // O motivo só existe no estado inválido: o selo vermelho chama a atenção, e
   // esta linha é quem diz o que aconteceu e o que fazer.
@@ -503,6 +705,66 @@ function buildEstoqueCard(item) {
 
   aplicarDisponibilidadeDoUndercut(li, item);
   return li;
+}
+
+// ---------------------------------------------------------------------------
+// Meus personagens
+// ---------------------------------------------------------------------------
+
+function renderPersonagens() {
+  const lista = document.getElementById("estoque-personagens-lista");
+  const contagem = document.getElementById("estoque-personagens-contagem");
+  if (!lista) return;
+
+  const personagens = carregarPersonagens();
+  if (contagem) contagem.textContent = String(personagens.length);
+
+  lista.innerHTML = "";
+  for (const nome of personagens) {
+    const li = document.createElement("li");
+    li.className = "estoque-personagem";
+    li.dataset.nome = nome;
+
+    const texto = document.createElement("span");
+    texto.textContent = nome;
+    li.appendChild(texto);
+
+    const remover = document.createElement("button");
+    remover.type = "button";
+    remover.className = "estoque-personagem-remover";
+    remover.textContent = "×";
+    remover.setAttribute("aria-label", "Remover o personagem " + nome);
+    li.appendChild(remover);
+
+    lista.appendChild(li);
+  }
+}
+
+// mudarPersonagens grava a lista e redesenha o estoque inteiro. Redesenhar
+// todos os cards é o ponto: quais anúncios são seus muda para TODO item de
+// uma vez, e como a separação é feita no navegador (ver separarAnuncios),
+// isso não custa requisição nenhuma.
+function mudarPersonagens(lista) {
+  salvarPersonagens(lista);
+  renderPersonagens();
+  renderEstoque();
+}
+
+function adicionarPersonagem(nome) {
+  const limpo = nome.trim();
+  if (limpo === "") return false;
+
+  const personagens = carregarPersonagens();
+  if (personagens.some((n) => n.toLowerCase() === limpo.toLowerCase())) {
+    showToast("«" + limpo + "» já está na lista.");
+    return false;
+  }
+  mudarPersonagens([...personagens, limpo]);
+  return true;
+}
+
+function removerPersonagem(nome) {
+  mudarPersonagens(carregarPersonagens().filter((n) => n !== nome));
 }
 
 // ---------------------------------------------------------------------------
@@ -530,6 +792,29 @@ function montarPainelDoEstoque() {
   if (!container) return;
 
   renderEstoque();
+  renderPersonagens();
+
+  const formPersonagem = document.getElementById("estoque-personagem-form");
+  if (formPersonagem) {
+    formPersonagem.addEventListener("submit", (ev) => {
+      ev.preventDefault();
+      const campo = document.getElementById("estoque-personagem");
+      if (!campo) return;
+      if (adicionarPersonagem(campo.value)) {
+        campo.value = "";
+        campo.focus();
+      }
+    });
+  }
+
+  const listaPersonagens = document.getElementById("estoque-personagens-lista");
+  if (listaPersonagens) {
+    listaPersonagens.addEventListener("click", (ev) => {
+      if (!ev.target.closest(".estoque-personagem-remover")) return;
+      const li = ev.target.closest(".estoque-personagem");
+      if (li) removerPersonagem(li.dataset.nome);
+    });
+  }
 
   const seletor = document.getElementById("estoque-servidor");
   if (seletor) {
@@ -567,6 +852,12 @@ function montarPainelDoEstoque() {
 
     if (ev.target.closest(".estoque-validar")) {
       validarItem(id);
+      return;
+    }
+
+    if (ev.target.closest(".estoque-atualizar")) {
+      // fresh: quem apertou quer o estado de agora, não o do cache.
+      consultarMercado(id, true);
       return;
     }
 

@@ -260,6 +260,65 @@ cache), então obrigar a recadastrar por causa de um tropeço seria gratuito.
 A lista de candidatos é persistida no `localStorage`: trocar de aba no meio da
 escolha e voltar não pode custar outra consulta ao site.
 
+#### O que o mercado está pedindo
+
+`GET /web/estoque/mercado?server=…&itemId=…&item=…[&fresh=1]` devolve os
+anúncios do item **agora**, do mais barato ao mais caro, cada um com preço,
+quantidade, nome da loja e **nome do vendedor**. Custo: 1 requisição, ou zero
+quando o cache de 4 minutos responde; `fresh=1` (o botão "↻" do card) o ignora.
+
+A rota **não** chama `GetStoreDetail`. A da watchlist gasta uma requisição
+extra por consulta só para obter o `/navi` da loja mais barata — quem tem o
+item no estoque não vai a lugar nenhum, vai comparar preço, e o nome da loja
+já vem de graça em cada linha da busca. Há um teste que trava isso.
+
+A lista é cortada em 60 anúncios (`maxAnunciosPorItem`), e o card diz quando
+cortou. Como ela vem ordenada, o corte só descarta o que ninguém ia olhar.
+
+#### Meus personagens
+
+Uma lista separada, no topo da tela (`ro-market-tracker:meus-personagens`),
+com os nomes dos personagens que vendem na sua loja. Anúncios feitos por eles
+não contam como concorrência — sem isso você apareceria competindo consigo
+mesmo, e o aviso de undercutting dispararia por causa do seu próprio anúncio.
+
+**A separação acontece no navegador, não no servidor.** É uma decisão de
+custo: se o servidor fizesse o desconto, editar a lista obrigaria cada card a
+reconsultar o site — vinte itens no estoque seriam vinte requisições e vinte
+segundos de fila. Por isso a rota devolve o vendedor de cada anúncio e o
+cliente filtra: mexer na lista recalcula a tela inteira **de graça**, o que os
+testes conferem com o contador de requisições.
+
+A comparação é por nome, insensível a caixa e com as pontas aparadas. Cadastre
+todos os personagens: um nome faltando faz o desconto falhar em silêncio.
+
+Com isso, o card mostra uma de três situações, que a interface não confunde:
+
+| Situação | O que o card diz |
+| --- | --- |
+| ninguém anuncia | "Ninguém está anunciando este item." |
+| só você anuncia | "Você é o único anunciando este item." (em verde) |
+| há concorrência | o menor preço **de terceiros**, com unidades e anúncios |
+
+E, quando algum anúncio é seu, uma linha a mais com o seu preço — em vermelho
+quando alguém está abaixo dele.
+
+#### Custo de validar um item, ponta a ponta
+
+| Situação | Requisições |
+| --- | --- |
+| Item que alguém anuncia | **2** — validar + a primeira consulta de mercado |
+| Item só no histórico | **2** — validar (mercado vazio + histórico) e nada mais |
+| Item inexistente | **2** — as duas consultas da validação |
+
+O item achado só no histórico não paga a terceira: a validação já provou que
+ninguém está anunciando, então o resultado de mercado é semeado à mão em vez
+de ser perguntado de novo.
+
+Depois disso, o card só volta a consultar quando o usuário aperta "↻". **O
+estoque ainda não participa do rodízio automático** — isso entra junto com o
+aviso de undercutting, na etapa seguinte.
+
 ### Busca
 
 Escolha o servidor (`NIDHOGG` ou `FREYA`, `NIDHOGG`

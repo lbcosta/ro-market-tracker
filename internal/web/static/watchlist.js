@@ -896,11 +896,16 @@ function applyUpdatedAt(row, timestampMs) {
 // texto não ficar parado entre uma checagem e a seguinte, que pode demorar
 // minutos.
 function refreshUpdatedAtLabels() {
-  document.querySelectorAll(".watchlist-updated-at[data-checked-at]").forEach((el) => {
+  // Por atributo, e não por classe de uma tela: o rótulo "há X" é o mesmo na
+  // watchlist e no estoque, e um seletor preso a .watchlist-updated-at
+  // deixaria os do estoque congelados no texto de quando foram pintados.
+  const now = Date.now();
+  for (const el of document.querySelectorAll("[data-checked-at]")) {
     const ts = Number(el.dataset.checkedAt);
-    if (Number.isFinite(ts)) el.textContent = relativeTime(ts);
-  });
+    if (Number.isFinite(ts)) el.textContent = relativeTime(ts, now);
+  }
 }
+
 
 function buildWatchlistRow(entry) {
   const li = document.createElement("li");

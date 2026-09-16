@@ -238,3 +238,169 @@ func TestValidarUsaOCache(t *testing.T) {
 		t.Errorf("requisições ao upstream = %d, quero 1 (a segunda validação sai do cache)", n)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Mercado
+// ---------------------------------------------------------------------------
+
+func consultarMercado(t *testing.T, srv *httptest.Server, query string) (int, mercadoView) {
+	t.Helper()
+	resp, err := srv.Client().Get(srv.URL + "/web/estoque/mercado?" + query)
+	if err != nil {
+		t.Fatalf("GET /web/estoque/mercado: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return resp.StatusCode, mercadoView{}
+	}
+	var view mercadoView
+	if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
+		t.Fatalf("decodificando resposta: %v", err)
+	}
+	return resp.StatusCode, view
+}
+
+// TestMercadoDevolveAnunciosOrdenados cobre o contrato que o navegador
+// depende: os anúncios vêm do mais barato para o mais caro, com o vendedor de
+// cada um, para o cliente conseguir separar os seus dos da concorrência.
+func TestMercadoDevolveAnunciosOrdenados(t *testing.T) {
+	srv, mock := newWebServer(t)
+	mock.ResetRequests()
+
+	status, view := consultarMercado(t, srv, "server=NIDHOGG&itemId=600009&item=Espada+Primordial")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, quero 200", status)
+	}
+	if !view.Found {
+		t.Fatal("Found = false, mas a fixture tem três anúncios da Espada Primordial")
+	}
+	if len(view.Listings) != 3 {
+		t.Fatalf("anúncios = %d, quero 3: %+v", len(view.Listings), view.Listings)
+	}
+	if view.DisplayName != "Espada Primordial" {
+		t.Errorf("DisplayName = %q, quero \"Espada Primordial\"", view.DisplayName)
+	}
+
+	for i := 1; i < len(view.Listings); i++ {
+		if view.Listings[i-1].Price > view.Listings[i].Price {
+			t.Fatalf("anúncios fora de ordem: %+v", view.Listings)
+		}
+	}
+	if view.Listings[0].Price != 129999999 {
+		t.Errorf("primeiro preço = %d, quero 129999999", view.Listings[0].Price)
+	}
+	// O vendedor é o que torna o desconto dos anúncios próprios possível sem
+	// requisição extra — sem ele, a feature inteira precisaria do detalhe de
+	// cada loja.
+	for _, a := range view.Listings {
+		if a.Seller == "" {
+			t.Errorf("anúncio sem vendedor: %+v", a)
+		}
+		if a.StoreName == "" {
+			t.Errorf("anúncio sem nome de loja: %+v", a)
+		}
+	}
+
+	if n := mock.RequestCount(); n != 1 {
+		t.Errorf("requisições ao upstream = %d, quero 1", n)
+	}
+}
+
+// TestMercadoNaoConsultaDetalheDaLoja trava a economia desta rota sobre a da
+// watchlist: lá, cada consulta gasta uma requisição extra de GetStoreDetail
+// só para obter o /navi. Quem tem o item no estoque não vai a lugar nenhum —
+// vai comparar preço —, e o nome da loja já vem de graça na busca.
+func TestMercadoNaoConsultaDetalheDaLoja(t *testing.T) {
+	srv, mock := newWebServer(t)
+	mock.ResetRequests()
+
+	consultarMercado(t, srv, "server=NIDHOGG&itemId=600009&item=Espada+Primordial")
+
+	for _, req := range mock.Requests() {
+		if strings.Contains(req.Body, "\"store\"") {
+			t.Errorf("a rota consultou o detalhe de uma loja: %s", req.Body)
+		}
+	}
+}
+
+// TestMercadoFiltraPeloItemId garante que uma busca que casa vários itens não
+// contamina o card de um deles. "Espada" traz três itens diferentes.
+func TestMercadoFiltraPeloItemId(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	_, view := consultarMercado(t, srv, "server=NIDHOGG&itemId=600009&item=Espada")
+	if len(view.Listings) != 3 {
+		t.Fatalf("anúncios = %d, quero só os 3 da Espada Primordial: %+v", len(view.Listings), view.Listings)
+	}
+}
+
+// TestMercadoSemAnuncio cobre o item validado pelo histórico: ele existe, mas
+// ninguém está vendendo agora. Não é erro, e o card precisa saber a
+// diferença.
+func TestMercadoSemAnuncio(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	status, view := consultarMercado(t, srv, "server=NIDHOGG&itemId=610003&item=Bota+do+Andarilho")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, quero 200", status)
+	}
+	if view.Found {
+		t.Error("Found = true, mas ninguém anuncia a Bota do Andarilho")
+	}
+	if len(view.Listings) != 0 {
+		t.Errorf("anúncios = %+v, quero nenhum", view.Listings)
+	}
+}
+
+func TestMercadoUsaOCacheEFreshOIgnora(t *testing.T) {
+	srv, mock := newWebServer(t)
+	mock.ResetRequests()
+
+	q := "server=NIDHOGG&itemId=600009&item=Espada+Primordial"
+	consultarMercado(t, srv, q)
+	consultarMercado(t, srv, q)
+	if n := mock.RequestCount(); n != 1 {
+		t.Fatalf("requisições = %d, quero 1 (a segunda sai do cache)", n)
+	}
+
+	consultarMercado(t, srv, q+"&fresh=1")
+	if n := mock.RequestCount(); n != 2 {
+		t.Errorf("requisições = %d, quero 2 (fresh=1 ignora o cache)", n)
+	}
+}
+
+func TestMercadoParametrosObrigatorios(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	casos := []string{
+		"itemId=600009&item=Espada",
+		"server=NIDHOGG&item=Espada",
+		"server=NIDHOGG&itemId=600009",
+		"server=NIDHOGG&itemId=abc&item=Espada",
+	}
+	for _, q := range casos {
+		resp, err := srv.Client().Get(srv.URL + "/web/estoque/mercado?" + q)
+		if err != nil {
+			t.Fatalf("GET %s: %v", q, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status de %q = %d, quero 400", q, resp.StatusCode)
+		}
+	}
+}
+
+func TestMercadoFalhaRespondeErro(t *testing.T) {
+	srv, mock := newWebServer(t)
+	mock.QueueFailure(gnjoytest.Failure{Status: http.StatusInternalServerError}, 10)
+
+	resp, err := srv.Client().Get(
+		srv.URL + "/web/estoque/mercado?server=NIDHOGG&itemId=600009&item=Espada+Primordial")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, quero 502", resp.StatusCode)
+	}
+}

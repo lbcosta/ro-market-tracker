@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 
 	"github.com/lbcosta/ro-market-tracker/internal/gnjoy"
 )
@@ -217,4 +218,114 @@ func ordenarCandidatos(porItem map[int]*candidatoView) []candidatoView {
 		return cmp.Compare(a.ItemID, b.ItemID)
 	})
 	return lista
+}
+
+// maxAnunciosPorItem limita quantos anúncios a rota de mercado devolve por
+// item. Ordenados do mais barato para o mais caro, então o corte só descarta
+// o que ninguém vai olhar: quem vende precisa saber por quanto o concorrente
+// mais barato está vendendo, não o trigésimo. O teto existe porque esta lista
+// é guardada no localStorage de cada card, e um item popular com centenas de
+// anúncios encheria a cota do navegador sozinho.
+const maxAnunciosPorItem = 60
+
+// anuncioView é um anúncio de um item no mercado agora.
+//
+// O vendedor vai junto de propósito: é o navegador quem decide quais anúncios
+// são do próprio usuário, comparando com a lista de personagens dele. Fazer
+// esse desconto aqui no servidor obrigaria a mandar a lista de personagens em
+// cada consulta — e, pior, editá-la custaria UMA REQUISIÇÃO POR ITEM do
+// estoque, porque todo card precisaria recalcular. Do jeito atual, mexer na
+// lista é instantâneo e de graça para a tela inteira.
+type anuncioView struct {
+	Price     int64  `json:"price"`
+	Units     int    `json:"units"`
+	StoreName string `json:"storeName,omitempty"`
+	Seller    string `json:"seller,omitempty"`
+}
+
+type mercadoView struct {
+	// Found diz se existe ALGUM anúncio do item agora, do usuário ou de
+	// terceiros. Quem separa uma coisa da outra é o navegador.
+	Found bool `json:"found"`
+
+	// DisplayName é o nome com o sufixo de slots. Vem junto porque um item
+	// validado pelo histórico não tinha como saber o sufixo (ver
+	// candidatoView.ItemName) — a primeira consulta de mercado corrige isso
+	// sem custar requisição nenhuma.
+	DisplayName string `json:"displayName,omitempty"`
+
+	Listings []anuncioView `json:"listings"`
+
+	// Truncated avisa que havia mais anúncios do que maxAnunciosPorItem. A
+	// tela não mente sobre o que não olhou.
+	Truncated bool `json:"truncated,omitempty"`
+}
+
+// EstoqueMercado trata GET /web/estoque/mercado e devolve os anúncios do item
+// no mercado agora — o que a concorrência está pedindo por ele.
+//
+// Custo: 1 requisição, ou 0 quando o cache responde. Não chama
+// GetStoreDetail: a watchlist gasta uma requisição extra por consulta só para
+// obter o /navi da loja mais barata, e quem tem o item no estoque não vai a
+// lugar nenhum — vai comparar preço. O nome da loja, que é o que interessa
+// aqui, já vem de graça em cada linha da busca.
+func (h *Handler) EstoqueMercado(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	server := q.Get("server")
+	item := q.Get("item")
+	itemID, err := strconv.Atoi(q.Get("itemId"))
+	if server == "" || item == "" || err != nil {
+		http.Error(w, "os parâmetros 'server', 'item' e 'itemId' são obrigatórios", http.StatusBadRequest)
+		return
+	}
+
+	// maxAge alto por padrão (o mesmo da watchlist): várias abas e vários
+	// cards do mesmo item não multiplicam o tráfego. fresh=1 é o botão "↻",
+	// onde o usuário pediu explicitamente o estado de agora.
+	maxAge := monitorMaxAge
+	if q.Get("fresh") == "1" {
+		maxAge = 0
+	}
+
+	// NoRetry: esta consulta tem repetição própria (o usuário clica de novo,
+	// ou o rodízio volta nela), e insistir aqui disputaria a cota com as
+	// ações que alguém está esperando na tela.
+	result, err := h.cachedSearchShops(r.Context(), server, item, maxAge, gnjoy.NoRetry())
+	if err != nil {
+		escreverErroDeConsulta(w, err, "estoque: consulta ao mercado falhou", item, server)
+		return
+	}
+
+	// A busca por nome casa por trecho e traz itens diferentes; só as linhas
+	// deste itemId interessam (o mesmo filtro que a watchlist faz).
+	anuncios := make([]gnjoy.ShopListItem, 0, len(result.Items))
+	for _, it := range result.Items {
+		if it.ItemId == itemID {
+			anuncios = append(anuncios, it)
+		}
+	}
+	if len(anuncios) == 0 {
+		writeJSON(w, http.StatusOK, mercadoView{Found: false, Listings: []anuncioView{}})
+		return
+	}
+
+	slices.SortFunc(anuncios, func(a, b gnjoy.ShopListItem) int {
+		return cmp.Compare(a.ItemPrice, b.ItemPrice)
+	})
+
+	view := mercadoView{Found: true, DisplayName: anuncios[0].DisplayName()}
+	if len(anuncios) > maxAnunciosPorItem {
+		anuncios = anuncios[:maxAnunciosPorItem]
+		view.Truncated = true
+	}
+	view.Listings = make([]anuncioView, 0, len(anuncios))
+	for _, it := range anuncios {
+		view.Listings = append(view.Listings, anuncioView{
+			Price:     it.ItemPrice,
+			Units:     it.ItemCnt,
+			StoreName: it.StoreName,
+			Seller:    it.ItemSellerCharName,
+		})
+	}
+	writeJSON(w, http.StatusOK, view)
 }

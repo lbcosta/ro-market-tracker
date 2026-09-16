@@ -337,6 +337,96 @@ h1 {
   filter: brightness(1.08);
 }
 
+/* Editor de "Meus personagens". Recolhido por padrão: é configuração que se
+   mexe uma vez e depois não se olha mais. */
+.estoque-personagens {
+  margin-bottom: 1.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  font-size: 0.85rem;
+}
+
+.estoque-personagens summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.estoque-personagens[open] summary {
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+
+.estoque-personagens-ajuda {
+  margin: 0 0 0.5rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.estoque-personagem-form {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.5rem;
+}
+
+.estoque-personagem-form input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.estoque-personagem-form button {
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: none;
+  color: var(--accent);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.estoque-personagem-form button:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.estoque-personagens-lista {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.estoque-personagem {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
+
+.estoque-personagem-remover {
+  border: none;
+  background: none;
+  color: var(--muted);
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+}
+
+.estoque-personagem-remover:hover {
+  color: var(--danger);
+}
+
 /* Uma grade, e não uma coluna: o card do estoque é largo (preço de venda,
    mercado, histórico) e a aba não tem painel lateral disputando espaço, então
    cabem dois ou três por linha em tela grande. */
@@ -492,6 +582,53 @@ h1 {
   border: 1px solid var(--accent);
   border-radius: 4px;
   font-size: 0.85rem;
+}
+
+/* O que o mercado está pedindo pelo item agora. */
+.estoque-mercado {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.estoque-mercado-sozinho {
+  color: var(--success);
+}
+
+/* O aviso que interessa a quem vende: alguém está abaixo de você. */
+.estoque-mercado-cortado {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.estoque-mercado-aviso {
+  font-style: italic;
+}
+
+.estoque-atualizar {
+  padding: 0 0.35rem;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.estoque-atualizar:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.estoque-atualizar:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.estoque-atualizado-em {
+  font-size: 0.75rem;
+  color: var(--muted);
 }
 
 .estoque-flags {

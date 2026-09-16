@@ -284,6 +284,13 @@ test("um nome ambíguo pede a escolha, e escolher não custa requisição", asyn
 
   await expect(selo(page, "Rapidez")).toHaveText("Validado");
   await expect(card(page, "Rapidez").locator(".estoque-candidato")).toHaveCount(0);
+
+  // Escolher em si não custa nada — o itemId já tinha vindo na validação. A
+  // requisição que sai é a primeira consulta de mercado do card, que o
+  // usuário não deveria precisar pedir de novo no "↻" depois de já ter
+  // mandado validar. Como estes candidatos vieram do histórico (ninguém
+  // anuncia "Rapidez"), nem essa sai: a validação já provou que não há
+  // anúncio nenhum.
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
 
   const gravado = await page.evaluate(
@@ -373,4 +380,139 @@ test("o estado de validação sobrevive a recarregar", async ({ page }) => {
   await page.reload();
 
   await expect(selo(page, "Bota do Andarilho")).toHaveText("Validado");
+});
+
+// ---------------------------------------------------------------------------
+// Dados de mercado e "meus personagens"
+// ---------------------------------------------------------------------------
+//
+// Os três anúncios da Espada Primordial nas fixtures, do mais barato ao mais
+// caro, com o vendedor de cada um:
+//
+//   129.999.999  Vendedor s-primordial-129
+//   158.000.000  Vendedor s-primordial-158
+//   299.999.999  Vendedor s-primordial-299
+
+const mercado = (page, nome) => card(page, nome).locator(".estoque-mercado-linha");
+const meuAnuncio = (page, nome) => card(page, nome).locator(".estoque-mercado-seu");
+
+async function validarItem(page, nome) {
+  await adicionar(page, nome);
+  await botaoValidar(page, nome).click();
+  await expect(selo(page, nome)).toHaveText("Validado");
+}
+
+async function adicionarPersonagem(page, nome) {
+  // Clicar no summary ALTERNA o <details>: chamar isto duas vezes fecharia o
+  // bloco e o campo sumiria.
+  await page.locator("#estoque-personagens").evaluate((el) => {
+    el.open = true;
+  });
+  await page.fill("#estoque-personagem", nome);
+  await page.press("#estoque-personagem", "Enter");
+  await expect(page.locator(".estoque-personagem").filter({ hasText: nome })).toBeVisible();
+}
+
+test("validar preenche o bloco de mercado do item", async ({ page }) => {
+  await validarItem(page, "Espada Primordial");
+
+  await expect(mercado(page, "Espada Primordial")).toContainText("129.999.999 z");
+  await expect(mercado(page, "Espada Primordial")).toContainText("3 anúncios");
+  // Sem personagens cadastrados, nenhum anúncio é reconhecido como seu.
+  await expect(meuAnuncio(page, "Espada Primordial")).toHaveCount(0);
+});
+
+// O ponto central da etapa: sem isto, você competiria consigo mesmo.
+test("um personagem seu deixa de contar como concorrência", async ({ page, request }) => {
+  await validarItem(page, "Espada Primordial");
+  await expect(mercado(page, "Espada Primordial")).toContainText("129.999.999 z");
+
+  await zerarContagemDoUpstream(request);
+  await adicionarPersonagem(page, "Vendedor s-primordial-129");
+
+  // O anúncio mais barato virou o SEU, então a concorrência agora começa no
+  // segundo.
+  await expect(mercado(page, "Espada Primordial")).toContainText("158.000.000 z");
+  await expect(mercado(page, "Espada Primordial")).toContainText("2 anúncios");
+  await expect(meuAnuncio(page, "Espada Primordial")).toContainText("129.999.999 z");
+
+  // E o recálculo é de graça: se ele custasse uma requisição por item, um
+  // estoque de vinte itens levaria vinte segundos de fila.
+  expect(await contarRequisicoesAoUpstream(request)).toBe(0);
+});
+
+test("quando todos os anúncios são seus, você está sozinho no mercado", async ({ page }) => {
+  await validarItem(page, "Espada Primordial");
+
+  for (const nome of ["Vendedor s-primordial-129", "Vendedor s-primordial-158", "Vendedor s-primordial-299"]) {
+    await adicionarPersonagem(page, nome);
+  }
+
+  await expect(mercado(page, "Espada Primordial")).toContainText("Você é o único anunciando");
+});
+
+// O aviso que interessa a quem vende. (O alerta ativo — toast, som, Telegram
+// — é a etapa seguinte; aqui é só o que o card mostra.)
+test("o card avisa quando alguém está vendendo mais barato que você", async ({ page }) => {
+  await validarItem(page, "Espada Primordial");
+  await adicionarPersonagem(page, "Vendedor s-primordial-299");
+
+  await expect(meuAnuncio(page, "Espada Primordial")).toContainText("299.999.999 z");
+  await expect(meuAnuncio(page, "Espada Primordial")).toContainText("estão vendendo mais barato");
+  await expect(meuAnuncio(page, "Espada Primordial")).toHaveClass(/estoque-mercado-cortado/);
+});
+
+test("um item que ninguém anuncia diz isso, em vez de parecer vazio", async ({ page }) => {
+  await validarItem(page, "Bota do Andarilho");
+
+  await expect(mercado(page, "Bota do Andarilho")).toContainText("Ninguém está anunciando");
+});
+
+test("o botão de atualizar consulta o mercado de novo", async ({ page, request }) => {
+  await validarItem(page, "Espada Primordial");
+  await zerarContagemDoUpstream(request);
+
+  await card(page, "Espada Primordial").locator(".estoque-atualizar").click();
+
+  await expect
+    .poll(() => contarRequisicoesAoUpstream(request))
+    .toBe(1);
+  await expect(mercado(page, "Espada Primordial")).toContainText("129.999.999 z");
+});
+
+test("os dados de mercado sobrevivem à troca de aba sem reconsultar", async ({ page, request }) => {
+  await validarItem(page, "Espada Primordial");
+  await zerarContagemDoUpstream(request);
+
+  await page.getByRole("link", { name: "Watchlist" }).click();
+  await expect(page.locator(".search-form")).toBeVisible();
+  await page.getByRole("link", { name: "Estoque" }).click();
+
+  await expect(mercado(page, "Espada Primordial")).toContainText("129.999.999 z");
+  expect(await contarRequisicoesAoUpstream(request)).toBe(0);
+});
+
+test("a lista de personagens persiste e pode ser esvaziada", async ({ page }) => {
+  await adicionarPersonagem(page, "Vendedor s-primordial-129");
+  await expect(page.locator("#estoque-personagens-contagem")).toHaveText("1");
+
+  await page.reload();
+  await page.locator("#estoque-personagens").evaluate((el) => {
+    el.open = true;
+  });
+  await expect(page.locator(".estoque-personagem")).toHaveCount(1);
+
+  await page.locator(".estoque-personagem-remover").first().click();
+  await expect(page.locator(".estoque-personagem")).toHaveCount(0);
+  await expect(page.locator("#estoque-personagens-contagem")).toHaveText("0");
+});
+
+test("o mesmo personagem não entra duas vezes", async ({ page }) => {
+  await adicionarPersonagem(page, "Vendedor s-primordial-129");
+
+  await page.fill("#estoque-personagem", "vendedor S-PRIMORDIAL-129");
+  await page.press("#estoque-personagem", "Enter");
+
+  await expect(page.locator(".estoque-personagem")).toHaveCount(1);
+  await expect(page.locator(".toast")).toBeVisible();
 });
