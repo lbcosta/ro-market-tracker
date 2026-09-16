@@ -404,3 +404,213 @@ func TestMercadoFalhaRespondeErro(t *testing.T) {
 		t.Errorf("status = %d, quero 502", resp.StatusCode)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Histórico
+// ---------------------------------------------------------------------------
+//
+// O item 700001 ("Elixir do Mercador") tem 32 dias de histórico numa
+// progressão: preço médio 1000 + i*10 do mais recente para o mais antigo, uma
+// unidade vendida por dia. Com isso, a quantidade vendida de uma janela É o
+// número de dias dela, e os agregados saem exatos sem reproduzir a fórmula de
+// stats.go aqui.
+
+func consultarHistorico(t *testing.T, srv *httptest.Server, query string) (int, historicoView) {
+	t.Helper()
+	resp, err := srv.Client().Get(srv.URL + "/web/estoque/historico?" + query)
+	if err != nil {
+		t.Fatalf("GET /web/estoque/historico: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return resp.StatusCode, historicoView{}
+	}
+	var view historicoView
+	if err := json.NewDecoder(resp.Body).Decode(&view); err != nil {
+		t.Fatalf("decodificando resposta: %v", err)
+	}
+	return resp.StatusCode, view
+}
+
+// TestHistoricoJanelaRecorta é o teste que só passou a significar alguma coisa
+// depois de o mock honrar o "limit": antes, as quatro janelas devolviam a
+// série inteira e qualquer implementação passaria.
+func TestHistoricoJanelaRecorta(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	casos := []struct {
+		janela string
+		dias   int
+	}{
+		{janelaDia, 1},
+		{janelaSete, 7},
+		{janelaMes, 30},
+	}
+	for _, caso := range casos {
+		t.Run(caso.janela, func(t *testing.T) {
+			status, view := consultarHistorico(t, srv,
+				"itemId=700001&svrId=303&janela="+caso.janela)
+			if status != http.StatusOK {
+				t.Fatalf("status = %d, quero 200", status)
+			}
+			if len(view.Days) != caso.dias {
+				t.Errorf("dias = %d, quero %d", len(view.Days), caso.dias)
+			}
+			if view.Summary.Days != caso.dias {
+				t.Errorf("resumo.Days = %d, quero %d", view.Summary.Days, caso.dias)
+			}
+			// Uma unidade por dia na fixture.
+			if view.Summary.QtySold != caso.dias {
+				t.Errorf("QtySold = %d, quero %d", view.Summary.QtySold, caso.dias)
+			}
+			// O total de dias conhecidos NÃO é o tamanho da janela — é o que
+			// permite ao card dizer "7 de 32".
+			if view.DaysAvailable != 32 {
+				t.Errorf("DaysAvailable = %d, quero 32", view.DaysAvailable)
+			}
+			if view.Window != caso.janela {
+				t.Errorf("Window = %q, quero %q", view.Window, caso.janela)
+			}
+		})
+	}
+}
+
+// TestHistoricoTudoUsaOTotalDisponivel cobre a janela que não tem um número
+// fixo: quantos dias existem só se descobre perguntando.
+func TestHistoricoTudoUsaOTotalDisponivel(t *testing.T) {
+	srv, mock := newWebServer(t)
+	mock.ResetRequests()
+
+	status, view := consultarHistorico(t, srv, "itemId=700001&svrId=303&janela=ALL")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, quero 200", status)
+	}
+	if len(view.Days) != 32 {
+		t.Fatalf("dias = %d, quero os 32 da série inteira", len(view.Days))
+	}
+	if view.DaysAvailable != 32 {
+		t.Errorf("DaysAvailable = %d, quero 32", view.DaysAvailable)
+	}
+	// Duas: a sonda (que descobre o total) e a busca do total. A fixture tem
+	// mais dias que a sonda, então este é o caminho de duas requisições.
+	if n := mock.RequestCount(); n != 2 {
+		t.Errorf("requisições = %d, quero 2 (sonda + total)", n)
+	}
+}
+
+// TestHistoricoTudoNaoGastaSegundaConsulta: quando o item tem menos dias que a
+// sonda, ela já é a resposta completa.
+func TestHistoricoTudoNaoGastaSegundaConsulta(t *testing.T) {
+	srv, mock := newWebServer(t)
+	mock.ResetRequests()
+
+	// 600009 tem 3 dias.
+	_, view := consultarHistorico(t, srv, "itemId=600009&svrId=303&janela=ALL")
+	if len(view.Days) != 3 {
+		t.Fatalf("dias = %d, quero 3", len(view.Days))
+	}
+	if n := mock.RequestCount(); n != 1 {
+		t.Errorf("requisições = %d, quero 1 (a sonda já trouxe tudo)", n)
+	}
+}
+
+// TestHistoricoAgregadosBatem confere os números do resumo contra a fixture,
+// para o card não mostrar estatística errada em silêncio.
+func TestHistoricoAgregadosBatem(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	_, view := consultarHistorico(t, srv, "itemId=700001&svrId=303&janela=7")
+
+	// Os 7 dias mais recentes: médias 1000, 1010, ... 1060; mínimos e máximos
+	// a 100 de distância; uma unidade por dia.
+	if view.Days[0].Avg != 1000 || view.Days[6].Avg != 1060 {
+		t.Errorf("médias das pontas = %d e %d, quero 1000 e 1060", view.Days[0].Avg, view.Days[6].Avg)
+	}
+	if view.Summary.Min != 900 {
+		t.Errorf("Min = %d, quero 900", view.Summary.Min)
+	}
+	if view.Summary.Max != 1160 {
+		t.Errorf("Max = %d, quero 1160", view.Summary.Max)
+	}
+	// Média ponderada por ItemCnt, que é 1 em todos: a média simples de
+	// 1000..1060 é 1030.
+	if view.Summary.WeightedAvg != 1030 {
+		t.Errorf("WeightedAvg = %v, quero 1030", view.Summary.WeightedAvg)
+	}
+}
+
+func TestHistoricoSemVendas(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	// 4005 está semeado com histórico vazio.
+	status, view := consultarHistorico(t, srv, "itemId=4005&svrId=303&janela=7")
+	if status != http.StatusOK {
+		t.Fatalf("status = %d, quero 200 — não ter venda não é erro", status)
+	}
+	if len(view.Days) != 0 {
+		t.Errorf("dias = %+v, quero nenhum", view.Days)
+	}
+	if view.DaysAvailable != 0 {
+		t.Errorf("DaysAvailable = %d, quero 0", view.DaysAvailable)
+	}
+}
+
+func TestHistoricoUsaOCacheEFreshOIgnora(t *testing.T) {
+	srv, mock := newWebServer(t)
+	mock.ResetRequests()
+
+	q := "itemId=700001&svrId=303&janela=7"
+	consultarHistorico(t, srv, q)
+	consultarHistorico(t, srv, q)
+	if n := mock.RequestCount(); n != 1 {
+		t.Fatalf("requisições = %d, quero 1 (a segunda sai do cache)", n)
+	}
+
+	// Janela diferente é chave diferente: o site pagina a série pelo limit,
+	// então a resposta de 30 dias não está contida na de 7.
+	consultarHistorico(t, srv, "itemId=700001&svrId=303&janela=30")
+	if n := mock.RequestCount(); n != 2 {
+		t.Fatalf("requisições = %d, quero 2 (a janela de 30 é outra consulta)", n)
+	}
+
+	consultarHistorico(t, srv, q+"&fresh=1")
+	if n := mock.RequestCount(); n != 3 {
+		t.Errorf("requisições = %d, quero 3 (fresh=1 ignora o cache)", n)
+	}
+}
+
+func TestHistoricoParametrosObrigatorios(t *testing.T) {
+	srv, _ := newWebServer(t)
+
+	casos := []string{
+		"svrId=303&janela=7",
+		"itemId=700001&janela=7",
+		"itemId=700001&svrId=303",
+		"itemId=700001&svrId=303&janela=90",
+		"itemId=700001&svrId=303&janela=tudo",
+	}
+	for _, q := range casos {
+		resp, err := srv.Client().Get(srv.URL + "/web/estoque/historico?" + q)
+		if err != nil {
+			t.Fatalf("GET %s: %v", q, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("status de %q = %d, quero 400", q, resp.StatusCode)
+		}
+	}
+}
+
+func TestHistoricoFalhaRespondeErro(t *testing.T) {
+	srv, mock := newWebServer(t)
+	mock.QueueFailure(gnjoytest.Failure{Status: http.StatusInternalServerError}, 10)
+
+	resp, err := srv.Client().Get(srv.URL + "/web/estoque/historico?itemId=700001&svrId=303&janela=7")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("status = %d, quero 502", resp.StatusCode)
+	}
+}

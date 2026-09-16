@@ -421,6 +421,11 @@ async function validarItem(page, nome) {
   await adicionar(page, nome);
   await botaoValidar(page, nome).click();
   await expect(selo(page, nome)).toHaveText("Validado");
+  // Esperar o histórico, e não só o selo: validar dispara mercado e histórico
+  // em seguida, e o selo fica verde antes de os dois responderem. Sem esta
+  // espera, um teste que zera o contador de requisições logo depois conta as
+  // que ainda estavam em voo.
+  await expect(card(page, nome).locator(".estoque-historico-resumo")).toBeVisible();
 }
 
 async function adicionarPersonagem(page, nome) {
@@ -536,4 +541,121 @@ test("o mesmo personagem não entra duas vezes", async ({ page }) => {
 
   await expect(page.locator(".estoque-personagem")).toHaveCount(1);
   await expect(page.locator(".toast")).toBeVisible();
+});
+
+// ---------------------------------------------------------------------------
+// Histórico de vendas e a janela
+// ---------------------------------------------------------------------------
+//
+// "Elixir do Mercador" (itemId 700001) tem 32 dias de histórico nas fixtures —
+// é o item que existe justamente para o seletor de janela ter o que recortar.
+
+const historico = (page, nome) => card(page, nome).locator(".estoque-historico-resumo");
+const diasDoHistorico = (page, nome) => card(page, nome).locator(".estoque-dias tbody tr");
+const janela = (page, nome) => card(page, nome).locator(".estoque-janela");
+
+test("validar traz o histórico junto, na janela padrão de 7 dias", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+
+  await expect(janela(page, "Elixir do Mercador")).toHaveValue("7");
+  await expect(historico(page, "Elixir do Mercador")).toContainText("Vendido entre");
+  // A tabela nasce recolhida para não esticar o card.
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias")).not.toHaveAttribute("open", "");
+
+  await card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary").click();
+  await expect(diasDoHistorico(page, "Elixir do Mercador")).toHaveCount(7);
+});
+
+// O card diz quantos dias vieram E quantos existem — é isso que avisa que
+// trocar para uma janela maior tem o que mostrar.
+test("o card mostra quantos dias existem além da janela atual", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+    "7 dias com venda de 32 registrados",
+  );
+});
+
+test("trocar a janela reconsulta só aquele item", async ({ page, request }) => {
+  await validarItem(page, "Elixir do Mercador");
+  await validarItem(page, "Espada Primordial");
+  await zerarContagemDoUpstream(request);
+
+  await janela(page, "Elixir do Mercador").selectOption("30");
+
+  // Esperar o resumo antes de abrir a tabela: clicar no <summary> ALTERNA o
+  // <details>, então repetir o clique enquanto se espera (dentro de um poll,
+  // por exemplo) fecharia o que acabou de abrir.
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+    "30 dias com venda",
+  );
+  await card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary").click();
+  await expect(diasDoHistorico(page, "Elixir do Mercador")).toHaveCount(30);
+
+  // Uma requisição, e só do item que mudou. Um seletor global cobraria isso de
+  // todos os itens de uma vez.
+  expect(await contarRequisicoesAoUpstream(request)).toBe(1);
+});
+
+test("a janela de um dia traz um dia só", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+
+  await janela(page, "Elixir do Mercador").selectOption("1");
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+    "1 dia com venda",
+  );
+});
+
+test("todo o histórico traz os 32 dias", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+
+  await janela(page, "Elixir do Mercador").selectOption("ALL");
+
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+    "32 dias com venda",
+  );
+  await card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary").click();
+  await expect(diasDoHistorico(page, "Elixir do Mercador")).toHaveCount(32);
+});
+
+test("voltar para uma janela já consultada não custa requisição", async ({ page, request }) => {
+  await validarItem(page, "Elixir do Mercador");
+  await janela(page, "Elixir do Mercador").selectOption("30");
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+    "30 dias com venda",
+  );
+
+  await zerarContagemDoUpstream(request);
+  await janela(page, "Elixir do Mercador").selectOption("7");
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+    "7 dias com venda",
+  );
+
+  expect(await contarRequisicoesAoUpstream(request)).toBe(0);
+});
+
+test("a janela escolhida e o histórico sobrevivem à troca de aba", async ({ page, request }) => {
+  await validarItem(page, "Elixir do Mercador");
+  await janela(page, "Elixir do Mercador").selectOption("30");
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+    "30 dias com venda",
+  );
+
+  await zerarContagemDoUpstream(request);
+  await page.getByRole("link", { name: "Watchlist" }).click();
+  await expect(page.locator(".search-form")).toBeVisible();
+  await page.getByRole("link", { name: "Estoque" }).click();
+
+  await expect(janela(page, "Elixir do Mercador")).toHaveValue("30");
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+    "30 dias com venda",
+  );
+  expect(await contarRequisicoesAoUpstream(request)).toBe(0);
+});
+
+test("um item sem vendas registradas diz isso", async ({ page }) => {
+  // A Carta Poring Noel está anunciada mas tem histórico vazio nas fixtures.
+  await validarItem(page, "Carta Poring Noel");
+
+  await expect(historico(page, "Carta Poring Noel")).toContainText("Sem vendas registradas");
 });

@@ -2,11 +2,13 @@ package web
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/lbcosta/ro-market-tracker/internal/gnjoy"
 )
@@ -328,4 +330,191 @@ func (h *Handler) EstoqueMercado(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+// Janelas do histórico oferecidas no card. Os rótulos são os mesmos do
+// seletor no navegador (ver JANELAS em static/estoque.js).
+const (
+	janelaDia   = "1"
+	janelaSete  = "7"
+	janelaMes   = "30"
+	janelaTudo  = "ALL"
+	janelaSonda = 30 // quantos dias pedir só para descobrir quantos existem
+
+	// maxDiasDoHistorico é o teto da janela "todo o histórico". O site devolve
+	// quantos dias existem (PriceDayStat.TotalCount), mas um item negociado há
+	// anos poderia pedir uma página enorme — e nem o tamanho que o site aceita
+	// nem o custo disso foram medidos contra o real. O teto deixa a janela
+	// "tudo" ser melhor esforço em vez de uma aposta.
+	maxDiasDoHistorico = 365
+)
+
+// limiteDaJanela traduz a janela escolhida no card para o "limit" da consulta
+// de histórico.
+//
+// É o limit, e NÃO o period, que implementa o seletor: o site pagina a série
+// diária por ele (comprovado em docs/webtools-api-research.md), enquanto o
+// period desta Server Action nunca foi observado — a captura original mandava
+// o literal "$undefined" do Next.js (ver gnjoy.PriceHistoryParams.Period).
+// Depender dele seria depender de comportamento que ninguém confirmou.
+//
+// A janela "tudo" devolve 0: quantos dias existem só se descobre perguntando.
+func limiteDaJanela(janela string) (int, bool) {
+	switch janela {
+	case janelaDia:
+		return 1, true
+	case janelaSete:
+		return 7, true
+	case janelaMes:
+		return 30, true
+	case janelaTudo:
+		return 0, true
+	default:
+		return 0, false
+	}
+}
+
+type diaView struct {
+	Date string `json:"date"`
+	Min  int64  `json:"min"`
+	Avg  int64  `json:"avg"`
+	Max  int64  `json:"max"`
+	Qty  int    `json:"qty"`
+}
+
+type resumoView struct {
+	Days        int     `json:"days"`
+	Min         int64   `json:"min"`
+	Max         int64   `json:"max"`
+	WeightedAvg float64 `json:"weightedAvg"`
+	StdDev      float64 `json:"stdDev"`
+	QtySold     int     `json:"qtySold"`
+}
+
+type historicoView struct {
+	Window string `json:"window"`
+
+	// DaysAvailable é quantos dias de venda existem no total, e não quantos
+	// vieram nesta janela. É o que permite ao card dizer "7 de 32 dias" — e
+	// é o único jeito honesto de montar a janela "tudo".
+	DaysAvailable int `json:"daysAvailable"`
+
+	// Days vai completa, sem corte. O site só devolve dias que TIVERAM venda,
+	// então cada linha é um dia em que o item de fato trocou de mãos — e são
+	// esses números que vão alimentar a fórmula de preço sugerido.
+	Days    []diaView  `json:"days"`
+	Summary resumoView `json:"summary"`
+}
+
+// EstoqueHistorico trata GET /web/estoque/historico e devolve a série diária
+// de vendas do item na janela pedida.
+//
+// Custo: 1 requisição (0 quando o cache de historyMaxAge responde). A janela
+// "todo o histórico" pode custar 2 na primeira vez de um item: o limit precisa
+// de um número, e quantos dias existem só se sabe perguntando — a primeira
+// consulta traz o TotalCount, a segunda busca o total. Da segunda vez em
+// diante o cache tem a resposta.
+func (h *Handler) EstoqueHistorico(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	itemID, errItem := strconv.Atoi(q.Get("itemId"))
+	svrID, errSvr := strconv.Atoi(q.Get("svrId"))
+	janela := q.Get("janela")
+	limite, janelaOK := limiteDaJanela(janela)
+	if errItem != nil || errSvr != nil || !janelaOK {
+		http.Error(w,
+			"os parâmetros 'itemId', 'svrId' e 'janela' (1, 7, 30 ou ALL) são obrigatórios",
+			http.StatusBadRequest)
+		return
+	}
+
+	maxAge := historyMaxAge
+	if q.Get("fresh") == "1" {
+		maxAge = 0
+	}
+
+	if limite == 0 {
+		// Janela "tudo": sonda primeiro para descobrir quantos dias existem.
+		// A sonda usa um limit fixo (e não 1) porque, quando o item tem menos
+		// dias que isso, ela já é a resposta completa e a segunda consulta
+		// nem acontece.
+		sonda, err := h.historicoCacheado(r.Context(), svrID, itemID, janelaSonda, maxAge)
+		if err != nil {
+			escreverErroDeConsulta(w, err, "estoque: consulta ao histórico falhou", q.Get("itemId"), "")
+			return
+		}
+		total := diasDisponiveis(sonda)
+		if total <= len(sonda.DayStatsList) {
+			writeJSON(w, http.StatusOK, montarHistorico(janela, total, sonda))
+			return
+		}
+		limite = min(total, maxDiasDoHistorico)
+	}
+
+	history, err := h.historicoCacheado(r.Context(), svrID, itemID, limite, maxAge)
+	if err != nil {
+		escreverErroDeConsulta(w, err, "estoque: consulta ao histórico falhou", q.Get("itemId"), "")
+		return
+	}
+	writeJSON(w, http.StatusOK, montarHistorico(janela, diasDisponiveis(history), history))
+}
+
+// diasDisponiveis lê o total de dias que o site conhece. Ele vem repetido em
+// cada linha devolvida (é assim no site), então qualquer uma serve; sem
+// nenhuma linha, o que veio é o que existe.
+func diasDisponiveis(history *gnjoy.PriceHistory) int {
+	if len(history.DayStatsList) == 0 {
+		return 0
+	}
+	if total := history.DayStatsList[0].TotalCount; total > 0 {
+		return total
+	}
+	return len(history.DayStatsList)
+}
+
+func montarHistorico(janela string, total int, history *gnjoy.PriceHistory) historicoView {
+	dias := make([]diaView, 0, len(history.DayStatsList))
+	for _, d := range history.DayStatsList {
+		dias = append(dias, diaView{
+			Date: d.Date,
+			Min:  d.MinItemPrice,
+			Avg:  d.AvgItemPrice,
+			Max:  d.MaxItemPrice,
+			Qty:  d.ItemCnt,
+		})
+	}
+	resumo := computePeriodStats(history.DayStatsList)
+	return historicoView{
+		Window:        janela,
+		DaysAvailable: total,
+		Days:          dias,
+		Summary: resumoView{
+			Days:        resumo.Days,
+			Min:         resumo.Min,
+			Max:         resumo.Max,
+			WeightedAvg: resumo.WeightedAvg,
+			StdDev:      resumo.StdDev,
+			QtySold:     resumo.QtySold,
+		},
+	}
+}
+
+// historicoCacheado é a consulta de histórico passando pelo cache. Roda
+// desacoplada do cancelamento de quem a disparou, como as outras consultas
+// compartilhadas, e devolve um clone: quem chama recorta a série à vontade
+// sem corromper o exemplar guardado.
+func (h *Handler) historicoCacheado(ctx context.Context, svrID, itemID, limite int, maxAge time.Duration) (*gnjoy.PriceHistory, error) {
+	key := cacheKey(strconv.Itoa(svrID), strconv.Itoa(itemID), strconv.Itoa(limite))
+	history, err := h.priceHistoryCache.Do(key, maxAge, func() (*gnjoy.PriceHistory, error) {
+		return h.client.GetPriceHistory(context.WithoutCancel(ctx), gnjoy.PriceHistoryParams{
+			ItemId: itemID,
+			SvrId:  svrID,
+			Limit:  limite,
+		}, gnjoy.NoRetry())
+	})
+	if err != nil {
+		return nil, err
+	}
+	clone := *history
+	clone.DayStatsList = slices.Clone(history.DayStatsList)
+	return &clone, nil
 }

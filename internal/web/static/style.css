@@ -641,6 +641,65 @@ h1 {
   color: var(--muted);
 }
 
+/* Histórico de vendas. O resumo fica sempre visível numa linha; a tabela de
+   dias fica recolhida, porque a janela de 30 dias (ou "tudo") pode ter dezenas
+   de linhas e os cards dividem uma grade — um card aberto esticaria a linha
+   inteira. */
+.estoque-historico {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.estoque-historico-dias summary {
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.estoque-historico-dias summary:hover {
+  color: var(--accent);
+}
+
+/* O container rola sozinho: "todo o histórico" pode ter centenas de dias, e
+   sem teto de altura abrir o detalhe empurraria o resto da página. */
+.estoque-dias {
+  display: block;
+  max-height: 11rem;
+  overflow-y: auto;
+  width: 100%;
+  margin-top: 0.3rem;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.estoque-dias th,
+.estoque-dias td {
+  padding: 0.15rem 0.3rem;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.estoque-dias th:first-child,
+.estoque-dias td:first-child {
+  text-align: left;
+}
+
+.estoque-dias thead th {
+  position: sticky;
+  top: 0;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.estoque-janela:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .estoque-flags {
   display: flex;
   flex-wrap: wrap;

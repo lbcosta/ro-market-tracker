@@ -59,6 +59,15 @@ type Handler struct {
 	// completo que o Expand precisa (nome da loja, vendedor, localização...).
 	storeDetailMemo *ttlCache[*gnjoy.StoreDetail]
 	itemDetailMemo  *ttlCache[*gnjoy.ItemDetail]
+
+	// priceHistoryCache guarda a série diária de vendas por (svrId, itemId,
+	// limit). O limit entra na chave porque é ele que define a JANELA: o site
+	// pagina priceDetailDayList por ele, então a resposta de 7 dias e a de 30
+	// são valores diferentes do mesmo item.
+	//
+	// Sem este cache, alternar o seletor de janela de um card e voltar
+	// custaria uma requisição a cada ida e volta.
+	priceHistoryCache *ttlCache[*gnjoy.PriceHistory]
 }
 
 // HandlerOption configura extras opcionais do Handler — hoje só
@@ -77,12 +86,13 @@ func WithTelegramClient(client *telegram.Client) HandlerOption {
 
 func NewHandler(client *gnjoy.Client, version string, opts ...HandlerOption) *Handler {
 	h := &Handler{
-		client:           client,
-		version:          version,
-		searchCache:      newTTLCache[*gnjoy.ShopSearchResult](searchCacheSize),
-		marketPriceCache: newTTLCache[*gnjoy.MarketPriceResult](marketPriceCacheSize),
-		storeDetailMemo:  newTTLCache[*gnjoy.StoreDetail](storeDetailMemoSize),
-		itemDetailMemo:   newTTLCache[*gnjoy.ItemDetail](itemDetailMemoSize),
+		client:            client,
+		version:           version,
+		searchCache:       newTTLCache[*gnjoy.ShopSearchResult](searchCacheSize),
+		marketPriceCache:  newTTLCache[*gnjoy.MarketPriceResult](marketPriceCacheSize),
+		storeDetailMemo:   newTTLCache[*gnjoy.StoreDetail](storeDetailMemoSize),
+		itemDetailMemo:    newTTLCache[*gnjoy.ItemDetail](itemDetailMemoSize),
+		priceHistoryCache: newTTLCache[*gnjoy.PriceHistory](priceHistoryCacheSize),
 	}
 	for _, opt := range opts {
 		opt(h)
@@ -184,12 +194,12 @@ func (h *Handler) Watchlist(w http.ResponseWriter, r *http.Request) {
 
 // Estoque trata GET /estoque e serve a página do estoque da loja do usuário.
 //
-// Não chama warmupActionID, e por um motivo diferente do de antes: a página
-// já consulta a GnJoy (ver EstoqueValidar, em estoque.go), mas só por rotas
-// GET comuns — busca de lojas e preços praticados. O aquecimento existe para
-// a Server Action do Next.js, que aqui ainda não é usada; chamá-lo agora
-// gastaria uma requisição por uma chave que ninguém desta tela precisa.
+// Aquece o action id como a Watchlist: desde que o histórico de vendas entrou
+// na tela (ver EstoqueHistorico, em estoque.go), ela usa a Server Action do
+// Next.js — e é justamente isso que o aquecimento existe para não fazer o
+// usuário pagar no meio da primeira interação.
 func (h *Handler) Estoque(w http.ResponseWriter, r *http.Request) {
+	h.warmupActionID()
 	h.renderPage(w, r, "estoque")
 }
 
@@ -237,6 +247,7 @@ func (h *Handler) ResetCaches(w http.ResponseWriter, r *http.Request) {
 	h.marketPriceCache.reset()
 	h.storeDetailMemo.reset()
 	h.itemDetailMemo.reset()
+	h.priceHistoryCache.reset()
 	h.client.Activity().Reset()
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -561,7 +572,7 @@ type expandView struct {
 	Store       *gnjoy.StoreDetail
 	Item        *gnjoy.ItemDetail
 	NaviCommand string
-	Stats       sevenDayStats
+	Stats       periodStats
 }
 
 // storeDetail devolve o detalhe completo de um anúncio, do memo ou do
@@ -650,7 +661,7 @@ func (h *Handler) Expand(w http.ResponseWriter, r *http.Request) {
 		Store:       store,
 		Item:        item,
 		NaviCommand: naviCommand(store.MapName, store.Xpos, store.Ypos),
-		Stats:       computeSevenDayStats(history.DayStatsList),
+		Stats:       computePeriodStats(history.DayStatsList),
 	})
 }
 

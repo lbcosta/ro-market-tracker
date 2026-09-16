@@ -378,9 +378,13 @@ function escolherCandidato(id, candidato) {
       lastResult: { found: false, listings: [] },
       lastCheckedAt: Date.now(),
     }));
-    return;
+  } else {
+    consultarMercado(id);
   }
-  consultarMercado(id);
+  // O histórico é a outra metade do card: o mercado diz com quem você compete
+  // hoje, o histórico diz se o preço de hoje está alto ou baixo para o padrão
+  // do item.
+  consultarHistorico(id);
 }
 
 // repintarCard troca o card inteiro pelo estado novo. Reconstruir é mais
@@ -580,6 +584,121 @@ function buildBlocoDeMercado(item) {
 }
 
 // ---------------------------------------------------------------------------
+// Histórico de vendas
+// ---------------------------------------------------------------------------
+
+// consultarHistorico busca a série diária de vendas do item na janela
+// escolhida. Sai ao validar e a cada troca do seletor — e só para AQUELE item,
+// que é o motivo de a janela ser por card e não da tela.
+async function consultarHistorico(id, fresh = false) {
+  const item = loadEstoque().find((e) => e.id === id);
+  if (!item || item.itemId == null || item.svrId == null) return;
+
+  const janela = janelaDoItem(item);
+  const card = findEstoqueCard(id);
+  const seletor = card ? card.querySelector(".estoque-janela") : null;
+  if (seletor) seletor.disabled = true;
+
+  try {
+    let url =
+      "/web/estoque/historico?itemId=" + encodeURIComponent(item.itemId) +
+      "&svrId=" + encodeURIComponent(item.svrId) +
+      "&janela=" + encodeURIComponent(janela);
+    if (fresh) url += "&fresh=1";
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    repintarCard(updateEstoqueItem(id, { historico: data }));
+  } catch (err) {
+    showToast(String(err.message || err).trim() || "Não foi possível consultar o histórico agora.");
+    const depois = findEstoqueCard(id);
+    const seletorDepois = depois ? depois.querySelector(".estoque-janela") : null;
+    if (seletorDepois) seletorDepois.disabled = false;
+  }
+}
+
+function rotuloDaJanela(valor) {
+  const janela = JANELAS.find((j) => j.valor === valor);
+  return janela ? janela.rotulo.toLowerCase() : valor;
+}
+
+// buildBlocoDeHistorico mostra o resumo da janela numa linha e esconde a
+// tabela de dias atrás de um <details>.
+//
+// A tabela fica recolhida porque a janela de 30 dias (ou "tudo") pode ter
+// dezenas de linhas, e os cards do estoque dividem uma grade: um card aberto
+// esticaria a linha inteira. O resumo — que é o que se olha no dia a dia —
+// cabe em uma linha e fica sempre visível.
+function buildBlocoDeHistorico(item) {
+  const bloco = document.createElement("div");
+  bloco.className = "estoque-historico";
+
+  const dados = item.historico;
+  if (!dados) return bloco;
+
+  const resumo = document.createElement("span");
+  resumo.className = "estoque-historico-resumo";
+
+  if (!dados.days || dados.days.length === 0) {
+    resumo.textContent = "Sem vendas registradas " + textoDaJanela(dados.window) + ".";
+    bloco.appendChild(resumo);
+    return bloco;
+  }
+
+  const s = dados.summary;
+  resumo.textContent =
+    "Vendido entre " + formatMoney(s.min) + " e " + formatMoney(s.max) +
+    " · média " + formatMoney(Math.round(s.weightedAvg)) +
+    " · " + s.qtySold + (s.qtySold === 1 ? " unidade" : " unidades");
+  bloco.appendChild(resumo);
+
+  const detalhe = document.createElement("details");
+  detalhe.className = "estoque-historico-dias";
+
+  const sumario = document.createElement("summary");
+  // Quantos dias vieram e quantos existem: a diferença é o que diz ao usuário
+  // que trocar para uma janela maior tem o que mostrar.
+  const quantos = dados.days.length === 1 ? "1 dia com venda" : dados.days.length + " dias com venda";
+  sumario.textContent =
+    quantos + (dados.daysAvailable > dados.days.length ? " de " + dados.daysAvailable + " registrados" : "");
+  detalhe.appendChild(sumario);
+
+  const tabela = document.createElement("table");
+  tabela.className = "estoque-dias";
+  const cabecalho = document.createElement("thead");
+  cabecalho.innerHTML =
+    "<tr><th>Dia</th><th>Mín.</th><th>Méd.</th><th>Máx.</th><th>Qtd.</th></tr>";
+  tabela.appendChild(cabecalho);
+
+  const corpo = document.createElement("tbody");
+  for (const dia of dados.days) {
+    const tr = document.createElement("tr");
+    for (const valor of [
+      dia.date,
+      formatMoney(dia.min),
+      formatMoney(dia.avg),
+      formatMoney(dia.max),
+      String(dia.qty),
+    ]) {
+      const td = document.createElement("td");
+      td.textContent = valor;
+      tr.appendChild(td);
+    }
+    corpo.appendChild(tr);
+  }
+  tabela.appendChild(corpo);
+  detalhe.appendChild(tabela);
+  bloco.appendChild(detalhe);
+
+  return bloco;
+}
+
+function textoDaJanela(janela) {
+  return janela === "ALL" ? "em todo o histórico" : "nos últimos " + rotuloDaJanela(janela);
+}
+
+// ---------------------------------------------------------------------------
 // Card
 // ---------------------------------------------------------------------------
 
@@ -713,6 +832,7 @@ function buildEstoqueCard(item) {
 
   if (item.validacao === VALIDACAO_OK) {
     li.appendChild(buildBlocoDeMercado(item));
+    li.appendChild(buildBlocoDeHistorico(item));
   }
 
   // O motivo só existe no estado inválido: o selo vermelho chama a atenção, e
@@ -952,7 +1072,11 @@ function montarPainelDoEstoque() {
     if (!seletorJanela) return;
     const card = seletorJanela.closest(".estoque-card");
     if (!card) return;
-    updateEstoqueItem(card.dataset.id, { janela: seletorJanela.value });
+    const id = card.dataset.id;
+    const item = updateEstoqueItem(id, { janela: seletorJanela.value });
+    // Só consulta se já há o que consultar. Num item ainda não validado a
+    // janela é só uma preferência guardada para depois.
+    if (item && item.validacao === VALIDACAO_OK) consultarHistorico(id);
   });
 }
 

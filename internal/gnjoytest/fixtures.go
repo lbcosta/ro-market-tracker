@@ -1,5 +1,7 @@
 package gnjoytest
 
+import "time"
+
 // DemoConfig devolve um conjunto de dados fixo e determinístico, pensado para
 // os testes de navegador (e utilizável nos testes de Go): cobre um item de
 // equipamento com vários anúncios em refinos diferentes, um item comum sem
@@ -28,6 +30,13 @@ func DemoConfig() Config {
 	}
 	caixas := []ShopListItem{
 		demoListItem("caixa-armadura-7", 22926, "Caixa de Armadura +7", "miscellaneous", 3000000, "Refino Store"),
+	}
+	// Item com histórico longo (ver Prices[700001]), anunciado no mercado
+	// para poder ser validado numa requisição só. Dois anúncios, para o card
+	// do estoque ter o que agregar.
+	elixires := []ShopListItem{
+		demoListItem("elixir-a", 700001, "Elixir do Mercador", "miscellaneous", 1200, "Boticário"),
+		demoListItem("elixir-b", 700001, "Elixir do Mercador", "miscellaneous", 1500, "Alquimia & Cia"),
 	}
 	selos := []ShopListItem{
 		demoListItem("selo-simples", 410232, "Selo de Loki", "armor", 79999999, "Odin Store"),
@@ -113,8 +122,9 @@ func DemoConfig() Config {
 			// A watchlist não consulta pelo termo digitado, e sim pelo nome
 			// canônico do item que a busca devolveu — então esses nomes
 			// também precisam ser buscáveis.
-			"Espada Primordial": {Items: primordiais},
-			"Carta Poring Noel": {Items: poring},
+			"Espada Primordial":  {Items: primordiais},
+			"Elixir do Mercador": {Items: elixires},
+			"Carta Poring Noel":  {Items: poring},
 		},
 		Stores: map[string]StoreDetail{
 			// Os três anúncios do mesmo item diferem só pelo refino embutido
@@ -161,7 +171,50 @@ func DemoConfig() Config {
 			// Item sem nenhum dia de histórico: o card de detalhe precisa
 			// mostrar "Sem histórico de vendas recente" em vez de zeros.
 			4005: {},
+
+			// Série longa, para o seletor de janela do estoque ter o que
+			// recortar. Em um itemId PRÓPRIO, e não esticando o 600009: os
+			// três dias dele são afirmados número a número por
+			// handlers_test.go e por e2e/tests/busca.spec.js, e alongá-lo
+			// quebraria os dois assim que o mock passasse a honrar o limit.
+			//
+			// Ver historicoLongo: os números são uma progressão, então cada
+			// janela (1 / 7 / 30 / tudo) produz agregados visivelmente
+			// diferentes — é o que torna o teste do seletor capaz de falhar.
+			700001: historicoLongo(32),
 		},
+	}
+}
+
+// historicoLongo monta uma série diária de n dias, do mais recente para o
+// mais antigo — a mesma ordem em que o site devolve.
+//
+// Uma unidade vendida por dia e preços em progressão aritmética: assim a
+// quantidade vendida de uma janela é o próprio número de dias dela, e a média
+// ponderada é a média simples dos preços do recorte. Isso deixa os testes
+// afirmarem números exatos sem precisar reproduzir a fórmula de stats.go.
+func historicoLongo(n int) PriceHistory {
+	// Datas de verdade, contadas para trás a partir de uma base fixa: montar
+	// a string com aritmética no número do dia produzia "2026-08-32" assim que
+	// a série passava do tamanho do mês — e isso aparecia na tela.
+	base := time.Date(2026, time.August, 31, 0, 0, 0, 0, time.UTC)
+
+	dias := make([]PriceDayStat, 0, n)
+	for i := range n {
+		preco := int64(1000 + i*10)
+		dias = append(dias, PriceDayStat{
+			Date:         base.AddDate(0, 0, -i).Format("2006-01-02"),
+			MinItemPrice: preco - 100,
+			MaxItemPrice: preco + 100,
+			AvgItemPrice: preco,
+			ItemCnt:      1,
+			TotalCount:   n,
+		})
+	}
+	return PriceHistory{
+		ItemPriceMin: dias[len(dias)-1].MinItemPrice,
+		ItemPriceMax: dias[0].MaxItemPrice,
+		DayStatsList: dias,
 	}
 }
 

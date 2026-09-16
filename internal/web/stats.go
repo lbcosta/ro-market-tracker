@@ -6,14 +6,14 @@ import (
 	"github.com/lbcosta/ro-market-tracker/internal/gnjoy"
 )
 
-// sevenDayStats resume o comportamento de preço de um item nos últimos dias
-// (no máximo 7, buscados via gnjoy.PriceHistoryParams{Limit: 7}), a partir
+// periodStats resume o comportamento de preço de um item numa janela de dias
+// — quantos vierem, conforme o Limit pedido ao site —, a partir
 // dos agregados diários que o próprio GnJoy Americas já calcula. Não temos o
 // preço de cada transação individual, só min/média/máx por dia — por isso
 // a média e o desvio padrão aqui são ponderados pela quantidade negociada
 // em cada dia (ItemCnt), o que é mais fiel ao real do que uma média simples
 // entre os dias.
-type sevenDayStats struct {
+type periodStats struct {
 	Days        int
 	Min         int64
 	Max         int64
@@ -22,8 +22,8 @@ type sevenDayStats struct {
 	QtySold     int
 }
 
-func computeSevenDayStats(days []gnjoy.PriceDayStat) sevenDayStats {
-	var stats sevenDayStats
+func computePeriodStats(days []gnjoy.PriceDayStat) periodStats {
+	var stats periodStats
 	if len(days) == 0 {
 		return stats
 	}

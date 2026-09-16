@@ -310,21 +310,61 @@ Com isso, o card mostra uma de três situações, que a interface não confunde:
 E, quando algum anúncio é seu, uma linha a mais com o seu preço — em vermelho
 quando alguém está abaixo dele.
 
+#### Histórico de vendas e a janela
+
+`GET /web/estoque/historico?itemId=…&svrId=…&janela=1|7|30|ALL[&fresh=1]`
+devolve a série diária de vendas do item: um dia por linha, com mínimo, médio,
+máximo e quantidade vendida. **Vai completa, sem corte** — o site só devolve
+dias que tiveram venda, e são esses números que vão alimentar a fórmula de
+preço sugerido.
+
+**O seletor usa o `limit`, não o `period`.** O site pagina a série diária pelo
+`limit` (comprovado em `docs/webtools-api-research.md`), enquanto o `period`
+desta Server Action nunca foi observado — a captura original mandava o literal
+`$undefined` do Next.js. Depender dele seria depender de comportamento que
+ninguém confirmou.
+
+A janela **é por item**, no card. Trocá-la custa uma requisição, e um seletor
+global cobraria isso de todos os itens de uma vez.
+
+A janela "todo o histórico" é a única sem um número fixo: quantos dias existem
+só se descobre perguntando. Ela sonda com 30 dias, lê o `TotalCount` que vem
+em cada linha e, se houver mais, busca o total — **1 ou 2 requisições, e só na
+primeira vez do item**, porque depois o cache responde. Há um teto de 365 dias
+(`maxDiasDoHistorico`): nem o tamanho que o site aceita nem o custo de uma
+página enorme foram medidos contra o real, então "tudo" é melhor esforço.
+
+O cache é novo (`priceHistoryCache`, validade de 10 minutos) e tem o `limit` na
+chave, porque a resposta de 7 dias e a de 30 são valores diferentes do mesmo
+item. Sem ele, alternar entre janelas e voltar custaria uma requisição a cada
+ida e volta.
+
+No card, o resumo da janela fica sempre visível numa linha e a **tabela de dias
+fica recolhida**: a janela de 30 dias pode ter dezenas de linhas, e os cards
+dividem uma grade — um card aberto esticaria a linha inteira. O resumo do
+`<summary>` diz quantos dias vieram e quantos existem ("7 dias com venda de 32
+registrados"), que é o que avisa que trocar para uma janela maior tem o que
+mostrar.
+
+Como a tela passou a usar a Server Action `price`, `Handler.Estoque` agora
+aquece o action id, como a Watchlist já fazia.
+
 #### Custo de validar um item, ponta a ponta
 
 | Situação | Requisições |
 | --- | --- |
-| Item que alguém anuncia | **2** — validar + a primeira consulta de mercado |
-| Item só no histórico | **2** — validar (mercado vazio + histórico) e nada mais |
+| Item que alguém anuncia | **3** — validar + mercado + histórico |
+| Item só no histórico | **3** — validar (duas consultas) + histórico |
 | Item inexistente | **2** — as duas consultas da validação |
 
 O item achado só no histórico não paga a terceira: a validação já provou que
 ninguém está anunciando, então o resultado de mercado é semeado à mão em vez
 de ser perguntado de novo.
 
-Depois disso, o card só volta a consultar quando o usuário aperta "↻". **O
-estoque ainda não participa do rodízio automático** — isso entra junto com o
-aviso de undercutting, na etapa seguinte.
+Depois disso, o card só volta a consultar quando o usuário aperta "↻" (o
+mercado) ou troca a janela (o histórico). **O estoque ainda não participa do
+rodízio automático** — isso entra junto com o aviso de undercutting, na etapa
+seguinte.
 
 ### Busca
 

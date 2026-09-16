@@ -19,7 +19,7 @@ func TestComputeSevenDayStats(t *testing.T) {
 		{MinItemPrice: 500, MaxItemPrice: 5000, AvgItemPrice: 1000, ItemCnt: 2},
 	}
 
-	stats := computeSevenDayStats(days)
+	stats := computePeriodStats(days)
 
 	if stats.Days != 3 {
 		t.Errorf("Days = %d, quero 3", stats.Days)
@@ -51,7 +51,7 @@ func TestComputeSevenDayStatsPonderaPelaQuantidade(t *testing.T) {
 		{MinItemPrice: 1000, MaxItemPrice: 1000, AvgItemPrice: 1000, ItemCnt: 1},
 	}
 
-	stats := computeSevenDayStats(days)
+	stats := computePeriodStats(days)
 
 	// Média simples seria 550; ponderada é (100*99 + 1000*1)/100 = 109.
 	if stats.WeightedAvg != 109 {
@@ -60,15 +60,15 @@ func TestComputeSevenDayStatsPonderaPelaQuantidade(t *testing.T) {
 }
 
 func TestComputeSevenDayStatsSemDias(t *testing.T) {
-	stats := computeSevenDayStats(nil)
+	stats := computePeriodStats(nil)
 
-	if stats != (sevenDayStats{}) {
+	if stats != (periodStats{}) {
 		t.Errorf("stats = %+v, quero tudo zerado", stats)
 	}
 }
 
 func TestComputeSevenDayStatsUmDia(t *testing.T) {
-	stats := computeSevenDayStats([]gnjoy.PriceDayStat{
+	stats := computePeriodStats([]gnjoy.PriceDayStat{
 		{MinItemPrice: 700, MaxItemPrice: 900, AvgItemPrice: 800, ItemCnt: 5},
 	})
 
@@ -88,7 +88,7 @@ func TestComputeSevenDayStatsUmDia(t *testing.T) {
 // dias com preço mas com itemCnt zerado: dá para mostrar a faixa de preço,
 // mas dividir por zero para achar a média não faria sentido.
 func TestComputeSevenDayStatsSemQuantidade(t *testing.T) {
-	stats := computeSevenDayStats([]gnjoy.PriceDayStat{
+	stats := computePeriodStats([]gnjoy.PriceDayStat{
 		{MinItemPrice: 300, MaxItemPrice: 900, AvgItemPrice: 600, ItemCnt: 0},
 		{MinItemPrice: 200, MaxItemPrice: 400, AvgItemPrice: 300, ItemCnt: 0},
 	})

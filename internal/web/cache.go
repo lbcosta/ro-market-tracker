@@ -27,10 +27,18 @@ const (
 	// em vez de gerar outra ida ao upstream.
 	monitorMaxAge = 4 * time.Minute
 
-	searchCacheSize      = 256
-	marketPriceCacheSize = 256
-	storeDetailMemoSize  = 2048
-	itemDetailMemoSize   = 2048
+	// historyMaxAge é a validade do histórico de vendas. As linhas diárias só
+	// mudam uma vez por dia — exceto a de HOJE, que se move ao longo dele.
+	// Dez minutos é longo o bastante para alternar entre as janelas
+	// (1 / 7 / 30 / tudo) e voltar sem custo nenhum, e curto o bastante para
+	// os números de hoje não ficarem horas parados.
+	historyMaxAge = 10 * time.Minute
+
+	searchCacheSize       = 256
+	marketPriceCacheSize  = 256
+	storeDetailMemoSize   = 2048
+	priceHistoryCacheSize = 256
+	itemDetailMemoSize    = 2048
 )
 
 // cacheKey monta a chave de cache a partir das partes que identificam a

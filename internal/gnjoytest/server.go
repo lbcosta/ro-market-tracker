@@ -229,6 +229,25 @@ func (m *Mock) SetSearches(searches map[string]SearchResult) {
 	m.searches = searches
 }
 
+// SetPrice registra ou substitui o histórico de preço de um item. Espelha
+// SetSearch: sem ele não há como montar uma transição de histórico no meio de
+// um teste de navegador.
+func (m *Mock) SetPrice(itemId int, history PriceHistory) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.prices == nil {
+		m.prices = map[int]PriceHistory{}
+	}
+	m.prices[itemId] = history
+}
+
+// SetPrices substitui o mapa inteiro de históricos.
+func (m *Mock) SetPrices(prices map[int]PriceHistory) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.prices = prices
+}
+
 // SetStore registra (ou substitui) os detalhes da loja de um ssi.
 func (m *Mock) SetStore(ssi string, store StoreDetail) {
 	m.mu.Lock()
@@ -541,17 +560,64 @@ func (m *Mock) handleAction(w http.ResponseWriter, r *http.Request, body []byte)
 		}
 		writeFlightAction(w, item, true)
 	case "price":
-		// O JSON decodifica números como float64; o itemId chega assim.
+		// O JSON decodifica números como float64; os parâmetros chegam assim.
+		// Sem travar de novo: handleAction já segura m.mu, e o mutex do Go não
+		// é reentrante — travar aqui trava o mock inteiro.
 		itemIdF, _ := action.Params["itemId"].(float64)
 		history, ok := m.prices[int(itemIdF)]
 		if !ok {
 			writeFlightAction(w, PriceHistory{}, true)
 			return
 		}
-		writeFlightAction(w, history, true)
+		limitF, _ := action.Params["limit"].(float64)
+		pageF, _ := action.Params["page"].(float64)
+		writeFlightAction(w, paginarHistorico(history, int(limitF), int(pageF)), true)
 	default:
 		writeFlightAction(w, nil, false)
 	}
+}
+
+// paginarHistorico recorta a série diária como o site real faz.
+//
+// Isto não é detalhe de fidelidade: o seletor de janela do estoque (último
+// dia / 7 / 30 / tudo) é implementado com o "limit" desta action, e um mock
+// que o ignorasse faria as quatro janelas devolverem as mesmas linhas — todo
+// teste do seletor passaria sem provar nada.
+//
+// O TotalCount de cada linha devolvida leva o tamanho TOTAL da série, não o
+// da fatia. É assim no site (uma captura com limit:10 devolveu 10 linhas com
+// totalCount:32) e é o único canal por onde o servidor descobre quantos dias
+// existem — de que depende a janela "todo o histórico".
+//
+// ChartList fica intocada de propósito: no site ela não é paginada junto (a
+// mesma captura trouxe 15 pontos nela para limit:10) e o programa não a usa.
+//
+// O "period" continua ignorado, também de propósito: o formato que o site
+// aceita nessa action nunca foi observado (ver PriceHistoryParams.Period). Um
+// mock que fingisse entendê-lo deixaria passar código que depende de um
+// comportamento que ninguém confirmou.
+func paginarHistorico(history PriceHistory, limit, page int) PriceHistory {
+	total := len(history.DayStatsList)
+	if limit <= 0 {
+		limit = 10 // o mesmo padrão do client
+	}
+	if page <= 0 {
+		page = 1
+	}
+
+	dias := make([]PriceDayStat, 0, limit)
+	inicio := (page - 1) * limit
+	if inicio < total {
+		fim := min(inicio+limit, total)
+		for _, d := range history.DayStatsList[inicio:fim] {
+			d.TotalCount = total
+			dias = append(dias, d)
+		}
+	}
+
+	recorte := history
+	recorte.DayStatsList = dias
+	return recorte
 }
 
 // writeFlightAction escreve o envelope de resposta de uma Server Action, no
