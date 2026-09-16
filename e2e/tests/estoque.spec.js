@@ -768,3 +768,94 @@ test("um personagem seu sai da fila que está na sua frente", async ({ page, req
   );
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
 });
+
+// ---------------------------------------------------------------------------
+// Loja offline
+// ---------------------------------------------------------------------------
+//
+// O caso que isto existe para pegar é o desconexão silenciosa: a loja caiu e o
+// usuário não viu. O sinal é indireto — nenhum anúncio seu aparece entre os
+// itens que você marcou como "na loja" —, e por isso o aviso descreve o que
+// foi observado em vez de cravar a causa: uma loja fechada e um estoque que
+// vendeu tudo somem do mercado exatamente igual.
+
+const avisoDeLoja = (page) => page.locator("#estoque-loja-aviso");
+
+async function porNaLoja(page, nome) {
+  await card(page, nome).locator(".estoque-toggle-loja").click();
+  await expect(card(page, nome).locator(".estoque-toggle-loja")).toHaveText("Na loja");
+}
+
+test("sem personagens cadastrados o aviso nunca aparece", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+  await porNaLoja(page, "Elixir do Mercador");
+
+  // Sem saber quais anúncios são seus, "nenhum anúncio seu" não significa nada.
+  await expect(avisoDeLoja(page)).toBeHidden();
+});
+
+test("com anúncio seu no mercado, nenhum aviso", async ({ page }) => {
+  await adicionarPersonagem(page, "Vendedor elixir-a");
+  await validarItem(page, "Elixir do Mercador");
+  await porNaLoja(page, "Elixir do Mercador");
+
+  await expect(avisoDeLoja(page)).toBeHidden();
+});
+
+test("sem nenhum anúncio seu, o aviso aparece e explica a ambiguidade", async ({ page }) => {
+  await adicionarPersonagem(page, "Personagem Que Nao Vende");
+  await validarItem(page, "Elixir do Mercador");
+  await porNaLoja(page, "Elixir do Mercador");
+
+  await expect(avisoDeLoja(page)).toBeVisible();
+  await expect(avisoDeLoja(page)).toContainText("não está aparecendo no mercado");
+  // A ambiguidade é dita, não escondida.
+  await expect(avisoDeLoja(page)).toContainText("pode ter caído, ou tudo pode ter sido vendido");
+  // E de quando é a evidência.
+  await expect(avisoDeLoja(page)).toContainText("Checagem");
+});
+
+test("itens fora da loja não contam para o aviso", async ({ page }) => {
+  await adicionarPersonagem(page, "Personagem Que Nao Vende");
+  await validarItem(page, "Elixir do Mercador");
+
+  // Validado, mas não marcado como "na loja": você não está vendendo isto,
+  // então a ausência dele no mercado não diz nada sobre a sua loja.
+  await expect(avisoDeLoja(page)).toBeHidden();
+});
+
+test("tirar o item da loja esconde o aviso de novo", async ({ page }) => {
+  await adicionarPersonagem(page, "Personagem Que Nao Vende");
+  await validarItem(page, "Elixir do Mercador");
+  await porNaLoja(page, "Elixir do Mercador");
+  await expect(avisoDeLoja(page)).toBeVisible();
+
+  await card(page, "Elixir do Mercador").locator(".estoque-toggle-loja").click();
+
+  await expect(avisoDeLoja(page)).toBeHidden();
+});
+
+// O aviso é sobre o conjunto: basta UM item com anúncio seu para não haver
+// motivo de alarme.
+test("um item com anúncio seu basta para não alarmar", async ({ page }) => {
+  await adicionarPersonagem(page, "Vendedor elixir-a");
+  await validarItem(page, "Elixir do Mercador");
+  await porNaLoja(page, "Elixir do Mercador");
+  await validarItem(page, "Espada Primordial");
+  await porNaLoja(page, "Espada Primordial");
+
+  await expect(avisoDeLoja(page)).toBeHidden();
+});
+
+test("o aviso sobrevive à troca de aba", async ({ page }) => {
+  await adicionarPersonagem(page, "Personagem Que Nao Vende");
+  await validarItem(page, "Elixir do Mercador");
+  await porNaLoja(page, "Elixir do Mercador");
+  await expect(avisoDeLoja(page)).toBeVisible();
+
+  await page.getByRole("link", { name: "Watchlist" }).click();
+  await expect(page.locator(".search-form")).toBeVisible();
+  await page.getByRole("link", { name: "Estoque" }).click();
+
+  await expect(avisoDeLoja(page)).toBeVisible();
+});

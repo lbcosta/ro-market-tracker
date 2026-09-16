@@ -224,6 +224,7 @@ function removerDoEstoque(id) {
   const card = findEstoqueCard(id);
   if (card) card.remove();
   atualizarEstoqueVazio();
+  renderAvisoDeLoja();
 }
 
 function findEstoqueCard(id) {
@@ -399,6 +400,10 @@ function repintarCard(item) {
   const antigo = findEstoqueCard(item.id);
   if (!antigo) return;
   antigo.replaceWith(buildEstoqueCard(item));
+  // O aviso de loja é sobre o conjunto, não sobre um card: qualquer card que
+  // muda pode ter sido o último que ainda tinha anúncio seu (ou o primeiro a
+  // voltar a ter).
+  renderAvisoDeLoja();
 }
 
 // resumoDoCandidato é a linha que ajuda o usuário a reconhecer o item dele.
@@ -1056,6 +1061,97 @@ function removerPersonagem(nome) {
 }
 
 // ---------------------------------------------------------------------------
+// Loja offline
+// ---------------------------------------------------------------------------
+
+// Checagens mais velhas que isto não contam como evidência: o mercado é
+// dinâmico, e um item consultado há quarenta minutos não diz nada sobre agora.
+const FRESCOR_DA_EVIDENCIA_MS = 15 * 60 * 1000;
+
+// avaliarPresencaNaLoja procura os seus anúncios entre os itens que você
+// marcou como "na loja".
+//
+// Se nenhum deles aparece no mercado, algo aconteceu — e o caso que isto
+// existe para pegar é o desconexão silenciosa: a loja caiu e você não viu.
+//
+// Mas NÃO dá para afirmar "loja offline": uma loja fechada e um estoque que
+// vendeu tudo somem do mercado exatamente igual, e o site não distingue os
+// dois. Por isso o aviso descreve o que foi observado e diz de quando são as
+// checagens, em vez de cravar a causa.
+function avaliarPresencaNaLoja() {
+  if (carregarPersonagens().length === 0) return null;
+
+  const limite = Date.now() - FRESCOR_DA_EVIDENCIA_MS;
+  const checados = loadEstoque().filter(
+    (item) =>
+      item.naLoja &&
+      item.validacao === VALIDACAO_OK &&
+      item.lastResult &&
+      item.lastCheckedAt != null &&
+      item.lastCheckedAt >= limite,
+  );
+  if (checados.length === 0) return null;
+
+  let comAnuncioSeu = 0;
+  let maisAntiga = Infinity;
+  let maisRecente = 0;
+  for (const item of checados) {
+    if (separarAnuncios(item.lastResult).meus.length > 0) comAnuncioSeu++;
+    maisAntiga = Math.min(maisAntiga, item.lastCheckedAt);
+    maisRecente = Math.max(maisRecente, item.lastCheckedAt);
+  }
+
+  return { itens: checados.length, comAnuncioSeu, maisAntiga, maisRecente };
+}
+
+function horaCurta(timestampMs) {
+  return new Date(timestampMs).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+}
+
+// renderAvisoDeLoja pinta (ou esconde) o aviso no topo do Estoque. Roda a
+// cada repintura, e não custa requisição nenhuma: a evidência já está no
+// lastResult de cada item.
+function renderAvisoDeLoja() {
+  const aviso = document.getElementById("estoque-loja-aviso");
+  if (!aviso) return;
+
+  const presenca = avaliarPresencaNaLoja();
+  if (!presenca || presenca.comAnuncioSeu > 0) {
+    aviso.hidden = true;
+    return;
+  }
+
+  const quantos =
+    presenca.itens === 1
+      ? "o item que você marcou como na loja"
+      : "nenhum dos " + presenca.itens + " itens que você marcou como na loja";
+  const janela =
+    presenca.maisAntiga === presenca.maisRecente
+      ? "Checagem das " + horaCurta(presenca.maisRecente) + "."
+      : "Checagens entre " + horaCurta(presenca.maisAntiga) + " e " + horaCurta(presenca.maisRecente) + ".";
+
+  aviso.textContent = "";
+
+  const titulo = document.createElement("strong");
+  titulo.textContent =
+    presenca.itens === 1
+      ? "Seu anúncio não está aparecendo no mercado."
+      : "Nenhum dos seus anúncios está aparecendo no mercado.";
+  aviso.appendChild(titulo);
+
+  const detalhe = document.createElement("span");
+  // A ambiguidade é dita, não escondida: as duas causas somem do mercado
+  // igual, e mandar o usuário conferir a loja à toa é o custo de fingir
+  // certeza.
+  detalhe.textContent =
+    " Sua loja pode ter caído, ou tudo pode ter sido vendido — procurando por " +
+    quantos + ", nenhum tinha anúncio seu. " + janela;
+  aviso.appendChild(detalhe);
+
+  aviso.hidden = false;
+}
+
+// ---------------------------------------------------------------------------
 // Montagem
 // ---------------------------------------------------------------------------
 
@@ -1069,6 +1165,7 @@ function renderEstoque() {
     container.appendChild(buildEstoqueCard(item));
   }
   atualizarEstoqueVazio();
+  renderAvisoDeLoja();
 }
 
 // montarPainelDoEstoque liga a tela que acabou de entrar no DOM. Chamada no
@@ -1181,6 +1278,7 @@ function montarPainelDoEstoque() {
         pintarToggle(botaoUndercut, atualizado.undercut, "Undercutting ligado", "Undercutting desligado");
       }
       aplicarDisponibilidadeDoUndercut(card, atualizado);
+      renderAvisoDeLoja();
       return;
     }
 

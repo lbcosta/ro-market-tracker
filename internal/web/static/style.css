@@ -427,6 +427,27 @@ h1 {
   color: var(--danger);
 }
 
+/* Aviso de que nenhum anúncio seu foi encontrado no mercado — o caso que ele
+   existe para pegar é a loja ter caído sem o usuário perceber.
+
+   A regra do [hidden] explícito vale aqui como em todo o arquivo: esta regra
+   define display, e sem a linha abaixo ela venceria o [hidden] do navegador. */
+.estoque-loja-aviso {
+  display: block;
+  margin: 0 0 1rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  background: var(--warning-bg);
+  color: var(--warning);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.estoque-loja-aviso[hidden] {
+  display: none;
+}
+
 /* Uma grade, e não uma coluna: o card do estoque é largo (preço de venda,
    mercado, histórico) e a aba não tem painel lateral disputando espaço, então
    cabem dois ou três por linha em tela grande. */
