@@ -180,6 +180,29 @@ function filaNaFrente(concorrencia, preco) {
   return somarUnidades(concorrencia.filter((a) => a.price < preco));
 }
 
+// posicaoNaFila é a sua colocação entre os anúncios, contando do mais barato.
+//
+// Diferente de tudo o mais neste arquivo, ISTO É UM FATO, não uma estimativa:
+// é contagem de anúncios, não depende de liquidez, de histórico nem da
+// confiança do dado. Por isso é mostrado sempre, exato, inclusive nos itens
+// em que nenhum preço é recomendado — e é ele que dá resposta imediata a quem
+// está mexendo no próprio preço para ver o que acontece.
+function posicaoNaFila(concorrencia, preco) {
+  if (preco == null) return null;
+  const maisBaratos = concorrencia.filter((a) => a.price < preco).length;
+  return { colocacao: maisBaratos + 1, total: concorrencia.length + 1 };
+}
+
+// distanciaDoMaisBarato é quanto o seu preço está acima (ou abaixo) do
+// concorrente mais barato, em fração. Também um fato exato, e também o tipo de
+// número que se move a cada zeny que o usuário digita.
+function distanciaDoMaisBarato(concorrencia, preco) {
+  if (preco == null || concorrencia.length === 0) return null;
+  const maisBarato = concorrencia[0].price;
+  if (maisBarato <= 0) return null;
+  return (preco - maisBarato) / maisBarato;
+}
+
 // estimarTempo converte fila e liquidez em uma expectativa — e é aqui que a
 // precisão acompanha a confiança. Um "~3 dias" calculado sobre dados
 // contaminados soa exato e não é; uma faixa ou uma ordem de grandeza dizem a
@@ -254,6 +277,8 @@ function calcularSugestao(item) {
     faixa: null,
     cenarios: [],
     tempoNoSeuPreco: seuPreco != null ? estimarTempo(filaNaFrente(concorrencia, seuPreco), porDia, confianca.nivel) : "",
+    posicao: posicaoNaFila(concorrencia, seuPreco),
+    distancia: distanciaDoMaisBarato(concorrencia, seuPreco),
   };
 
   if (confianca.nivel === CONFIANCA_NENHUMA) return sugestao;

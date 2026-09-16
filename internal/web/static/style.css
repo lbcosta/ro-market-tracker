@@ -802,6 +802,13 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
+/* Estar em primeiro é o estado que quem vende persegue — e é a resposta
+   imediata a quem acabou de baixar o preço. */
+.estoque-sugestao-seu.is-primeiro {
+  color: var(--success);
+  font-weight: 600;
+}
+
 .estoque-cenarios summary {
   cursor: pointer;
   font-size: 0.75rem;

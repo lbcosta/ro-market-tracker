@@ -288,13 +288,17 @@ test("um nome ambíguo pede a escolha, e escolher não custa requisição", asyn
   await expect(selo(page, "Rapidez")).toHaveText("Validado");
   await expect(card(page, "Rapidez").locator(".estoque-escolha")).toHaveCount(0);
 
-  // Escolher em si não custa nada — o itemId já tinha vindo na validação. A
-  // requisição que sai é a primeira consulta de mercado do card, que o
-  // usuário não deveria precisar pedir de novo no "↻" depois de já ter
-  // mandado validar. Como estes candidatos vieram do histórico (ninguém
-  // anuncia "Rapidez"), nem essa sai: a validação já provou que não há
-  // anúncio nenhum.
-  expect(await contarRequisicoesAoUpstream(request)).toBe(0);
+  // Escolher em si não custa nada — o itemId já tinha vindo na validação. E
+  // como estes candidatos vieram do histórico (ninguém anuncia "Rapidez"), a
+  // consulta de mercado também não sai: a validação já provou que não há
+  // anúncio nenhum, e o resultado é semeado à mão.
+  //
+  // Sobra UMA requisição, a da série diária do item escolhido. Esperar por ela
+  // antes de contar não é detalhe do teste: sem isso a asserção corre contra a
+  // rede e passa por acaso, que foi o que aconteceu até este comentário ser
+  // escrito.
+  await expect(card(page, "Rapidez").locator(".estoque-historico-resumo")).toBeVisible();
+  expect(await contarRequisicoesAoUpstream(request)).toBe(1);
 
   const gravado = await page.evaluate(
     () => JSON.parse(localStorage.getItem("ro-market-tracker:estoque"))[0],
@@ -727,6 +731,55 @@ test("um item sem vendas registradas não sugere preço nenhum", async ({ page }
   await expect(card(page, "Carta Poring Noel").locator(".estoque-cenarios")).toHaveCount(0);
 });
 
+// A colocação na fila é a resposta imediata a quem mexe no próprio preço, e é
+// um FATO exato — contagem de anúncios, sem depender de liquidez nem da
+// confiança do dado. Foi a falta dela que fazia o card parecer inerte num
+// equipamento: os baldes grosseiros do tempo ("provavelmente dias") quase não
+// se mexem, e o "Sugerido" não depende do que você está pedindo.
+test("mudar o preço muda a colocação e a distância, exatamente", async ({ page, request }) => {
+  await validarItem(page, "Espada Primordial");
+  const c = card(page, "Espada Primordial");
+  const linha = c.locator(".estoque-sugestao-seu");
+  await zerarContagemDoUpstream(request);
+
+  // Anúncios: 129.999.999 / 158.000.000 / 299.999.999.
+  const casos = [
+    ["100000000", "1º de 4 anúncios", "23% abaixo do mais barato"],
+    ["140000000", "2º de 4 anúncios", "8% acima do mais barato"],
+    ["200000000", "3º de 4 anúncios", "54% acima do mais barato"],
+    ["500000000", "4º de 4 anúncios", "285% acima do mais barato"],
+  ];
+  for (const [preco, colocacao, distancia] of casos) {
+    await c.locator(".estoque-preco-venda").click();
+    await c.locator("input").fill(preco);
+    await c.locator("input").press("Enter");
+    await expect(linha).toContainText(colocacao);
+    await expect(linha).toContainText(distancia);
+  }
+
+  // Estar em primeiro é o estado que quem vende persegue, e é destacado.
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("100000000");
+  await c.locator("input").press("Enter");
+  await expect(linha).toHaveClass(/is-primeiro/);
+
+  expect(await contarRequisicoesAoUpstream(request)).toBe(0);
+});
+
+// Mesmo num item onde NENHUM preço é recomendado, a colocação aparece: ela não
+// é estimativa, é contagem.
+test("a colocação aparece mesmo com confiança baixa", async ({ page }) => {
+  await validarItem(page, "Espada Primordial");
+  const c = card(page, "Espada Primordial");
+  await expect(c.locator(".estoque-cenarios")).toHaveCount(0);
+
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("200000000");
+  await c.locator("input").press("Enter");
+
+  await expect(c.locator(".estoque-sugestao-seu")).toContainText("3º de 4 anúncios");
+});
+
 // O mercado é dinâmico: a fila muda a cada atualização, e o seu preço é insumo
 // dela. Editar o preço tem que refazer a conta na hora, sem requisição.
 test("editar o preço recalcula o tempo até vender, de graça", async ({ page, request }) => {
@@ -734,17 +787,18 @@ test("editar o preço recalcula o tempo até vender, de graça", async ({ page, 
   const c = card(page, "Elixir do Mercador");
   await zerarContagemDoUpstream(request);
 
-  // Abaixo dos dois concorrentes (1.200 e 1.500): ninguém na frente.
+  // Abaixo dos dois concorrentes (1.200 e 1.500): ninguém na frente. O total
+  // é 3 porque conta você junto.
   await c.locator(".estoque-preco-venda").click();
   await c.locator("input").fill("1000");
   await c.locator("input").press("Enter");
-  await expect(c.locator(".estoque-sugestao-seu")).toContainText("você é o próximo da fila");
+  await expect(c.locator(".estoque-sugestao-seu")).toContainText("1º de 3 anúncios");
 
   // Acima dos dois: a fila inteira na frente.
   await c.locator(".estoque-preco-venda").click();
   await c.locator("input").fill("2000");
   await c.locator("input").press("Enter");
-  await expect(c.locator(".estoque-sugestao-seu")).not.toContainText("você é o próximo da fila");
+  await expect(c.locator(".estoque-sugestao-seu")).toContainText("3º de 3 anúncios");
 
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
 });
@@ -757,14 +811,16 @@ test("um personagem seu sai da fila que está na sua frente", async ({ page, req
   await c.locator(".estoque-preco-venda").click();
   await c.locator("input").fill("1400");
   await c.locator("input").press("Enter");
-  await expect(c.locator(".estoque-sugestao-seu")).not.toContainText("você é o próximo da fila");
+  // Entre 1.200 e 1.500: segundo de três.
+  await expect(c.locator(".estoque-sugestao-seu")).toContainText("2º de 3 anúncios");
 
   await zerarContagemDoUpstream(request);
-  // O anúncio de 1.200 z é do "Vendedor elixir-a".
+  // O anúncio de 1.200 z é do "Vendedor elixir-a". Reconhecido como seu, ele
+  // sai da concorrência — e você passa a ser o primeiro dos dois que restam.
   await adicionarPersonagem(page, "Vendedor elixir-a");
 
   await expect(card(page, "Elixir do Mercador").locator(".estoque-sugestao-seu")).toContainText(
-    "você é o próximo da fila",
+    "1º de 2 anúncios",
   );
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
 });

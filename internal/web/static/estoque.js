@@ -858,10 +858,31 @@ function buildBlocoDeSugestao(item) {
     bloco.appendChild(partido);
   }
 
-  if (item.precoVenda != null && sugestao.tempoNoSeuPreco) {
+  // A linha do SEU preço. Ela abre com os dois fatos exatos — colocação na
+  // fila e distância do mais barato —, e só depois vem a estimativa de tempo,
+  // que é a única parte incerta.
+  //
+  // A ordem importa: os baldes grosseiros do tempo ("provavelmente dias")
+  // existem para não mentir sobre precisão, mas sozinhos eles quase não se
+  // mexem quando o usuário muda o preço — e o preço é justamente o que ele
+  // está decidindo. A colocação muda a cada anúncio ultrapassado, e não
+  // depende de confiança nenhuma: é contagem.
+  if (item.precoVenda != null && sugestao.posicao) {
     const seu = document.createElement("span");
     seu.className = "estoque-sugestao-seu";
-    seu.textContent = "No seu preço: " + sugestao.tempoNoSeuPreco;
+
+    const partes = [
+      sugestao.posicao.colocacao + "º de " + sugestao.posicao.total + " anúncios",
+    ];
+    if (sugestao.distancia != null) {
+      const pct = Math.round(Math.abs(sugestao.distancia) * 100);
+      if (pct === 0) partes.push("no mesmo preço do mais barato");
+      else partes.push(pct + "% " + (sugestao.distancia > 0 ? "acima" : "abaixo") + " do mais barato");
+    }
+    if (sugestao.tempoNoSeuPreco) partes.push(sugestao.tempoNoSeuPreco);
+
+    seu.textContent = "Seu preço: " + partes.join(" · ");
+    if (sugestao.posicao.colocacao === 1) seu.classList.add("is-primeiro");
     bloco.appendChild(seu);
   }
 

@@ -394,6 +394,25 @@ precisão. Por isso:
 | baixa | `provavelmente semanas` | **não** — só a faixa e o motivo |
 | nenhuma | — | não |
 
+##### A sua posição é um fato, não uma estimativa
+
+A linha do seu preço abre com dois números **exatos** — a colocação na fila e a
+distância do concorrente mais barato — e só depois vem a estimativa de tempo:
+
+```
+Seu preço: 3º de 4 anúncios · 54% acima do mais barato · provavelmente rápido
+```
+
+A ordem importa. Os baldes grosseiros do tempo existem para não mentir sobre
+precisão, mas sozinhos eles quase não se mexem quando o usuário muda o preço —
+e o preço é justamente o que ele está decidindo. O "Sugerido", por definição,
+também não depende do que você está pedindo. Sem a colocação, um equipamento
+de confiança baixa dava a impressão de que o card estava inerte.
+
+A colocação é contagem de anúncios: não depende de liquidez, de histórico nem
+da confiança do dado, e por isso aparece **sempre**, inclusive nos itens em que
+nenhum preço é recomendado.
+
 ##### Tempo até vender
 
 ```
