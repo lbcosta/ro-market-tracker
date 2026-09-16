@@ -700,6 +700,88 @@ h1 {
   cursor: not-allowed;
 }
 
+/* Preço sugerido: a faixa e o selo de confiança sempre visíveis, os cenários
+   recolhidos. O card precisa de altura previsível (eles dividem uma grade), e
+   a explicação de cada estratégia é longa demais para caber numa linha — mas
+   cabe muito bem dentro de um <details>. */
+.estoque-sugestao {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.estoque-sugestao-faixa {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.estoque-confianca {
+  font-weight: 400;
+}
+
+.estoque-confianca-alta { color: var(--success); }
+.estoque-confianca-media { color: var(--warning); }
+.estoque-confianca-baixa,
+.estoque-confianca-nenhuma { color: var(--danger); }
+
+/* O motivo é o que transforma o selo de opaco em informação — é ele que conta
+   que o histórico está somando refinos e encantamentos diferentes. */
+.estoque-confianca-motivo,
+.estoque-faixas {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.estoque-cenarios summary {
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.estoque-cenarios summary:hover {
+  color: var(--accent);
+}
+
+.estoque-cenario {
+  padding: 0.35rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.estoque-cenario-topo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+}
+
+.estoque-cenario-nome {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.estoque-cenario-preco {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.estoque-cenario-expectativa {
+  margin-left: auto;
+}
+
+/* A aposta que a estratégia embute. É o lugar onde o "Segurar" explica que só
+   compensa para quem está apostando em alta, e que o custo é ficar parado. */
+.estoque-cenario-aposta {
+  margin: 0.15rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.estoque-tendencia.is-subindo { color: var(--success); }
+.estoque-tendencia.is-caindo { color: var(--danger); }
+
 .estoque-flags {
   display: flex;
   flex-wrap: wrap;

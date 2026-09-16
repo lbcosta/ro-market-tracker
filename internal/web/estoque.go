@@ -389,6 +389,13 @@ type resumoView struct {
 	WeightedAvg float64 `json:"weightedAvg"`
 	StdDev      float64 `json:"stdDev"`
 	QtySold     int     `json:"qtySold"`
+
+	// MedianMin, MedianMax e Dispersao são o que o navegador usa para
+	// precificar equipamento, onde a média é enganosa porque o histórico
+	// mistura unidades com refinos e encantamentos diferentes. Ver periodStats.
+	MedianMin int64   `json:"medianMin"`
+	MedianMax int64   `json:"medianMax"`
+	Dispersao float64 `json:"dispersion"`
 }
 
 type historicoView struct {
@@ -494,6 +501,9 @@ func montarHistorico(janela string, total int, history *gnjoy.PriceHistory) hist
 			WeightedAvg: resumo.WeightedAvg,
 			StdDev:      resumo.StdDev,
 			QtySold:     resumo.QtySold,
+			MedianMin:   resumo.MedianMin,
+			MedianMax:   resumo.MedianMax,
+			Dispersao:   resumo.Dispersao,
 		},
 	}
 }

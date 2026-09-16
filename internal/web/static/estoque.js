@@ -275,6 +275,10 @@ function startEditingPrecoVenda(span, id) {
     // então o aviso de undercutting precisa poder disparar de novo.
     const atualizado = updateEstoqueItem(id, { precoVenda, notified: false }) || item;
     span.textContent = precoVendaLabel(atualizado.precoVenda);
+    // Repintar o card inteiro, e não só este texto: o preço é insumo da fila,
+    // do tempo até vender e dos cenários (ver calcularSugestao). Sem isto, o
+    // card continuaria mostrando a conta do preço anterior.
+    repintarCard(atualizado);
   };
 
   input.addEventListener("keydown", (ev) => {
@@ -653,6 +657,18 @@ function buildBlocoDeHistorico(item) {
     " · " + s.qtySold + (s.qtySold === 1 ? " unidade" : " unidades");
   bloco.appendChild(resumo);
 
+  // A tendência entra na mesma linha, e só quando existe: uma seta para toda
+  // variação de 1% seria ruído com aparência de sinal (ver calcularTendencia).
+  const tendencia = calcularTendencia(dados);
+  if (tendencia) {
+    const seta = document.createElement("span");
+    seta.className = "estoque-tendencia " + (tendencia.subindo ? "is-subindo" : "is-caindo");
+    seta.textContent =
+      (tendencia.subindo ? " ↗ " : " ↘ ") +
+      Math.abs(Math.round(tendencia.variacao * 100)) + "% vs. o período anterior";
+    resumo.appendChild(seta);
+  }
+
   const detalhe = document.createElement("details");
   detalhe.className = "estoque-historico-dias";
 
@@ -696,6 +712,129 @@ function buildBlocoDeHistorico(item) {
 
 function textoDaJanela(janela) {
   return janela === "ALL" ? "em todo o histórico" : "nos últimos " + rotuloDaJanela(janela);
+}
+
+// ---------------------------------------------------------------------------
+// Preço sugerido
+// ---------------------------------------------------------------------------
+
+const ROTULO_CONFIANCA = {
+  alta: "confiança alta",
+  media: "confiança média",
+  baixa: "confiança baixa",
+  nenhuma: "sem dados suficientes",
+};
+
+// buildBlocoDeSugestao desenha a faixa sugerida numa linha e guarda os
+// cenários dentro de um <details>.
+//
+// Nada de tooltip: os cards dividem uma grade e precisam de altura previsível,
+// mas a explicação de cada estratégia é longa demais para um atributo title —
+// que ainda por cima demora meio segundo para aparecer e não existe no toque.
+// Recolhido, cabe texto de verdade e o card não cresce.
+function buildBlocoDeSugestao(item) {
+  const bloco = document.createElement("div");
+  bloco.className = "estoque-sugestao";
+
+  // Sem histórico ainda não há o que calcular.
+  if (!item.historico) return bloco;
+
+  const sugestao = calcularSugestao(item);
+
+  const linha = document.createElement("span");
+  linha.className = "estoque-sugestao-faixa";
+  if (sugestao.faixa) {
+    linha.textContent =
+      "Sugerido: " + formatMoney(sugestao.faixa.min) + " – " + formatMoney(sugestao.faixa.max);
+  } else {
+    linha.textContent = "Sem preço sugerido";
+  }
+
+  const selo = document.createElement("span");
+  selo.className = "estoque-confianca estoque-confianca-" + sugestao.confianca.nivel;
+  selo.textContent = ROTULO_CONFIANCA[sugestao.confianca.nivel];
+  linha.appendChild(document.createTextNode(" · "));
+  linha.appendChild(selo);
+  bloco.appendChild(linha);
+
+  // O motivo da confiança é o que transforma um selo opaco em informação: é
+  // ele que conta ao usuário QUE o histórico está somando coisas diferentes.
+  if (sugestao.confianca.motivo) {
+    const motivo = document.createElement("p");
+    motivo.className = "estoque-confianca-motivo";
+    motivo.textContent = sugestao.confianca.motivo;
+    bloco.appendChild(motivo);
+  }
+
+  // O mercado partido em faixas, quando os próprios anúncios revelam isso.
+  if (sugestao.faixas) {
+    const partido = document.createElement("p");
+    partido.className = "estoque-faixas";
+    partido.textContent =
+      "O mercado está partido: " + sugestao.faixas.baixa.length + " anúncio(s) até " +
+      formatMoney(sugestao.faixas.baixa[sugestao.faixas.baixa.length - 1].price) +
+      " e " + sugestao.faixas.alta.length + " a partir de " +
+      formatMoney(sugestao.faixas.alta[0].price) + ".";
+    bloco.appendChild(partido);
+  }
+
+  if (item.precoVenda != null && sugestao.tempoNoSeuPreco) {
+    const seu = document.createElement("span");
+    seu.className = "estoque-sugestao-seu";
+    seu.textContent = "No seu preço: " + sugestao.tempoNoSeuPreco;
+    bloco.appendChild(seu);
+  }
+
+  if (sugestao.cenarios.length > 0) {
+    bloco.appendChild(buildCenarios(sugestao.cenarios));
+  }
+
+  return bloco;
+}
+
+function buildCenarios(cenarios) {
+  const detalhe = document.createElement("details");
+  detalhe.className = "estoque-cenarios";
+
+  const sumario = document.createElement("summary");
+  sumario.textContent = "Estratégias de preço";
+  detalhe.appendChild(sumario);
+
+  for (const cenario of cenarios) {
+    const item = document.createElement("div");
+    item.className = "estoque-cenario";
+
+    const cabecalho = document.createElement("div");
+    cabecalho.className = "estoque-cenario-topo";
+
+    const nome = document.createElement("span");
+    nome.className = "estoque-cenario-nome";
+    nome.textContent = cenario.nome;
+    cabecalho.appendChild(nome);
+
+    const preco = document.createElement("span");
+    preco.className = "estoque-cenario-preco";
+    preco.textContent = formatMoney(cenario.preco);
+    cabecalho.appendChild(preco);
+
+    if (cenario.expectativa) {
+      const expectativa = document.createElement("span");
+      expectativa.className = "estoque-cenario-expectativa";
+      expectativa.textContent = cenario.expectativa;
+      cabecalho.appendChild(expectativa);
+    }
+
+    item.appendChild(cabecalho);
+
+    const aposta = document.createElement("p");
+    aposta.className = "estoque-cenario-aposta";
+    aposta.textContent = cenario.aposta;
+    item.appendChild(aposta);
+
+    detalhe.appendChild(item);
+  }
+
+  return detalhe;
 }
 
 // ---------------------------------------------------------------------------
@@ -833,6 +972,7 @@ function buildEstoqueCard(item) {
   if (item.validacao === VALIDACAO_OK) {
     li.appendChild(buildBlocoDeMercado(item));
     li.appendChild(buildBlocoDeHistorico(item));
+    li.appendChild(buildBlocoDeSugestao(item));
   }
 
   // O motivo só existe no estado inválido: o selo vermelho chama a atenção, e

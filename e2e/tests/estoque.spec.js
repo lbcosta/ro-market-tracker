@@ -659,3 +659,112 @@ test("um item sem vendas registradas diz isso", async ({ page }) => {
 
   await expect(historico(page, "Carta Poring Noel")).toContainText("Sem vendas registradas");
 });
+
+// ---------------------------------------------------------------------------
+// Preço sugerido
+// ---------------------------------------------------------------------------
+//
+// A regra que manda em tudo aqui: a PRECISÃO DA RESPOSTA ACOMPANHA A CONFIANÇA
+// DO DADO. O histórico do site é indexado por itemId, mas refino e
+// encantamento são da unidade — para equipamento, a série soma coisas
+// diferentes, e recomendar um preço exato em cima disso seria afirmar o que
+// não se sabe.
+
+const sugestao = (page, nome) => card(page, nome).locator(".estoque-sugestao-faixa");
+const confianca = (page, nome) => card(page, nome).locator(".estoque-confianca");
+const cenarios = (page, nome) => card(page, nome).locator(".estoque-cenario");
+
+test("um item homogêneo ganha faixa, confiança alta e os três cenários", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+
+  await expect(confianca(page, "Elixir do Mercador")).toHaveText("confiança alta");
+  await expect(sugestao(page, "Elixir do Mercador")).toContainText("Sugerido:");
+
+  await card(page, "Elixir do Mercador").locator(".estoque-cenarios summary").click();
+  await expect(cenarios(page, "Elixir do Mercador")).toHaveCount(3);
+  await expect(cenarios(page, "Elixir do Mercador").first()).toContainText("Vender hoje");
+});
+
+// O concorrente mais barato do Elixir é 1.200 z; dez por cento abaixo é 1.080.
+test("o cenário de vender hoje fica 10% abaixo do concorrente mais barato", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+  await card(page, "Elixir do Mercador").locator(".estoque-cenarios summary").click();
+
+  await expect(cenarios(page, "Elixir do Mercador").first()).toContainText("1.080 z");
+});
+
+// A aposta do "Segurar" precisa estar escrita em algum lugar: é a única
+// estratégia que depende de uma previsão do usuário sobre o jogo.
+test("o cenário de segurar explica a aposta que embute", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+  await card(page, "Elixir do Mercador").locator(".estoque-cenarios summary").click();
+
+  const segurar = cenarios(page, "Elixir do Mercador").filter({ hasText: "Segurar" });
+  await expect(segurar).toContainText("apostando em alta");
+  await expect(segurar).toContainText("atualização do jogo");
+  await expect(segurar).toContainText("ficar parado");
+});
+
+// A Espada Primordial vendeu entre 500 z e 5.000 z nas fixtures — dispersão
+// alta num item "weapon", que é exatamente o caso contaminado.
+test("um equipamento disperso fica com confiança baixa e SEM cenários", async ({ page }) => {
+  await validarItem(page, "Espada Primordial");
+
+  await expect(confianca(page, "Espada Primordial")).toHaveText("confiança baixa");
+  await expect(card(page, "Espada Primordial").locator(".estoque-confianca-motivo")).toContainText(
+    "não distingue refino nem encantamento",
+  );
+  // A faixa aparece; o preço recomendado, não.
+  await expect(sugestao(page, "Espada Primordial")).toContainText("Sugerido:");
+  await expect(card(page, "Espada Primordial").locator(".estoque-cenarios")).toHaveCount(0);
+});
+
+test("um item sem vendas registradas não sugere preço nenhum", async ({ page }) => {
+  await validarItem(page, "Carta Poring Noel");
+
+  await expect(sugestao(page, "Carta Poring Noel")).toContainText("Sem preço sugerido");
+  await expect(confianca(page, "Carta Poring Noel")).toHaveText("sem dados suficientes");
+  await expect(card(page, "Carta Poring Noel").locator(".estoque-cenarios")).toHaveCount(0);
+});
+
+// O mercado é dinâmico: a fila muda a cada atualização, e o seu preço é insumo
+// dela. Editar o preço tem que refazer a conta na hora, sem requisição.
+test("editar o preço recalcula o tempo até vender, de graça", async ({ page, request }) => {
+  await validarItem(page, "Elixir do Mercador");
+  const c = card(page, "Elixir do Mercador");
+  await zerarContagemDoUpstream(request);
+
+  // Abaixo dos dois concorrentes (1.200 e 1.500): ninguém na frente.
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("1000");
+  await c.locator("input").press("Enter");
+  await expect(c.locator(".estoque-sugestao-seu")).toContainText("você é o próximo da fila");
+
+  // Acima dos dois: a fila inteira na frente.
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("2000");
+  await c.locator("input").press("Enter");
+  await expect(c.locator(".estoque-sugestao-seu")).not.toContainText("você é o próximo da fila");
+
+  expect(await contarRequisicoesAoUpstream(request)).toBe(0);
+});
+
+// Mexer na lista de personagens muda quem é concorrência, e com isso a fila —
+// para o estoque inteiro, e sem custo nenhum.
+test("um personagem seu sai da fila que está na sua frente", async ({ page, request }) => {
+  await validarItem(page, "Elixir do Mercador");
+  const c = card(page, "Elixir do Mercador");
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("1400");
+  await c.locator("input").press("Enter");
+  await expect(c.locator(".estoque-sugestao-seu")).not.toContainText("você é o próximo da fila");
+
+  await zerarContagemDoUpstream(request);
+  // O anúncio de 1.200 z é do "Vendedor elixir-a".
+  await adicionarPersonagem(page, "Vendedor elixir-a");
+
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-sugestao-seu")).toContainText(
+    "você é o próximo da fila",
+  );
+  expect(await contarRequisicoesAoUpstream(request)).toBe(0);
+});
