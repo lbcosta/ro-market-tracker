@@ -20,6 +20,29 @@ const linhas = (page) => page.locator(".estoque-linha");
 const linha = (page, nome) => page.locator(".estoque-linha").filter({ hasText: nome });
 const card = (page, nome) => page.locator("#estoque-detalhe .estoque-card").filter({ hasText: nome });
 
+// esperarHistorico espera pelo DADO, e não por um elemento.
+//
+// O painel desenha os tiles assim que o mercado responde, com a faixa ainda
+// vazia — então "o tile está visível" NÃO prova que o histórico chegou. Um
+// teste que zere o contador de requisições confiando no elemento conta, na
+// verdade, a requisição do histórico que ainda estava em voo.
+function esperarHistorico(page) {
+  return expect
+    .poll(() =>
+      page.evaluate(() => {
+        const lista = JSON.parse(localStorage.getItem("ro-market-tracker:estoque") || "[]");
+        const id = localStorage.getItem("ro-market-tracker:estoque-selecionado");
+        const item = lista.find((e) => e.id === id);
+        return Boolean(item && item.historico);
+      }),
+    )
+    .toBe(true);
+}
+
+async function abrirAba(page, rotulo) {
+  await page.locator(".estoque-aba").filter({ hasText: rotulo }).click();
+}
+
 async function abrir(page, nome) {
   await linha(page, nome).click();
   await expect(card(page, nome)).toBeVisible();
@@ -320,7 +343,7 @@ test("um nome ambíguo pede a escolha, e escolher não custa requisição", asyn
   // antes de contar não é detalhe do teste: sem isso a asserção corre contra a
   // rede e passa por acaso, que foi o que aconteceu até este comentário ser
   // escrito.
-  await expect(card(page, "Rapidez").locator(".estoque-historico-resumo")).toBeVisible();
+  await esperarHistorico(page);
   expect(await contarRequisicoesAoUpstream(request)).toBe(1);
 
   const gravado = await page.evaluate(
@@ -426,18 +449,20 @@ test("o estado de validação sobrevive a recarregar", async ({ page }) => {
 //   158.000.000  Vendedor s-primordial-158
 //   299.999.999  Vendedor s-primordial-299
 
-const mercado = (page, nome) => card(page, nome).locator(".estoque-mercado-linha");
-const meuAnuncio = (page, nome) => card(page, nome).locator(".estoque-mercado-seu");
+const tarja = (page, nome) => card(page, nome).locator(".estoque-tarja-texto");
+const tileMaisBarato = (page, nome) => card(page, nome).locator(".estoque-tile-mais-barato");
 
 async function validarItem(page, nome) {
   await adicionar(page, nome);
   await botaoValidar(page, nome).click();
   await expect(selo(page, nome)).toHaveText("Validado");
-  // Esperar o histórico, e não só o selo: validar dispara mercado e histórico
-  // em seguida, e o selo fica verde antes de os dois responderem. Sem esta
+  // Esperar os tiles, e não só o selo: validar dispara mercado e histórico em
+  // seguida, e o selo fica verde antes de os dois responderem. Sem esta
   // espera, um teste que zera o contador de requisições logo depois conta as
   // que ainda estavam em voo.
-  await expect(card(page, nome).locator(".estoque-historico-resumo")).toBeVisible();
+  //
+  await expect(card(page, nome).locator(".estoque-tarja")).toBeVisible();
+  await esperarHistorico(page);
 }
 
 async function adicionarPersonagem(page, nome) {
@@ -451,28 +476,27 @@ async function adicionarPersonagem(page, nome) {
   await expect(page.locator(".estoque-personagem").filter({ hasText: nome })).toBeVisible();
 }
 
-test("validar preenche o bloco de mercado do item", async ({ page }) => {
+test("validar preenche os números de mercado do item", async ({ page }) => {
   await validarItem(page, "Espada Primordial");
 
-  await expect(mercado(page, "Espada Primordial")).toContainText("129.999.999 z");
-  await expect(mercado(page, "Espada Primordial")).toContainText("3 anúncios");
+  await expect(tileMaisBarato(page, "Espada Primordial")).toContainText("129.999.999 z");
+  await expect(card(page, "Espada Primordial").locator(".estoque-tile-oferta")).toContainText("3 anúncios");
   // Sem personagens cadastrados, nenhum anúncio é reconhecido como seu.
-  await expect(meuAnuncio(page, "Espada Primordial")).toHaveCount(0);
+  await expect(tileMaisBarato(page, "Espada Primordial")).not.toContainText("você");
 });
 
 // O ponto central da etapa: sem isto, você competiria consigo mesmo.
 test("um personagem seu deixa de contar como concorrência", async ({ page, request }) => {
   await validarItem(page, "Espada Primordial");
-  await expect(mercado(page, "Espada Primordial")).toContainText("129.999.999 z");
+  await expect(tileMaisBarato(page, "Espada Primordial")).toContainText("129.999.999 z");
 
   await zerarContagemDoUpstream(request);
   await adicionarPersonagem(page, "Vendedor s-primordial-129");
 
   // O anúncio mais barato virou o SEU, então a concorrência agora começa no
   // segundo.
-  await expect(mercado(page, "Espada Primordial")).toContainText("158.000.000 z");
-  await expect(mercado(page, "Espada Primordial")).toContainText("2 anúncios");
-  await expect(meuAnuncio(page, "Espada Primordial")).toContainText("129.999.999 z");
+  await expect(tileMaisBarato(page, "Espada Primordial")).toContainText("158.000.000 z");
+  await expect(card(page, "Espada Primordial").locator(".estoque-tile-oferta")).toContainText("2 anúncios");
 
   // E o recálculo é de graça: se ele custasse uma requisição por item, um
   // estoque de vinte itens levaria vinte segundos de fila.
@@ -486,24 +510,27 @@ test("quando todos os anúncios são seus, você está sozinho no mercado", asyn
     await adicionarPersonagem(page, nome);
   }
 
-  await expect(mercado(page, "Espada Primordial")).toContainText("Você é o único anunciando");
+  await expect(tarja(page, "Espada Primordial")).toContainText("único anunciando");
 });
 
 // O aviso que interessa a quem vende. (O alerta ativo — toast, som, Telegram
 // — é a etapa seguinte; aqui é só o que o card mostra.)
 test("o card avisa quando alguém está vendendo mais barato que você", async ({ page }) => {
   await validarItem(page, "Espada Primordial");
+  const c = card(page, "Espada Primordial");
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("299999999");
+  await c.locator("input").press("Enter");
   await adicionarPersonagem(page, "Vendedor s-primordial-299");
 
-  await expect(meuAnuncio(page, "Espada Primordial")).toContainText("299.999.999 z");
-  await expect(meuAnuncio(page, "Espada Primordial")).toContainText("estão vendendo mais barato");
-  await expect(meuAnuncio(page, "Espada Primordial")).toHaveClass(/estoque-mercado-cortado/);
+  await expect(tarja(page, "Espada Primordial")).toContainText("Estão vendendo mais barato");
+  await expect(card(page, "Espada Primordial").locator(".estoque-tarja")).toHaveClass(/estoque-tarja-perdendo/);
 });
 
 test("um item que ninguém anuncia diz isso, em vez de parecer vazio", async ({ page }) => {
   await validarItem(page, "Bota do Andarilho");
 
-  await expect(mercado(page, "Bota do Andarilho")).toContainText("Ninguém está anunciando");
+  await expect(tarja(page, "Bota do Andarilho")).toContainText("Sem anúncios no mercado");
 });
 
 test("o botão de atualizar consulta o mercado de novo", async ({ page, request }) => {
@@ -515,7 +542,7 @@ test("o botão de atualizar consulta o mercado de novo", async ({ page, request 
   await expect
     .poll(() => contarRequisicoesAoUpstream(request))
     .toBe(1);
-  await expect(mercado(page, "Espada Primordial")).toContainText("129.999.999 z");
+  await expect(tileMaisBarato(page, "Espada Primordial")).toContainText("129.999.999 z");
 });
 
 test("os dados de mercado sobrevivem à troca de aba sem reconsultar", async ({ page, request }) => {
@@ -527,7 +554,7 @@ test("os dados de mercado sobrevivem à troca de aba sem reconsultar", async ({ 
   await page.getByRole("link", { name: "Estoque" }).click();
   await abrir(page, "Espada Primordial");
 
-  await expect(mercado(page, "Espada Primordial")).toContainText("129.999.999 z");
+  await expect(tileMaisBarato(page, "Espada Primordial")).toContainText("129.999.999 z");
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
 });
 
@@ -564,6 +591,7 @@ test("o mesmo personagem não entra duas vezes", async ({ page }) => {
 // é o item que existe justamente para o seletor de janela ter o que recortar.
 
 const historico = (page, nome) => card(page, nome).locator(".estoque-historico-resumo");
+const vendaEstimada = (page, nome) => card(page, nome).locator(".estoque-venda-valor");
 const diasDoHistorico = (page, nome) => card(page, nome).locator(".estoque-dias tbody tr");
 const janela = (page, nome) => card(page, nome).locator(".estoque-janela");
 
@@ -571,11 +599,16 @@ test("validar traz o histórico junto, na janela padrão de 7 dias", async ({ pa
   await validarItem(page, "Elixir do Mercador");
 
   await expect(janela(page, "Elixir do Mercador")).toHaveValue("7");
-  await expect(historico(page, "Elixir do Mercador")).toContainText("Vendido entre");
-  // A tabela nasce recolhida para não esticar o card.
-  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias")).not.toHaveAttribute("open", "");
 
-  await card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary").click();
+  // Abrir a aba já mostra a tabela: nada de expandir depois. A aba É a
+  // divulgação, e um clique a mais só escondia o que se foi ver.
+  // Os agregados do período viram tiles lado a lado; a tabela logo abaixo é o
+  // dia a dia. Espremidos numa frase só eles se atropelavam.
+  await abrirAba(page, "Histórico");
+  const c = card(page, "Elixir do Mercador");
+  await expect(c.locator(".estoque-tile-hist-min .estoque-tile-valor")).toHaveText("900 z");
+  await expect(c.locator(".estoque-tile-hist-max .estoque-tile-valor")).toHaveText("1.160 z");
+  await expect(c.locator(".estoque-tile-hist-qtd .estoque-tile-valor")).toHaveText("7 un.");
   await expect(diasDoHistorico(page, "Elixir do Mercador")).toHaveCount(7);
 });
 
@@ -584,7 +617,8 @@ test("validar traz o histórico junto, na janela padrão de 7 dias", async ({ pa
 test("o card mostra quantos dias existem além da janela atual", async ({ page }) => {
   await validarItem(page, "Elixir do Mercador");
 
-  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+  await abrirAba(page, "Histórico");
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-legenda")).toContainText(
     "7 dias com venda de 32 registrados",
   );
 });
@@ -600,10 +634,11 @@ test("trocar a janela reconsulta só aquele item", async ({ page, request }) => 
   // Esperar o resumo antes de abrir a tabela: clicar no <summary> ALTERNA o
   // <details>, então repetir o clique enquanto se espera (dentro de um poll,
   // por exemplo) fecharia o que acabou de abrir.
-  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+  await abrirAba(page, "Histórico");
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-legenda")).toContainText(
     "30 dias com venda",
   );
-  await card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary").click();
+  await abrirAba(page, "Histórico");
   await expect(diasDoHistorico(page, "Elixir do Mercador")).toHaveCount(30);
 
   // Uma requisição, e só do item que mudou. Um seletor global cobraria isso de
@@ -615,7 +650,8 @@ test("a janela de um dia traz um dia só", async ({ page }) => {
   await validarItem(page, "Elixir do Mercador");
 
   await janela(page, "Elixir do Mercador").selectOption("1");
-  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+  await abrirAba(page, "Histórico");
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-legenda")).toContainText(
     "1 dia com venda",
   );
 });
@@ -625,23 +661,26 @@ test("todo o histórico traz os 32 dias", async ({ page }) => {
 
   await janela(page, "Elixir do Mercador").selectOption("ALL");
 
-  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+  await abrirAba(page, "Histórico");
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-legenda")).toContainText(
     "32 dias com venda",
   );
-  await card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary").click();
+  await abrirAba(page, "Histórico");
   await expect(diasDoHistorico(page, "Elixir do Mercador")).toHaveCount(32);
 });
 
 test("voltar para uma janela já consultada não custa requisição", async ({ page, request }) => {
   await validarItem(page, "Elixir do Mercador");
   await janela(page, "Elixir do Mercador").selectOption("30");
-  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+  await abrirAba(page, "Histórico");
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-legenda")).toContainText(
     "30 dias com venda",
   );
 
   await zerarContagemDoUpstream(request);
   await janela(page, "Elixir do Mercador").selectOption("7");
-  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+  await abrirAba(page, "Histórico");
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-legenda")).toContainText(
     "7 dias com venda",
   );
 
@@ -651,7 +690,8 @@ test("voltar para uma janela já consultada não custa requisição", async ({ p
 test("a janela escolhida e o histórico sobrevivem à troca de aba", async ({ page, request }) => {
   await validarItem(page, "Elixir do Mercador");
   await janela(page, "Elixir do Mercador").selectOption("30");
-  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+  await abrirAba(page, "Histórico");
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-legenda")).toContainText(
     "30 dias com venda",
   );
 
@@ -662,7 +702,8 @@ test("a janela escolhida e o histórico sobrevivem à troca de aba", async ({ pa
   await abrir(page, "Elixir do Mercador");
 
   await expect(janela(page, "Elixir do Mercador")).toHaveValue("30");
-  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
+  await abrirAba(page, "Histórico");
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-legenda")).toContainText(
     "30 dias com venda",
   );
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
@@ -672,6 +713,7 @@ test("um item sem vendas registradas diz isso", async ({ page }) => {
   // A Carta Poring Noel está anunciada mas tem histórico vazio nas fixtures.
   await validarItem(page, "Carta Poring Noel");
 
+  await abrirAba(page, "Histórico");
   await expect(historico(page, "Carta Poring Noel")).toContainText("Sem vendas registradas");
 });
 
@@ -685,26 +727,29 @@ test("um item sem vendas registradas diz isso", async ({ page }) => {
 // diferentes, e recomendar um preço exato em cima disso seria afirmar o que
 // não se sabe.
 
-const sugestao = (page, nome) => card(page, nome).locator(".estoque-sugestao-faixa");
-const confianca = (page, nome) => card(page, nome).locator(".estoque-confianca");
+const sugestao = (page, nome) => card(page, nome).locator(".estoque-tile-faixa .estoque-tile-valor");
+const confianca = (page, nome) => card(page, nome).locator(".estoque-tile-faixa .estoque-tile-detalhe");
 const cenarios = (page, nome) => card(page, nome).locator(".estoque-cenario");
 
 test("um item homogêneo ganha faixa, confiança alta e os três cenários", async ({ page }) => {
   await validarItem(page, "Elixir do Mercador");
 
   await expect(confianca(page, "Elixir do Mercador")).toHaveText("confiança alta");
-  await expect(sugestao(page, "Elixir do Mercador")).toContainText("Sugerido:");
+  await expect(sugestao(page, "Elixir do Mercador")).toContainText("1.080 z");
 
-  await card(page, "Elixir do Mercador").locator(".estoque-cenarios summary").click();
+  await abrirAba(page, "Estratégias");
+  await abrirAba(page, "Estratégias");
   await expect(cenarios(page, "Elixir do Mercador")).toHaveCount(3);
+  await abrirAba(page, "Estratégias");
   await expect(cenarios(page, "Elixir do Mercador").first()).toContainText("Vender hoje");
 });
 
 // O concorrente mais barato do Elixir é 1.200 z; dez por cento abaixo é 1.080.
 test("o cenário de vender hoje fica 10% abaixo do concorrente mais barato", async ({ page }) => {
   await validarItem(page, "Elixir do Mercador");
-  await card(page, "Elixir do Mercador").locator(".estoque-cenarios summary").click();
+  await abrirAba(page, "Estratégias");
 
+  await abrirAba(page, "Estratégias");
   await expect(cenarios(page, "Elixir do Mercador").first()).toContainText("1.080 z");
 });
 
@@ -712,7 +757,7 @@ test("o cenário de vender hoje fica 10% abaixo do concorrente mais barato", asy
 // estratégia que depende de uma previsão do usuário sobre o jogo.
 test("o cenário de segurar explica a aposta que embute", async ({ page }) => {
   await validarItem(page, "Elixir do Mercador");
-  await card(page, "Elixir do Mercador").locator(".estoque-cenarios summary").click();
+  await abrirAba(page, "Estratégias");
 
   const segurar = cenarios(page, "Elixir do Mercador").filter({ hasText: "Segurar" });
   await expect(segurar).toContainText("apostando em alta");
@@ -726,20 +771,26 @@ test("um equipamento disperso fica com confiança baixa e SEM cenários", async 
   await validarItem(page, "Espada Primordial");
 
   await expect(confianca(page, "Espada Primordial")).toHaveText("confiança baixa");
-  await expect(card(page, "Espada Primordial").locator(".estoque-confianca-motivo")).toContainText(
+
+  // O motivo fica na aba de ressalvas: o texto é longo demais para caber ao
+  // lado dos números, e a contagem na aba avisa que há o que ler.
+  await abrirAba(page, "Ressalvas");
+  await expect(card(page, "Espada Primordial").locator(".estoque-ressalvas")).toContainText(
     "não distingue refino nem encantamento",
   );
+
   // A faixa aparece; o preço recomendado, não.
-  await expect(sugestao(page, "Espada Primordial")).toContainText("Sugerido:");
-  await expect(card(page, "Espada Primordial").locator(".estoque-cenarios")).toHaveCount(0);
+  await abrirAba(page, "Estratégias");
+  await expect(card(page, "Espada Primordial").locator(".estoque-cenario")).toHaveCount(0);
 });
 
 test("um item sem vendas registradas não sugere preço nenhum", async ({ page }) => {
   await validarItem(page, "Carta Poring Noel");
 
-  await expect(sugestao(page, "Carta Poring Noel")).toContainText("Sem preço sugerido");
-  await expect(confianca(page, "Carta Poring Noel")).toHaveText("sem dados suficientes");
-  await expect(card(page, "Carta Poring Noel").locator(".estoque-cenarios")).toHaveCount(0);
+  await expect(sugestao(page, "Carta Poring Noel")).toHaveText("—");
+  await expect(confianca(page, "Carta Poring Noel")).toHaveText("sem dados");
+  await abrirAba(page, "Estratégias");
+  await expect(card(page, "Carta Poring Noel").locator(".estoque-cenario")).toHaveCount(0);
 });
 
 // A colocação na fila é a resposta imediata a quem mexe no próprio preço, e é
@@ -750,29 +801,29 @@ test("um item sem vendas registradas não sugere preço nenhum", async ({ page }
 test("mudar o preço muda a colocação e a distância, exatamente", async ({ page, request }) => {
   await validarItem(page, "Espada Primordial");
   const c = card(page, "Espada Primordial");
-  const linha = c.locator(".estoque-sugestao-seu");
+  const linhaVenda = c.locator(".estoque-venda-valor");
   await zerarContagemDoUpstream(request);
 
   // Anúncios: 129.999.999 / 158.000.000 / 299.999.999.
   const casos = [
-    ["100000000", "1º de 4 anúncios", "23% abaixo do mais barato"],
-    ["140000000", "2º de 4 anúncios", "8% acima do mais barato"],
-    ["200000000", "3º de 4 anúncios", "54% acima do mais barato"],
-    ["500000000", "4º de 4 anúncios", "285% acima do mais barato"],
+    ["100000000", "1º de 4", "23% abaixo do mais barato"],
+    ["140000000", "2º de 4", "8% acima do mais barato"],
+    ["200000000", "3º de 4", "54% acima do mais barato"],
+    ["500000000", "4º de 4", "285% acima do mais barato"],
   ];
   for (const [preco, colocacao, distancia] of casos) {
     await c.locator(".estoque-preco-venda").click();
     await c.locator("input").fill(preco);
     await c.locator("input").press("Enter");
-    await expect(linha).toContainText(colocacao);
-    await expect(linha).toContainText(distancia);
+    await expect(linhaVenda).toContainText(colocacao);
+    await expect(linhaVenda).toContainText(distancia);
   }
 
   // Estar em primeiro é o estado que quem vende persegue, e é destacado.
   await c.locator(".estoque-preco-venda").click();
   await c.locator("input").fill("100000000");
   await c.locator("input").press("Enter");
-  await expect(linha).toHaveClass(/is-primeiro/);
+  await expect(linhaVenda).toContainText("1º de 4");
 
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
 });
@@ -782,13 +833,13 @@ test("mudar o preço muda a colocação e a distância, exatamente", async ({ pa
 test("a colocação aparece mesmo com confiança baixa", async ({ page }) => {
   await validarItem(page, "Espada Primordial");
   const c = card(page, "Espada Primordial");
-  await expect(c.locator(".estoque-cenarios")).toHaveCount(0);
+  await expect(c.locator(".estoque-cenario")).toHaveCount(0);
 
   await c.locator(".estoque-preco-venda").click();
   await c.locator("input").fill("200000000");
   await c.locator("input").press("Enter");
 
-  await expect(c.locator(".estoque-sugestao-seu")).toContainText("3º de 4 anúncios");
+  await expect(c.locator(".estoque-venda-valor")).toContainText("3º de 4");
 });
 
 // O mercado é dinâmico: a fila muda a cada atualização, e o seu preço é insumo
@@ -803,13 +854,13 @@ test("editar o preço recalcula o tempo até vender, de graça", async ({ page, 
   await c.locator(".estoque-preco-venda").click();
   await c.locator("input").fill("1000");
   await c.locator("input").press("Enter");
-  await expect(c.locator(".estoque-sugestao-seu")).toContainText("1º de 3 anúncios");
+  await expect(c.locator(".estoque-venda-valor")).toContainText("1º de 3");
 
   // Acima dos dois: a fila inteira na frente.
   await c.locator(".estoque-preco-venda").click();
   await c.locator("input").fill("2000");
   await c.locator("input").press("Enter");
-  await expect(c.locator(".estoque-sugestao-seu")).toContainText("3º de 3 anúncios");
+  await expect(c.locator(".estoque-venda-valor")).toContainText("3º de 3");
 
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
 });
@@ -823,15 +874,15 @@ test("um personagem seu sai da fila que está na sua frente", async ({ page, req
   await c.locator("input").fill("1400");
   await c.locator("input").press("Enter");
   // Entre 1.200 e 1.500: segundo de três.
-  await expect(c.locator(".estoque-sugestao-seu")).toContainText("2º de 3 anúncios");
+  await expect(c.locator(".estoque-venda-valor")).toContainText("2º de 3");
 
   await zerarContagemDoUpstream(request);
   // O anúncio de 1.200 z é do "Vendedor elixir-a". Reconhecido como seu, ele
   // sai da concorrência — e você passa a ser o primeiro dos dois que restam.
   await adicionarPersonagem(page, "Vendedor elixir-a");
 
-  await expect(card(page, "Elixir do Mercador").locator(".estoque-sugestao-seu")).toContainText(
-    "1º de 2 anúncios",
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-venda-valor")).toContainText(
+    "1º de 2",
   );
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
 });
@@ -926,57 +977,6 @@ test("o aviso sobrevive à troca de aba", async ({ page }) => {
   await page.getByRole("link", { name: "Estoque" }).click();
 
   await expect(avisoDeLoja(page)).toBeVisible();
-});
-
-// ---------------------------------------------------------------------------
-// Régua de preços
-// ---------------------------------------------------------------------------
-
-const regua = (page, nome) => card(page, nome).locator(".estoque-regua");
-const tiques = (page, nome) => card(page, nome).locator(".estoque-regua-tique");
-
-test("a régua mostra um tique por anúncio e destaca o seu preço", async ({ page }) => {
-  await validarItem(page, "Elixir do Mercador");
-  const c = card(page, "Elixir do Mercador");
-  await c.locator(".estoque-preco-venda").click();
-  await c.locator("input").fill("1400");
-  await c.locator("input").press("Enter");
-
-  // Dois concorrentes mais o seu preço.
-  await expect(tiques(page, "Elixir do Mercador")).toHaveCount(3);
-  await expect(c.locator(".estoque-regua-tique.is-seu-preco")).toHaveCount(1);
-  await expect(regua(page, "Elixir do Mercador")).toHaveAttribute("role", "img");
-});
-
-test("a régua marca os seus anúncios separados dos concorrentes", async ({ page }) => {
-  await adicionarPersonagem(page, "Vendedor elixir-a");
-  await validarItem(page, "Elixir do Mercador");
-
-  await expect(card(page, "Elixir do Mercador").locator(".estoque-regua-tique.is-meu")).toHaveCount(1);
-});
-
-// Escala logarítmica: num item cujos anúncios vão de 200k a 88kk, uma escala
-// linear empilharia os baratos num pixel e esconderia justamente a estrutura
-// que a régua existe para mostrar.
-test("a posição dos tiques usa escala logarítmica", async ({ page }) => {
-  await validarItem(page, "Espada Primordial");
-
-  const posicoes = await page.evaluate(() =>
-    [...document.querySelectorAll(".estoque-card .estoque-regua-tique")].map((el) =>
-      parseFloat(el.style.left),
-    ),
-  );
-  expect(posicoes.length).toBeGreaterThanOrEqual(2);
-  // As pontas ancoram em 0% e 100%.
-  expect(Math.min(...posicoes)).toBeCloseTo(0, 1);
-  expect(Math.max(...posicoes)).toBeCloseTo(100, 1);
-});
-
-test("sem concorrência suficiente a régua não aparece", async ({ page }) => {
-  // A Carta Poring Noel tem um anúncio só: não há o que comparar.
-  await validarItem(page, "Carta Poring Noel");
-
-  await expect(regua(page, "Carta Poring Noel")).toHaveCount(0);
 });
 
 // ---------------------------------------------------------------------------
@@ -1138,4 +1138,163 @@ test("validar tudo valida os pendentes em série", async ({ page }) => {
   // frase, que deixa de ser "sem validar".
   await expect(contraOMercado(page, "Elixir do Mercador")).toHaveText("defina o seu preço", { timeout: 20000 });
   await expect(contraOMercado(page, "Bota do Andarilho")).toHaveText("sem anúncios", { timeout: 20000 });
+});
+
+// ---------------------------------------------------------------------------
+// Histograma
+// ---------------------------------------------------------------------------
+
+const barras = (page, nome) => card(page, nome).locator(".estoque-barra");
+
+test("o histograma mostra a distribuição e marca onde você está", async ({ page }) => {
+  await validarItem(page, "Espada Primordial");
+  const c = card(page, "Espada Primordial");
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("140000000");
+  await c.locator("input").press("Enter");
+
+  await expect(barras(page, "Espada Primordial")).toHaveCount(8);
+  await expect(c.locator(".estoque-barra.is-seu")).toHaveCount(1);
+  await expect(c.locator(".estoque-barra-voce")).toHaveText("você");
+});
+
+// A barra do seu preço acompanha a cor do status: é a mesma informação da
+// bolinha da tabela, no lugar onde se está olhando.
+test("a barra do seu preço acompanha a cor do status", async ({ page }) => {
+  await validarItem(page, "Espada Primordial");
+  const c = card(page, "Espada Primordial");
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("200000000");
+  await c.locator("input").press("Enter");
+
+  await expect(c.locator(".estoque-barra.is-seu")).toHaveClass(/estoque-barra-perdendo/);
+});
+
+test("sem concorrência suficiente o histograma não aparece", async ({ page }) => {
+  // A Carta Poring Noel tem um anúncio só: não há distribuição a mostrar.
+  await validarItem(page, "Carta Poring Noel");
+
+  await expect(card(page, "Carta Poring Noel").locator(".estoque-histograma")).toHaveCount(0);
+});
+
+// ---------------------------------------------------------------------------
+// Painel: tarja, ação e abas
+// ---------------------------------------------------------------------------
+
+const tarjaDe = (page, nome) => card(page, nome).locator(".estoque-tarja");
+const acao = (page, nome) => card(page, nome).locator(".estoque-acao");
+
+test("a tarja diz a situação e oferece a ação que cabe", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+  const c = card(page, "Elixir do Mercador");
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("2000");
+  await c.locator("input").press("Enter");
+
+  await expect(tarjaDe(page, "Elixir do Mercador")).toHaveClass(/estoque-tarja-perdendo/);
+  await expect(tarja(page, "Elixir do Mercador")).toContainText("Estão vendendo mais barato");
+  // Um zeny abaixo do concorrente mais barato (1.200 z).
+  await expect(acao(page, "Elixir do Mercador")).toHaveText("Reprecificar 1.199 z");
+});
+
+// Sendo o mais barato não há o que fazer — e um botão que não faz nada seria
+// pior que botão nenhum.
+test("sendo o mais barato, a tarja não oferece ação", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+  const c = card(page, "Elixir do Mercador");
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("1000");
+  await c.locator("input").press("Enter");
+
+  await expect(tarjaDe(page, "Elixir do Mercador")).toHaveClass(/estoque-tarja-na-frente/);
+  await expect(tarja(page, "Elixir do Mercador")).toContainText("Nada a fazer agora");
+  await expect(acao(page, "Elixir do Mercador")).toHaveCount(0);
+});
+
+// O programa não consegue mexer na sua loja dentro do jogo: quem aplica o
+// preço é você. Por isso o clique grava E copia, e o toast diz o que falta.
+test("reprecificar grava o preço, copia o valor e avisa o que falta", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await validarItem(page, "Elixir do Mercador");
+  const c = card(page, "Elixir do Mercador");
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("2000");
+  await c.locator("input").press("Enter");
+
+  await acao(page, "Elixir do Mercador").click();
+
+  await expect(c.locator(".estoque-preco-venda")).toHaveText("Vendo por: 1.199 z");
+  await expect(page.locator(".toast")).toContainText("Aplique o preço na sua loja");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("1199");
+
+  // E o item passa a ser o mais barato.
+  await expect(bolinhaDe(page, "Elixir do Mercador")).toHaveClass(/estoque-bolinha-na-frente/);
+});
+
+// Sem collapse em lugar nenhum das abas: a aba já é a divulgação, e um clique
+// a mais só esconde o que se foi ver.
+test("nenhuma aba esconde o conteúdo atrás de um segundo clique", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+
+  await abrirAba(page, "Histórico");
+  await expect(diasDoHistorico(page, "Elixir do Mercador")).toHaveCount(7);
+
+  await abrirAba(page, "Estratégias");
+  await expect(cenarios(page, "Elixir do Mercador")).toHaveCount(3);
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-cenario-aposta").first()).toBeVisible();
+
+  // E nenhum <details> sobrou no painel.
+  await expect(card(page, "Elixir do Mercador").locator("details")).toHaveCount(0);
+});
+
+test("as abas trocam o conteúdo e a escolha persiste", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-tile-mais-barato")).toBeVisible();
+  await abrirAba(page, "Histórico");
+  // As duas abas usam tiles; o que distingue é QUAIS.
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-tile-hist-min")).toBeVisible();
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-tile-mais-barato")).toHaveCount(0);
+
+  // Quem está comparando histórico entre itens não quer voltar para "Mercado"
+  // a cada troca de seleção.
+  await validarItem(page, "Espada Primordial");
+  await expect(
+    page.locator(".estoque-aba").filter({ hasText: "Histórico" }),
+  ).toHaveClass(/is-ativa/);
+});
+
+// A contagem na aba avisa que há o que ler ali sem ocupar espaço na tela.
+test("as abas contam estratégias e ressalvas", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+  // Item homogêneo: três estratégias e nenhuma ressalva a fazer.
+  await expect(page.locator(".estoque-aba").filter({ hasText: "Estratégias" })).toContainText("3");
+  await expect(page.locator(".estoque-aba-conta")).toHaveCount(1);
+
+  // Um equipamento disperso é o oposto: nenhuma estratégia recomendada e
+  // várias ressalvas.
+  await validarItem(page, "Espada Primordial");
+  const contaRessalvas = page.locator(".estoque-aba").filter({ hasText: "Ressalvas" }).locator(".estoque-aba-conta");
+  await expect(contaRessalvas).toBeVisible();
+  await expect(page.locator(".estoque-aba").filter({ hasText: "Estratégias" })).toHaveText("Estratégias");
+});
+
+test("um equipamento disperso ganha a ressalva sobre refino e encantamento", async ({ page }) => {
+  await validarItem(page, "Espada Primordial");
+  await abrirAba(page, "Ressalvas");
+
+  const ressalvas = card(page, "Espada Primordial").locator(".estoque-ressalva");
+  await expect(ressalvas.filter({ hasText: "Sobre a confiança" })).toContainText(
+    "não distingue refino nem encantamento",
+  );
+  await expect(ressalvas.filter({ hasText: "velocidade de venda" })).toContainText("aproximação");
+});
+
+test("um item sem validar mostra a tarja pedindo validação", async ({ page }) => {
+  await adicionar(page, "Elmo Ancestral");
+
+  // Sem validar não há tarja nem abas: não há o que comparar nem medir.
+  await expect(card(page, "Elmo Ancestral").locator(".estoque-tarja")).toHaveCount(0);
+  await expect(card(page, "Elmo Ancestral").locator(".estoque-abas")).toHaveCount(0);
+  await expect(card(page, "Elmo Ancestral").locator(".estoque-validar")).toBeVisible();
 });

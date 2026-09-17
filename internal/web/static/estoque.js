@@ -704,44 +704,61 @@ function buildBlocoDeHistorico(item) {
   const dados = item.historico;
   if (!dados) return bloco;
 
-  const resumo = document.createElement("span");
-  resumo.className = "estoque-historico-resumo";
-
   if (!dados.days || dados.days.length === 0) {
+    const resumo = document.createElement("p");
+    resumo.className = "estoque-historico-resumo";
     resumo.textContent = "Sem vendas registradas " + textoDaJanela(dados.window) + ".";
     bloco.appendChild(resumo);
     return bloco;
   }
 
+  // Os agregados do período viram tiles, e não uma frase corrida.
+  //
+  // Espremidos numa linha só eles se atropelavam e quebravam no meio de um
+  // valor. Em caixas lado a lado cada número tem rótulo e respiro — e eles
+  // espelham as colunas da tabela logo abaixo, então a leitura é a mesma de
+  // cima para baixo: o período inteiro primeiro, depois dia a dia.
   const s = dados.summary;
-  resumo.textContent =
-    "Vendido entre " + formatMoney(s.min) + " e " + formatMoney(s.max) +
-    " · média " + formatMoney(Math.round(s.weightedAvg)) +
-    " · " + s.qtySold + (s.qtySold === 1 ? " unidade" : " unidades");
-  bloco.appendChild(resumo);
-
-  // A tendência entra na mesma linha, e só quando existe: uma seta para toda
-  // variação de 1% seria ruído com aparência de sinal (ver calcularTendencia).
   const tendencia = calcularTendencia(dados);
-  if (tendencia) {
-    const seta = document.createElement("span");
-    seta.className = "estoque-tendencia " + (tendencia.subindo ? "is-subindo" : "is-caindo");
-    seta.textContent =
-      (tendencia.subindo ? " ↗ " : " ↘ ") +
-      Math.abs(Math.round(tendencia.variacao * 100)) + "% vs. o período anterior";
-    resumo.appendChild(seta);
-  }
 
-  const detalhe = document.createElement("details");
+  const tiles = document.createElement("div");
+  tiles.className = "estoque-tiles";
+  tiles.appendChild(buildTile("Mínimo", formatMoney(s.min), "", "", "hist-min"));
+  tiles.appendChild(
+    buildTile(
+      "Médio",
+      formatMoney(Math.round(s.weightedAvg)),
+      // A tendência só aparece quando existe: uma seta para toda variação de
+      // 1% seria ruído com aparência de sinal (ver calcularTendencia).
+      tendencia
+        ? (tendencia.subindo ? "↗ " : "↘ ") +
+          Math.abs(Math.round(tendencia.variacao * 100)) + "% vs. o período anterior"
+        : "",
+      tendencia ? (tendencia.subindo ? "is-subindo" : "is-caindo") : "",
+      "hist-med",
+    ),
+  );
+  tiles.appendChild(buildTile("Máximo", formatMoney(s.max), "", "", "hist-max"));
+  tiles.appendChild(
+    buildTile("Vendido", s.qtySold + " un.", rotuloDaJanela(dados.window), "", "hist-qtd"),
+  );
+  bloco.appendChild(tiles);
+
+  // Sem <details>: a aba já é a divulgação. Quando o histórico morava no card,
+  // dentro de uma grade, recolher a tabela era o que impedia um item de
+  // esticar a linha inteira — numa aba própria isso virou um clique a mais
+  // para ver o que a aba existe para mostrar.
+  const detalhe = document.createElement("div");
   detalhe.className = "estoque-historico-dias";
 
-  const sumario = document.createElement("summary");
+  const legenda = document.createElement("p");
+  legenda.className = "estoque-historico-legenda";
   // Quantos dias vieram e quantos existem: a diferença é o que diz ao usuário
   // que trocar para uma janela maior tem o que mostrar.
   const quantos = dados.days.length === 1 ? "1 dia com venda" : dados.days.length + " dias com venda";
-  sumario.textContent =
+  legenda.textContent =
     quantos + (dados.daysAvailable > dados.days.length ? " de " + dados.daysAvailable + " registrados" : "");
-  detalhe.appendChild(sumario);
+  detalhe.appendChild(legenda);
 
   const tabela = document.createElement("table");
   tabela.className = "estoque-dias";
@@ -781,186 +798,231 @@ function textoDaJanela(janela) {
 // Régua de preços
 // ---------------------------------------------------------------------------
 
-// buildReguaDePrecos desenha uma faixa horizontal com um tique por anúncio,
-// posicionado pelo preço, e um marcador destacado no seu.
-//
-// Um objeto só responde quatro perguntas que, em texto, custariam quatro
-// linhas: QUANTOS concorrentes existem, A QUE PREÇOS, ONDE você está entre
-// eles e — porque os vazios ficam visíveis — SE o mercado está partido em
-// faixas. Esse último é o item 4 do tratamento da mistura de refinos: um vazio
-// grande é o próprio mercado dizendo que ali há duas coisas diferentes à
-// venda (ver detectarFaixas, em sugestao.js).
-//
-// A escala é LOGARÍTMICA porque é isso que o problema pede: num item em que os
-// anúncios vão de 200k a 88kk, uma escala linear empilharia os cinco baratos
-// num pixel e deixaria o resto da régua vazia — justamente escondendo a
-// estrutura que a régua existe para mostrar.
-function buildReguaDePrecos(item, sugestao) {
-  const outros = sugestao.concorrencia === null ? [] : separarAnuncios(item.lastResult).outros;
-  const meus = sugestao.meus || [];
-  const marcados = [];
-  for (const a of outros) marcados.push({ preco: a.price, meu: false });
-  for (const a of meus) marcados.push({ preco: a.price, meu: true });
-  if (item.precoVenda != null) marcados.push({ preco: item.precoVenda, meu: true, seuPreco: true });
+// NUM_BALDES é em quantas faixas de preço o histograma divide o mercado.
+// Oito é o que cabe legível na largura do painel sem virar um borrão.
+const NUM_BALDES = 8;
 
-  const precos = marcados.map((m) => m.preco).filter((p) => p > 0);
-  if (precos.length < 2) return null;
+// buildHistograma mostra onde cada anúncio está na escala de preço: altura da
+// barra = quantos anúncios caem naquela faixa, e a faixa onde VOCÊ está
+// pintada na cor do seu status.
+//
+// A escala é LOGARÍTMICA porque é isso que o problema pede. Num item cujos
+// anúncios vão de 400k a 22M, uma escala linear empilharia os baratos numa
+// barra só e deixaria o resto do gráfico vazio — escondendo justamente a
+// estrutura que o gráfico existe para mostrar: se o mercado está partido em
+// faixas, o vazio entre elas aparece aqui.
+function buildHistograma(item, sugestao, statusInfo) {
+  const { meus, outros } = separarAnuncios(item.lastResult);
+  const todos = [...outros, ...meus];
+  if (todos.length < 2) return null;
 
+  const precos = todos.map((a) => a.price).filter((p) => p > 0);
   const menor = Math.min(...precos);
   const maior = Math.max(...precos);
   if (maior <= menor) return null;
 
   const base = Math.log(menor);
   const amplitude = Math.log(maior) - base;
-  const posicao = (preco) => ((Math.log(preco) - base) / amplitude) * 100;
+  const baldeDe = (preco) =>
+    Math.min(NUM_BALDES - 1, Math.floor(((Math.log(preco) - base) / amplitude) * NUM_BALDES));
 
-  const regua = document.createElement("div");
-  regua.className = "estoque-regua";
-  regua.setAttribute("role", "img");
-  regua.setAttribute(
+  const baldes = Array.from({ length: NUM_BALDES }, () => ({ total: 0, seu: false }));
+  for (const anuncio of todos) {
+    if (anuncio.price <= 0) continue;
+    baldes[baldeDe(anuncio.price)].total++;
+  }
+  const seuBalde = item.precoVenda != null && item.precoVenda > 0 ? baldeDe(item.precoVenda) : -1;
+  if (seuBalde >= 0 && seuBalde < NUM_BALDES) baldes[seuBalde].seu = true;
+
+  const pico = Math.max(...baldes.map((b) => b.total), 1);
+
+  const bloco = document.createElement("div");
+  bloco.className = "estoque-histograma";
+
+  const titulo = document.createElement("p");
+  titulo.className = "estoque-secao-titulo";
+  titulo.textContent = "Onde cada anúncio está";
+  bloco.appendChild(titulo);
+
+  const grafico = document.createElement("div");
+  grafico.className = "estoque-barras";
+  grafico.setAttribute("role", "img");
+  grafico.setAttribute(
     "aria-label",
-    "Anúncios entre " + formatMoney(menor) + " e " + formatMoney(maior) +
-      (item.precoVenda != null ? ", com o seu preço em " + formatMoney(item.precoVenda) : ""),
+    todos.length + " anúncios entre " + formatMoney(menor) + " e " + formatMoney(maior) +
+      (seuBalde >= 0 ? ", com o seu preço em " + formatMoney(item.precoVenda) : ""),
   );
 
-  const trilho = document.createElement("div");
-  trilho.className = "estoque-regua-trilho";
-  for (const marca of marcados) {
-    if (marca.preco <= 0) continue;
-    const tique = document.createElement("span");
-    tique.className = "estoque-regua-tique";
-    if (marca.seuPreco) tique.classList.add("is-seu-preco");
-    else if (marca.meu) tique.classList.add("is-meu");
-    tique.style.left = posicao(marca.preco).toFixed(2) + "%";
-    tique.title = marca.seuPreco
-      ? "Seu preço de venda: " + formatMoney(marca.preco)
-      : (marca.meu ? "Seu anúncio: " : "Concorrente: ") + formatMoney(marca.preco);
-    trilho.appendChild(tique);
+  for (const balde of baldes) {
+    const coluna = document.createElement("div");
+    coluna.className = "estoque-barra-coluna";
+    const barra = document.createElement("div");
+    barra.className = "estoque-barra";
+    if (balde.seu) barra.classList.add("is-seu", "estoque-barra-" + statusInfo.status);
+    // Uma faixa vazia continua ocupando espaço: é o vazio que revela o mercado
+    // partido, e escondê-lo apagaria a informação.
+    barra.style.height = (balde.total === 0 ? 2 : Math.round((balde.total / pico) * 100)) + "%";
+    barra.title = balde.total === 1 ? "1 anúncio" : balde.total + " anúncios";
+    coluna.appendChild(barra);
+    if (balde.seu) {
+      const marca = document.createElement("span");
+      marca.className = "estoque-barra-voce";
+      marca.textContent = "você";
+      coluna.appendChild(marca);
+    }
+    grafico.appendChild(coluna);
   }
-  regua.appendChild(trilho);
+  bloco.appendChild(grafico);
 
   const pontas = document.createElement("div");
-  pontas.className = "estoque-regua-pontas";
-  const esquerda = document.createElement("span");
-  esquerda.textContent = formatMoney(menor);
-  const direita = document.createElement("span");
-  direita.textContent = formatMoney(maior);
-  pontas.appendChild(esquerda);
-  pontas.appendChild(direita);
-  regua.appendChild(pontas);
+  pontas.className = "estoque-barras-pontas";
+  const esq = document.createElement("span");
+  esq.textContent = formatMoney(menor);
+  const meio = document.createElement("span");
+  meio.className = "estoque-barras-meio";
+  meio.textContent = sugestao.faixas
+    ? sugestao.faixas.baixa.length + " anúncios até " +
+      formatMoney(sugestao.faixas.baixa[sugestao.faixas.baixa.length - 1].price) + " · " +
+      sugestao.faixas.alta.length + " a partir de " + formatMoney(sugestao.faixas.alta[0].price)
+    : "mercado uniforme: " + todos.length + " anúncios na mesma faixa";
+  const dir = document.createElement("span");
+  dir.textContent = formatMoney(maior);
+  pontas.appendChild(esq);
+  pontas.appendChild(meio);
+  pontas.appendChild(dir);
+  bloco.appendChild(pontas);
 
-  return regua;
+  return bloco;
 }
 
-// ---------------------------------------------------------------------------
-// Preço sugerido
-// ---------------------------------------------------------------------------
+function buildTile(rotulo, valor, detalhe, classeDetalhe, classeTile) {
+  const tile = document.createElement("div");
+  tile.className = "estoque-tile" + (classeTile ? " estoque-tile-" + classeTile : "");
+  const r = document.createElement("span");
+  r.className = "estoque-tile-rotulo";
+  r.textContent = rotulo;
+  tile.appendChild(r);
+  const v = document.createElement("span");
+  v.className = "estoque-tile-valor";
+  v.textContent = valor;
+  tile.appendChild(v);
+  if (detalhe) {
+    const d = document.createElement("span");
+    d.className = "estoque-tile-detalhe" + (classeDetalhe ? " " + classeDetalhe : "");
+    d.textContent = detalhe;
+    tile.appendChild(d);
+  }
+  return tile;
+}
 
-const ROTULO_CONFIANCA = {
-  alta: "confiança alta",
-  media: "confiança média",
-  baixa: "confiança baixa",
-  nenhuma: "sem dados suficientes",
-};
-
-// buildBlocoDeSugestao desenha a faixa sugerida numa linha e guarda os
-// cenários dentro de um <details>.
-//
-// Nada de tooltip: os cards dividem uma grade e precisam de altura previsível,
-// mas a explicação de cada estratégia é longa demais para um atributo title —
-// que ainda por cima demora meio segundo para aparecer e não existe no toque.
-// Recolhido, cabe texto de verdade e o card não cresce.
-function buildBlocoDeSugestao(item) {
+// buildAbaMercado: os quatro números que resumem a situação, o histograma e a
+// expectativa de venda.
+function buildAbaMercado(item, sugestao, statusInfo) {
   const bloco = document.createElement("div");
-  bloco.className = "estoque-sugestao";
 
-  // Sem histórico ainda não há o que calcular.
-  if (!item.historico) return bloco;
+  const tiles = document.createElement("div");
+  tiles.className = "estoque-tiles";
 
-  const sugestao = calcularSugestao(item);
+  const outros = sugestao.concorrencia || [];
+  const { meus } = separarAnuncios(item.lastResult);
+  const souOMaisBarato = statusInfo.status === STATUS_NA_FRENTE && meus.length > 0;
 
-  const linha = document.createElement("span");
-  linha.className = "estoque-sugestao-faixa";
-  if (sugestao.faixa) {
-    linha.textContent =
-      "Sugerido: " + formatMoney(sugestao.faixa.min) + " – " + formatMoney(sugestao.faixa.max);
-  } else {
-    linha.textContent = "Sem preço sugerido";
-  }
+  tiles.appendChild(
+    buildTile(
+      "Mais barato",
+      outros.length > 0 ? formatMoney(outros[0].price) : "—",
+      souOMaisBarato ? "(você)" : "",
+      "",
+      "mais-barato",
+    ),
+  );
+  tiles.appendChild(
+    buildTile(
+      "Oferta",
+      outros.length > 0 ? somarUnidades(outros) + " un." : "—",
+      outros.length > 0 ? outros.length + (outros.length === 1 ? " anúncio" : " anúncios") : "",
+      "",
+      "oferta",
+    ),
+  );
 
-  const selo = document.createElement("span");
-  selo.className = "estoque-confianca estoque-confianca-" + sugestao.confianca.nivel;
-  selo.textContent = ROTULO_CONFIANCA[sugestao.confianca.nivel];
-  linha.appendChild(document.createTextNode(" · "));
-  linha.appendChild(selo);
-  bloco.appendChild(linha);
+  const resumo = item.historico && item.historico.summary;
+  // O rótulo acompanha a janela escolhida: dizer "vendido 7 d" com o seletor
+  // em 30 dias seria mentira.
+  const rotuloJanela = "Vendido · " + rotuloDaJanela(janelaDoItem(item));
+  const tend = sugestao.tendencia;
+  tiles.appendChild(
+    buildTile(
+      rotuloJanela,
+      resumo && resumo.qtySold > 0 ? resumo.qtySold + " un." : "—",
+      tend ? (tend.subindo ? "↗ " : "↘ ") + Math.abs(Math.round(tend.variacao * 100)) + "%" : "",
+      tend ? (tend.subindo ? "is-subindo" : "is-caindo") : "",
+      "vendido",
+    ),
+  );
+  tiles.appendChild(
+    buildTile(
+      "Faixa sugerida",
+      sugestao.faixa ? formatMoney(sugestao.faixa.min) + " – " + formatMoney(sugestao.faixa.max) : "—",
+      ROTULO_CONFIANCA[sugestao.confianca.nivel],
+      "estoque-confianca-" + sugestao.confianca.nivel,
+      "faixa",
+    ),
+  );
+  bloco.appendChild(tiles);
 
-  // O motivo da confiança é o que transforma um selo opaco em informação: é
-  // ele que conta ao usuário QUE o histórico está somando coisas diferentes.
-  if (sugestao.confianca.motivo) {
-    const motivo = document.createElement("p");
-    motivo.className = "estoque-confianca-motivo";
-    motivo.textContent = sugestao.confianca.motivo;
-    bloco.appendChild(motivo);
-  }
+  const histograma = buildHistograma(item, sugestao, statusInfo);
+  if (histograma) bloco.appendChild(histograma);
 
-  // O mercado partido em faixas, quando os próprios anúncios revelam isso.
-  if (sugestao.faixas) {
-    const partido = document.createElement("p");
-    partido.className = "estoque-faixas";
-    partido.textContent =
-      "O mercado está partido: " + sugestao.faixas.baixa.length + " anúncio(s) até " +
-      formatMoney(sugestao.faixas.baixa[sugestao.faixas.baixa.length - 1].price) +
-      " e " + sugestao.faixas.alta.length + " a partir de " +
-      formatMoney(sugestao.faixas.alta[0].price) + ".";
-    bloco.appendChild(partido);
-  }
-
-  // A linha do SEU preço. Ela abre com os dois fatos exatos — colocação na
-  // fila e distância do mais barato —, e só depois vem a estimativa de tempo,
-  // que é a única parte incerta.
-  //
-  // A ordem importa: os baldes grosseiros do tempo ("provavelmente dias")
-  // existem para não mentir sobre precisão, mas sozinhos eles quase não se
-  // mexem quando o usuário muda o preço — e o preço é justamente o que ele
-  // está decidindo. A colocação muda a cada anúncio ultrapassado, e não
-  // depende de confiança nenhuma: é contagem.
-  if (item.precoVenda != null && sugestao.posicao) {
-    const seu = document.createElement("span");
-    seu.className = "estoque-sugestao-seu";
-
-    const partes = [
-      sugestao.posicao.colocacao + "º de " + sugestao.posicao.total + " anúncios",
-    ];
+  if (sugestao.tempoNoSeuPreco || sugestao.posicao) {
+    const rodape = document.createElement("div");
+    rodape.className = "estoque-venda-estimada";
+    const r = document.createElement("span");
+    r.className = "estoque-tile-rotulo";
+    r.textContent = "Venda estimada";
+    rodape.appendChild(r);
+    const v = document.createElement("span");
+    v.className = "estoque-venda-valor";
+    // Os FATOS primeiro — colocação e distância do mais barato —, e só depois a
+    // estimativa de tempo. Os dois primeiros se movem a cada zeny que o
+    // usuário digita; o terceiro é grosseiro de propósito, e sozinho daria a
+    // impressão de que o card não reage ao preço.
+    const partes = [];
+    if (sugestao.posicao) partes.push(sugestao.posicao.colocacao + "º de " + sugestao.posicao.total);
     if (sugestao.distancia != null) {
       const pct = Math.round(Math.abs(sugestao.distancia) * 100);
-      if (pct === 0) partes.push("no mesmo preço do mais barato");
-      else partes.push(pct + "% " + (sugestao.distancia > 0 ? "acima" : "abaixo") + " do mais barato");
+      partes.push(
+        pct === 0
+          ? "no mesmo preço do mais barato"
+          : pct + "% " + (sugestao.distancia > 0 ? "acima" : "abaixo") + " do mais barato",
+      );
     }
     if (sugestao.tempoNoSeuPreco) partes.push(sugestao.tempoNoSeuPreco);
-
-    seu.textContent = "Seu preço: " + partes.join(" · ");
-    if (sugestao.posicao.colocacao === 1) seu.classList.add("is-primeiro");
-    bloco.appendChild(seu);
-  }
-
-  const regua = buildReguaDePrecos(item, sugestao);
-  if (regua) bloco.appendChild(regua);
-
-  if (sugestao.cenarios.length > 0) {
-    bloco.appendChild(buildCenarios(sugestao.cenarios));
+    v.textContent = partes.join(" · ") || "—";
+    rodape.appendChild(v);
+    bloco.appendChild(rodape);
   }
 
   return bloco;
 }
 
-function buildCenarios(cenarios) {
-  const detalhe = document.createElement("details");
-  detalhe.className = "estoque-cenarios";
+const ROTULO_CONFIANCA = {
+  alta: "confiança alta",
+  media: "confiança média",
+  baixa: "confiança baixa",
+  nenhuma: "sem dados",
+};
 
-  const sumario = document.createElement("summary");
-  sumario.textContent = "Estratégias de preço";
-  detalhe.appendChild(sumario);
+// buildCenarios lista as três estratégias, cada uma com preço, expectativa e a
+// aposta que embute.
+//
+// Sem <details>, pelo mesmo motivo da tabela de dias: quando isto morava no
+// card, dentro de uma grade, recolher era o que impedia um item de esticar a
+// linha inteira. Numa aba própria, a aba já é a divulgação — e esconder o
+// conteúdo atrás de mais um clique é esconder o que se foi ver.
+function buildCenarios(cenarios) {
+  const bloco = document.createElement("div");
+  bloco.className = "estoque-cenarios";
 
   for (const cenario of cenarios) {
     const item = document.createElement("div");
@@ -993,10 +1055,35 @@ function buildCenarios(cenarios) {
     aposta.textContent = cenario.aposta;
     item.appendChild(aposta);
 
-    detalhe.appendChild(item);
+    bloco.appendChild(item);
   }
+  return bloco;
+}
 
-  return detalhe;
+function buildAbaRessalvas(ressalvas) {
+  const bloco = document.createElement("div");
+  bloco.className = "estoque-ressalvas";
+  if (ressalvas.length === 0) {
+    const vazio = document.createElement("p");
+    vazio.className = "estoque-detalhe-vazio";
+    vazio.textContent = "Nada a ressalvar: os números desta tela são diretos.";
+    bloco.appendChild(vazio);
+    return bloco;
+  }
+  for (const ressalva of ressalvas) {
+    const item = document.createElement("div");
+    item.className = "estoque-ressalva";
+    const t = document.createElement("span");
+    t.className = "estoque-ressalva-titulo";
+    t.textContent = ressalva.titulo;
+    item.appendChild(t);
+    const p = document.createElement("p");
+    p.className = "estoque-ressalva-texto";
+    p.textContent = ressalva.texto;
+    item.appendChild(p);
+    bloco.appendChild(item);
+  }
+  return bloco;
 }
 
 // ---------------------------------------------------------------------------
@@ -1055,22 +1142,92 @@ function aplicarDisponibilidadeDoUndercut(card, item) {
     : "Disponível apenas para itens que estão na loja";
 }
 
+// Qual aba do painel está aberta. Persistida: quem está comparando histórico
+// entre itens não quer voltar para "Mercado" a cada troca de seleção.
+const ESTOQUE_ABA_KEY = "ro-market-tracker:estoque-aba";
+const ABAS = ["mercado", "historico", "estrategias", "ressalvas"];
+const ROTULO_ABA = {
+  mercado: "Mercado",
+  historico: "Histórico",
+  estrategias: "Estratégias",
+  ressalvas: "Ressalvas",
+};
+
+function abaAtiva() {
+  try {
+    const salva = localStorage.getItem(ESTOQUE_ABA_KEY);
+    if (ABAS.includes(salva)) return salva;
+  } catch {
+    // Sem preferência salva: começa no mercado.
+  }
+  return "mercado";
+}
+
+function gravarAba(aba) {
+  try {
+    localStorage.setItem(ESTOQUE_ABA_KEY, aba);
+  } catch {
+    // Ver saveEstoque.
+  }
+}
+
+// buildEstoqueCard monta o painel de detalhe do item selecionado.
+//
+// A ordem é a da decisão: quem é este item, por quanto você vende, O QUE
+// FAZER AGORA (a tarja), e só então os números que sustentam isso — em abas,
+// porque juntos eles não cabem e, separados por assunto, cada um é procurado
+// quando faz falta.
 function buildEstoqueCard(item) {
   const li = document.createElement("li");
   li.className = "estoque-card";
   li.dataset.id = item.id;
 
+  // --- cabeçalho ---
   const topo = document.createElement("div");
-  topo.className = "estoque-card-topo";
+  topo.className = "estoque-painel-topo";
 
-  const nome = document.createElement("span");
-  nome.className = "estoque-nome";
+  const nome = document.createElement("h3");
+  nome.className = "estoque-painel-nome";
   nome.textContent = nomeVisivel(item);
   topo.appendChild(nome);
 
   const status = document.createElement("span");
   pintarStatus(status, item.validacao);
   topo.appendChild(status);
+
+  const janela = document.createElement("select");
+  janela.className = "estoque-janela";
+  janela.setAttribute("aria-label", "Janela do histórico de " + nomeVisivel(item));
+  for (const opcao of JANELAS) {
+    const option = document.createElement("option");
+    option.value = opcao.valor;
+    option.textContent = opcao.rotulo;
+    if (opcao.valor === janelaDoItem(item)) option.selected = true;
+    janela.appendChild(option);
+  }
+  topo.appendChild(janela);
+
+  const validar = document.createElement("button");
+  validar.type = "button";
+  validar.className = "estoque-validar";
+  validar.textContent = item.validacao === VALIDACAO_INVALIDO ? "Tentar de novo" : "Validar";
+  topo.appendChild(validar);
+
+  // Só faz sentido depois de validado: sem itemId não há o que consultar.
+  if (item.validacao === VALIDACAO_OK) {
+    const atualizar = document.createElement("button");
+    atualizar.type = "button";
+    atualizar.className = "estoque-atualizar";
+    atualizar.textContent = "↻";
+    atualizar.title = "Consultar o mercado agora";
+    atualizar.setAttribute("aria-label", "Consultar o mercado agora para " + nomeVisivel(item));
+    topo.appendChild(atualizar);
+
+    const quando = document.createElement("span");
+    quando.className = "estoque-atualizado-em";
+    paintUpdatedAt(quando, item.lastCheckedAt);
+    topo.appendChild(quando);
+  }
 
   const remover = document.createElement("button");
   remover.type = "button";
@@ -1082,94 +1239,39 @@ function buildEstoqueCard(item) {
 
   li.appendChild(topo);
 
-  const precos = document.createElement("div");
-  precos.className = "estoque-precos";
+  // --- linha do seu preço e dos interruptores ---
+  const sub = document.createElement("div");
+  sub.className = "estoque-painel-sub";
 
   const precoVenda = document.createElement("span");
   precoVenda.className = "estoque-preco-venda";
   precoVenda.textContent = precoVendaLabel(item.precoVenda);
   precoVenda.tabIndex = 0;
   precoVenda.title = "Clique para editar o preço de venda";
-  precos.appendChild(precoVenda);
-
-  li.appendChild(precos);
-
-  const flags = document.createElement("div");
-  flags.className = "estoque-flags";
+  sub.appendChild(precoVenda);
 
   const loja = document.createElement("button");
   loja.type = "button";
   loja.className = "estoque-toggle estoque-toggle-loja";
   pintarToggle(loja, item.naLoja, "Na loja", "Fora da loja");
-  flags.appendChild(loja);
+  sub.appendChild(loja);
 
-  // Sininho, e não um rótulo escrito: com a tabela mostrando o estado de cada
-  // item numa bolinha, este interruptor deixou de ser sobre exibição e passou
-  // a significar uma coisa só — "me avise mesmo quando eu não estiver na
-  // tela". Isso é notificação, e notificação é um sino.
+  // Sininho, e não um rótulo escrito: com a bolinha da tabela mostrando o
+  // estado, este interruptor deixou de ser sobre exibição e passou a
+  // significar uma coisa só — "me avise mesmo quando eu não estiver na tela".
   const undercut = document.createElement("button");
   undercut.type = "button";
   undercut.className = "estoque-toggle estoque-sino";
   undercut.appendChild(buildSinoIcon());
   pintarSino(undercut, item.undercut);
-  flags.appendChild(undercut);
+  sub.appendChild(undercut);
 
-  li.appendChild(flags);
+  li.appendChild(sub);
 
-  const acoes = document.createElement("div");
-  acoes.className = "estoque-acoes";
-
-  // O seletor de janela é por item, e não da tela inteira: trocá-lo custa uma
-  // consulta ao site, e cobrar isso de todos os itens de uma vez estouraria o
-  // ritmo de uma requisição por minuto que o programa inteiro respeita.
-  const janela = document.createElement("select");
-  janela.className = "estoque-janela";
-  janela.setAttribute("aria-label", "Janela do histórico de " + nomeVisivel(item));
-  for (const opcao of JANELAS) {
-    const option = document.createElement("option");
-    option.value = opcao.valor;
-    option.textContent = opcao.rotulo;
-    if (opcao.valor === janelaDoItem(item)) option.selected = true;
-    janela.appendChild(option);
+  // --- escolha de candidato, quando o nome foi ambíguo ---
+  if (Array.isArray(item.candidatos) && item.candidatos.length > 0) {
+    li.appendChild(buildEscolhaDeCandidato(item));
   }
-  acoes.appendChild(janela);
-
-  // Só faz sentido depois de o item ser validado: sem itemId não há o que
-  // consultar.
-  if (item.validacao === VALIDACAO_OK) {
-    const atualizar = document.createElement("button");
-    atualizar.type = "button";
-    atualizar.className = "estoque-atualizar";
-    atualizar.textContent = "↻";
-    atualizar.title = "Consultar o mercado agora";
-    atualizar.setAttribute("aria-label", "Consultar o mercado agora para " + nomeVisivel(item));
-    acoes.appendChild(atualizar);
-
-    const quando = document.createElement("span");
-    quando.className = "estoque-atualizado-em";
-    paintUpdatedAt(quando, item.lastCheckedAt);
-    acoes.appendChild(quando);
-  }
-
-  const validar = document.createElement("button");
-  validar.type = "button";
-  validar.className = "estoque-validar";
-  // "Tentar de novo" num item inválido: revalidar custa uma requisição (zero,
-  // se for dentro do cache de 30s), então não faz sentido obrigar a apagar e
-  // recadastrar quando o site apenas estava fora do ar na primeira tentativa.
-  validar.textContent = item.validacao === VALIDACAO_INVALIDO ? "Tentar de novo" : "Validar";
-  acoes.appendChild(validar);
-
-  li.appendChild(acoes);
-
-  if (item.validacao === VALIDACAO_OK) {
-    li.appendChild(buildBlocoDeMercado(item));
-    li.appendChild(buildBlocoDeHistorico(item));
-    li.appendChild(buildBlocoDeSugestao(item));
-  }
-
-  // O motivo só existe no estado inválido: o selo vermelho chama a atenção, e
-  // esta linha é quem diz o que aconteceu e o que fazer.
   if (item.validacao === VALIDACAO_INVALIDO && item.motivo) {
     const motivo = document.createElement("p");
     motivo.className = "estoque-motivo";
@@ -1177,15 +1279,144 @@ function buildEstoqueCard(item) {
     li.appendChild(motivo);
   }
 
-  // A escolha fica DENTRO do card, e não num diálogo: ela é sobre este item, e
-  // quem está cadastrando vários seguidos não deve ser interrompido por uma
-  // janela modal a cada nome ambíguo.
-  if (Array.isArray(item.candidatos) && item.candidatos.length > 0) {
-    li.appendChild(buildEscolhaDeCandidato(item));
-  }
-
   aplicarDisponibilidadeDoUndercut(li, item);
+
+  // Sem validar não há o que comparar, medir nem sugerir.
+  if (item.validacao !== VALIDACAO_OK) return li;
+
+  const sugestao = calcularSugestao(item);
+  const statusInfo = classificarStatus(item, { naFila: filaDeValidacao.has(item.id) });
+
+  li.appendChild(buildTarja(item, sugestao, statusInfo));
+  li.appendChild(buildAbas(item, sugestao, statusInfo));
   return li;
+}
+
+// aplicarNovoPreco grava o preço sugerido E o copia para a área de
+// transferência.
+//
+// A cópia não é conveniência: o programa NÃO consegue mexer na sua loja
+// dentro do jogo. Quem aplica o preço é você, e com o valor já na área de
+// transferência isso é um colar. Enquanto você não fizer, o programa está
+// acreditando num preço que a loja não pratica — o botão avisa disso no
+// toast, que é o único lugar onde cabe dizer sem poluir a tela.
+function aplicarNovoPreco(id, preco, botao) {
+  if (!Number.isFinite(preco) || preco <= 0) return;
+
+  const atualizado = updateEstoqueItem(id, { precoVenda: preco, notified: false });
+  if (!atualizado) return;
+  repintarCard(atualizado);
+
+  const texto = String(preco);
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(texto).then(
+      () => showToast(formatMoney(preco) + " copiado. Aplique o preço na sua loja dentro do jogo."),
+      () => showToast("Preço anotado. Aplique " + formatMoney(preco) + " na sua loja dentro do jogo."),
+    );
+  } else {
+    showToast("Preço anotado. Aplique " + formatMoney(preco) + " na sua loja dentro do jogo.");
+  }
+  if (botao) botao.blur();
+}
+
+// buildTarja é o que o usuário lê primeiro: em que situação este item está e
+// o que dá para fazer a respeito agora.
+function buildTarja(item, sugestao, statusInfo) {
+  const { titulo, detalhe, acao } = montarTarja(item, sugestao, statusInfo);
+
+  const tarja = document.createElement("div");
+  tarja.className = "estoque-tarja estoque-tarja-" + statusInfo.status;
+
+  const bolinha = document.createElement("span");
+  bolinha.className = "estoque-bolinha estoque-bolinha-" + statusInfo.status;
+  bolinha.setAttribute("aria-hidden", "true");
+  tarja.appendChild(bolinha);
+
+  const texto = document.createElement("p");
+  texto.className = "estoque-tarja-texto";
+  const forte = document.createElement("strong");
+  forte.textContent = titulo;
+  texto.appendChild(forte);
+  texto.appendChild(document.createTextNode(" " + detalhe));
+  tarja.appendChild(texto);
+
+  if (acao && acao.validar) {
+    const botao = document.createElement("button");
+    botao.type = "button";
+    botao.className = "estoque-acao estoque-validar";
+    botao.textContent = "Validar agora";
+    tarja.appendChild(botao);
+  } else if (acao) {
+    const botao = document.createElement("button");
+    botao.type = "button";
+    botao.className = "estoque-acao estoque-reprecificar";
+    botao.dataset.preco = String(acao.preco);
+    botao.textContent = acao.rotulo;
+    tarja.appendChild(botao);
+  }
+  return tarja;
+}
+
+function buildAbas(item, sugestao, statusInfo) {
+  const ressalvas = montarRessalvas(item, sugestao);
+  const contagens = { estrategias: sugestao.cenarios.length, ressalvas: ressalvas.length };
+
+  const bloco = document.createElement("div");
+
+  const tiras = document.createElement("div");
+  tiras.className = "estoque-abas";
+  tiras.setAttribute("role", "tablist");
+
+  const ativa = abaAtiva();
+  for (const aba of ABAS) {
+    const botao = document.createElement("button");
+    botao.type = "button";
+    botao.className = "estoque-aba" + (aba === ativa ? " is-ativa" : "");
+    botao.dataset.aba = aba;
+    botao.setAttribute("role", "tab");
+    botao.setAttribute("aria-selected", String(aba === ativa));
+    botao.textContent = ROTULO_ABA[aba];
+    // A contagem na própria aba avisa que há o que ler ali sem ocupar espaço
+    // nenhum na tela.
+    if (contagens[aba]) {
+      const conta = document.createElement("span");
+      conta.className = "estoque-aba-conta";
+      conta.textContent = String(contagens[aba]);
+      botao.appendChild(conta);
+    }
+    tiras.appendChild(botao);
+  }
+  bloco.appendChild(tiras);
+
+  const conteudo = document.createElement("div");
+  conteudo.className = "estoque-aba-conteudo";
+  conteudo.setAttribute("role", "tabpanel");
+  if (ativa === "mercado") {
+    conteudo.appendChild(buildAbaMercado(item, sugestao, statusInfo));
+  } else if (ativa === "historico") {
+    conteudo.appendChild(buildBlocoDeHistorico(item));
+  } else if (ativa === "estrategias") {
+    conteudo.appendChild(
+      sugestao.cenarios.length > 0
+        ? buildCenarios(sugestao.cenarios)
+        : semEstrategias(sugestao),
+    );
+  } else {
+    conteudo.appendChild(buildAbaRessalvas(ressalvas));
+  }
+  bloco.appendChild(conteudo);
+  return bloco;
+}
+
+// Com confiança baixa nenhum preço é recomendado — e dizer por quê é mais
+// útil do que uma aba vazia.
+function semEstrategias(sugestao) {
+  const p = document.createElement("p");
+  p.className = "estoque-detalhe-vazio";
+  p.textContent = sugestao.confianca.motivo
+    ? "Nenhum preço é recomendado para este item. " + sugestao.confianca.motivo
+    : "Ainda não há dados suficientes para recomendar um preço.";
+  return p;
 }
 
 // ---------------------------------------------------------------------------
@@ -1621,6 +1852,20 @@ function montarPainelDoEstoque() {
 
     if (ev.target.closest(".estoque-remover")) {
       removerDoEstoque(id);
+      return;
+    }
+
+    const aba = ev.target.closest(".estoque-aba");
+    if (aba) {
+      gravarAba(aba.dataset.aba);
+      const atual = loadEstoque().find((e) => e.id === id);
+      if (atual) repintarCard(atual);
+      return;
+    }
+
+    const reprecificar = ev.target.closest(".estoque-reprecificar");
+    if (reprecificar) {
+      aplicarNovoPreco(id, Number(reprecificar.dataset.preco), reprecificar);
       return;
     }
 

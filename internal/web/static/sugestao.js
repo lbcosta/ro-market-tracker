@@ -331,6 +331,134 @@ function mediaSimples(dias) {
   return dias.reduce((soma, d) => soma + d.avg, 0) / dias.length;
 }
 
+// montarTarja traduz o status do item na frase da tarja e na ação que cabe
+// fazer agora. É o topo do painel, e é o que o usuário lê primeiro.
+//
+// A ação de "perdendo" e "empatado" é reprecificar UM ZENY abaixo do
+// concorrente mais barato — o suficiente para passar na frente. O clique
+// copia o valor para a área de transferência, porque o programa não consegue
+// mexer na sua loja dentro do jogo: quem aplica o preço é você.
+function montarTarja(item, sugestao, statusInfo) {
+  const outros = sugestao.concorrencia || [];
+  const maisBarato = outros.length > 0 ? outros[0].price : 0;
+
+  switch (statusInfo.status) {
+    case STATUS_PERDENDO: {
+      const naFrente = outros.filter((a) => a.price < item.precoVenda).length;
+      return {
+        titulo: "Estão vendendo mais barato.",
+        detalhe:
+          naFrente + (naFrente === 1 ? " anúncio a " : " anúncios a ") +
+          formatMoney(maisBarato) + (naFrente === 1 ? " passou" : " passaram") + " na sua frente.",
+        acao: { rotulo: "Reprecificar " + formatMoney(maisBarato - 1), preco: maisBarato - 1 },
+      };
+    }
+    case STATUS_EMPATADO:
+      return {
+        titulo: "Empatado com a concorrência.",
+        detalhe: "Você está a " + formatMoney(Math.abs(item.precoVenda - maisBarato)) +
+          " do anúncio mais barato.",
+        acao: { rotulo: "Reprecificar " + formatMoney(maisBarato - 1), preco: maisBarato - 1 },
+      };
+    case STATUS_NA_FRENTE: {
+      if (outros.length === 0) {
+        return {
+          titulo: "Você é o único anunciando.",
+          detalhe: "Sem concorrência agora — e, por isso, sem referência de preço no mercado.",
+          acao: null,
+        };
+      }
+      const folga = Math.round(((maisBarato - item.precoVenda) / item.precoVenda) * 100);
+      return {
+        titulo: "Você é o mais barato.",
+        detalhe: folga > 0
+          ? "O próximo anúncio está " + folga + "% acima. Nada a fazer agora."
+          : "Nada a fazer agora.",
+        acao: null,
+      };
+    }
+    case STATUS_NA_FILA:
+      return { titulo: "Na fila para validação.", detalhe: "A consulta sai assim que chegar a vez.", acao: null };
+    default:
+      return {
+        titulo: dizerPorQueSemDados(item),
+        detalhe: dizerOQueFazer(item),
+        acao: item.validacao === VALIDACAO_OK ? null : { validar: true },
+      };
+  }
+}
+
+// A ordem importa: sem anúncio nenhum, o seu preço é irrelevante — não há com
+// o que compará-lo. Perguntar o preço nessa hora mandaria o usuário resolver
+// o problema errado.
+function dizerOQueFazer(item) {
+  if (item.validacao !== VALIDACAO_OK) return "Valide o item para ver mercado, histórico e estratégias.";
+  if (!item.lastResult || !item.lastResult.found) {
+    return "Ninguém está anunciando este item agora — nem você.";
+  }
+  if (item.precoVenda == null) return "Informe por quanto você está vendendo para comparar com o mercado.";
+  return "";
+}
+
+function dizerPorQueSemDados(item) {
+  if (item.validacao === VALIDACAO_INVALIDO) return "Item inválido.";
+  if (item.validacao !== VALIDACAO_OK) return "Sem dados recentes.";
+  if (!item.lastResult || !item.lastResult.found) return "Sem anúncios no mercado.";
+  if (item.precoVenda == null) return "Falta o seu preço.";
+  return "Sem dados do mercado.";
+}
+
+// montarRessalvas junta tudo que o programa sabe que pode estar errado nos
+// números que ele mesmo mostra.
+//
+// Elas ficam numa aba própria, e não espalhadas pelo painel, por dois
+// motivos: o texto é longo demais para caber ao lado dos números, e juntas
+// elas viram uma contagem — "Ressalvas 2" avisa que há o que ler sem ocupar
+// espaço nenhum.
+function montarRessalvas(item, sugestao) {
+  const ressalvas = [];
+
+  if (sugestao.confianca.motivo) {
+    ressalvas.push({ titulo: "Sobre a confiança", texto: sugestao.confianca.motivo });
+  }
+  if (sugestao.faixas) {
+    ressalvas.push({
+      titulo: "O mercado está partido",
+      texto:
+        "Os anúncios se separam em dois grupos: " + sugestao.faixas.baixa.length + " até " +
+        formatMoney(sugestao.faixas.baixa[sugestao.faixas.baixa.length - 1].price) + " e " +
+        sugestao.faixas.alta.length + " a partir de " + formatMoney(sugestao.faixas.alta[0].price) +
+        ". Os números desta tela comparam você só com o grupo em que o seu preço cai.",
+    });
+  }
+  if (item.lastResult && item.lastResult.truncated) {
+    ressalvas.push({
+      titulo: "Nem todos os anúncios foram olhados",
+      texto:
+        "Este item tem mais anúncios do que o programa traz de uma vez. Os mostrados são os mais " +
+        "baratos, que são os que disputam com você.",
+    });
+  }
+  if (ehEquipamento(item) && sugestao.concorrencia && sugestao.concorrencia.length > 0) {
+    ressalvas.push({
+      titulo: "A velocidade de venda é estimada",
+      texto:
+        "O histórico conta as vendas de todas as unidades deste item, sem separar refino nem " +
+        "encantamento. A estimativa desconta isso pela fatia do mercado que se parece com o seu " +
+        "anúncio — é uma aproximação, não uma medida.",
+    });
+  }
+  if (sugestao.posicao) {
+    ressalvas.push({
+      titulo: "Como a fila é calculada",
+      texto:
+        "O tempo até vender supõe que se compra do anúncio mais barato para o mais caro. E a fila " +
+        "muda sozinha: qualquer anúncio novo mais barato que o seu entra na sua frente.",
+    });
+  }
+  return ressalvas;
+}
+
 // calcularSugestao é a entrada única deste arquivo: junta tudo e devolve o que
 // o card desenha. Sem efeito nenhum — só leitura do que já está na entrada.
 function calcularSugestao(item) {

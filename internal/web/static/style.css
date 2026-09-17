@@ -636,6 +636,273 @@ h1 {
   }
 }
 
+/* --- Painel de detalhe --- */
+
+.estoque-painel-topo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.estoque-painel-nome {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1rem;
+}
+
+.estoque-painel-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+/* A tarja é o que o usuário lê primeiro: em que situação o item está e o que
+   dá para fazer agora. A cor vem do mesmo vocabulário da bolinha. */
+.estoque-tarja {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-row);
+}
+
+.estoque-tarja .estoque-bolinha { margin-top: 0.3rem; }
+
+.estoque-tarja-texto {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.estoque-tarja-perdendo { border-color: var(--danger); }
+.estoque-tarja-perdendo .estoque-tarja-texto strong { color: var(--danger); }
+.estoque-tarja-empatado { border-color: var(--warning); }
+.estoque-tarja-empatado .estoque-tarja-texto strong { color: var(--warning); }
+.estoque-tarja-na-frente { border-color: var(--success); }
+.estoque-tarja-na-frente .estoque-tarja-texto strong { color: var(--success); }
+
+.estoque-acao {
+  flex-shrink: 0;
+  align-self: center;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.estoque-acao:hover { filter: brightness(1.08); }
+
+/* --- Abas --- */
+
+.estoque-abas {
+  display: flex;
+  gap: 0.1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.estoque-aba {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.6rem;
+  margin-bottom: -1px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.estoque-aba:hover { color: var(--text); }
+
+.estoque-aba.is-ativa {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+/* A contagem avisa que há o que ler ali sem ocupar espaço nenhum na tela. */
+.estoque-aba-conta {
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: var(--border);
+  color: var(--text);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.estoque-aba-conteudo {
+  padding-top: 0.6rem;
+}
+
+/* --- Tiles --- */
+
+.estoque-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: 1px;
+  margin-bottom: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.estoque-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.45rem 0.55rem;
+  background: var(--bg-card);
+}
+
+.estoque-tile-rotulo {
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.estoque-tile-valor {
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.estoque-tile-detalhe {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.estoque-tile-detalhe.is-subindo { color: var(--success); }
+.estoque-tile-detalhe.is-caindo { color: var(--danger); }
+
+/* O histórico reaproveita os tiles da aba Mercado. A única diferença é a
+   largura mínima: são quatro valores curtos, e 7rem deixaria sobra demais. */
+.estoque-historico .estoque-tiles {
+  grid-template-columns: repeat(auto-fit, minmax(5.5rem, 1fr));
+}
+
+.estoque-historico-resumo {
+  margin: 0;
+}
+
+.estoque-secao-titulo {
+  margin: 0 0 0.3rem;
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* --- Histograma --- */
+
+.estoque-barras {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 4.5rem;
+}
+
+.estoque-barra-coluna {
+  position: relative;
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.estoque-barra {
+  width: 100%;
+  background: var(--border);
+  border-radius: 2px 2px 0 0;
+}
+
+.estoque-barra.is-seu { background: var(--muted); }
+.estoque-barra-perdendo.is-seu { background: var(--danger); }
+.estoque-barra-empatado.is-seu { background: var(--warning); }
+.estoque-barra-na-frente.is-seu { background: var(--success); }
+
+.estoque-barra-voce {
+  position: absolute;
+  top: -0.9rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.65rem;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.estoque-barras-pontas {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.estoque-barras-meio {
+  flex: 1;
+  text-align: center;
+  font-variant-numeric: normal;
+}
+
+.estoque-venda-estimada {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.estoque-venda-valor {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+/* --- Ressalvas --- */
+
+.estoque-ressalva + .estoque-ressalva {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.estoque-ressalva-titulo {
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.estoque-ressalva-texto {
+  margin: 0.1rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
 /* O card perdeu a borda e o fundo: ele agora é o conteúdo do painel de
    detalhe, não um objeto solto numa grade. */
 .estoque-card {
@@ -847,20 +1114,16 @@ h1 {
   color: var(--muted);
 }
 
-.estoque-historico-dias summary {
-  cursor: pointer;
+.estoque-historico-legenda {
+  margin: 0.3rem 0 0;
   font-size: 0.75rem;
-}
-
-.estoque-historico-dias summary:hover {
-  color: var(--accent);
 }
 
 /* O container rola sozinho: "todo o histórico" pode ter centenas de dias, e
    sem teto de altura abrir o detalhe empurraria o resto da página. */
 .estoque-dias {
   display: block;
-  max-height: 11rem;
+  max-height: 16rem;
   overflow-y: auto;
   width: 100%;
   margin-top: 0.3rem;
@@ -992,7 +1255,12 @@ h1 {
 }
 
 .estoque-cenario {
-  padding: 0.35rem 0;
+  padding: 0.4rem 0;
+}
+
+/* Separador entre estratégias, e não em cima da primeira: acima dela já existe
+   a borda da tira de abas. */
+.estoque-cenario + .estoque-cenario {
   border-top: 1px solid var(--border);
 }
 
