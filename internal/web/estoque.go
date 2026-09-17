@@ -103,7 +103,7 @@ func (h *Handler) EstoqueValidar(w http.ResponseWriter, r *http.Request) {
 
 	anuncios, err := h.cachedSearchShops(r.Context(), server, item, freshMaxAge)
 	if err != nil {
-		escreverErroDeConsulta(w, err, "validação do estoque: busca no mercado falhou", item, server)
+		escreverErroDeConsulta(w, err, "validação do estoque: busca no mercado falhou", "item", item, "servidor", server)
 		return
 	}
 
@@ -114,7 +114,7 @@ func (h *Handler) EstoqueValidar(w http.ResponseWriter, r *http.Request) {
 
 	historico, err := h.searchMarketPrice(r.Context(), server, item, gnjoy.MarketPricePeriodAll)
 	if err != nil {
-		escreverErroDeConsulta(w, err, "validação do estoque: consulta ao histórico falhou", item, server)
+		escreverErroDeConsulta(w, err, "validação do estoque: consulta ao histórico falhou", "item", item, "servidor", server)
 		return
 	}
 
@@ -136,7 +136,7 @@ func (h *Handler) EstoqueValidar(w http.ResponseWriter, r *http.Request) {
 // tentar de novo. Um timeout ou um bloqueio do site NUNCA podem invalidar um
 // cadastro correto, e é por isso que estes caminhos respondem erro HTTP em
 // vez de uma lista vazia.
-func escreverErroDeConsulta(w http.ResponseWriter, err error, msgLog, item, server string) {
+func escreverErroDeConsulta(w http.ResponseWriter, err error, msgLog string, contexto ...any) {
 	// "Tente de novo em instantes" seria um mau conselho quando o site está
 	// limitando as consultas: tentar de novo é justamente o que não se deve
 	// fazer, e o aviso no topo da página já diz o que está acontecendo.
@@ -146,7 +146,7 @@ func escreverErroDeConsulta(w http.ResponseWriter, err error, msgLog, item, serv
 			http.StatusServiceUnavailable)
 		return
 	}
-	slog.Error("web: "+msgLog, "item", item, "servidor", server, "error", err)
+	slog.Error("web: "+msgLog, append(contexto, "error", err)...)
 	http.Error(w, "não foi possível consultar o mercado agora", http.StatusBadGateway)
 }
 
@@ -294,7 +294,7 @@ func (h *Handler) EstoqueMercado(w http.ResponseWriter, r *http.Request) {
 	// ações que alguém está esperando na tela.
 	result, err := h.cachedSearchShops(r.Context(), server, item, maxAge, gnjoy.NoRetry())
 	if err != nil {
-		escreverErroDeConsulta(w, err, "estoque: consulta ao mercado falhou", item, server)
+		escreverErroDeConsulta(w, err, "estoque: consulta ao mercado falhou", "item", item, "servidor", server)
 		return
 	}
 
@@ -446,7 +446,8 @@ func (h *Handler) EstoqueHistorico(w http.ResponseWriter, r *http.Request) {
 		// nem acontece.
 		sonda, err := h.historicoCacheado(r.Context(), svrID, itemID, janelaSonda, maxAge)
 		if err != nil {
-			escreverErroDeConsulta(w, err, "estoque: consulta ao histórico falhou", q.Get("itemId"), "")
+			escreverErroDeConsulta(w, err, "estoque: consulta ao histórico falhou",
+				"itemId", itemID, "svrId", svrID, "janela", janela, "limite", janelaSonda)
 			return
 		}
 		total := diasDisponiveis(sonda)
@@ -459,7 +460,8 @@ func (h *Handler) EstoqueHistorico(w http.ResponseWriter, r *http.Request) {
 
 	history, err := h.historicoCacheado(r.Context(), svrID, itemID, limite, maxAge)
 	if err != nil {
-		escreverErroDeConsulta(w, err, "estoque: consulta ao histórico falhou", q.Get("itemId"), "")
+		escreverErroDeConsulta(w, err, "estoque: consulta ao histórico falhou",
+			"itemId", itemID, "svrId", svrID, "janela", janela, "limite", limite)
 		return
 	}
 	writeJSON(w, http.StatusOK, montarHistorico(janela, diasDisponiveis(history), history))
@@ -515,11 +517,19 @@ func montarHistorico(janela string, total int, history *gnjoy.PriceHistory) hist
 func (h *Handler) historicoCacheado(ctx context.Context, svrID, itemID, limite int, maxAge time.Duration) (*gnjoy.PriceHistory, error) {
 	key := cacheKey(strconv.Itoa(svrID), strconv.Itoa(itemID), strconv.Itoa(limite))
 	history, err := h.priceHistoryCache.Do(key, maxAge, func() (*gnjoy.PriceHistory, error) {
+		// SEM NoRetry, de propósito. NoRetry é para chamada de fundo que tem
+		// repetição própria — o rodízio da watchlist, o aquecimento do action
+		// id: nelas, desistir no primeiro 429 é correto, porque o ciclo
+		// seguinte refaz. Esta aqui sai de um clique e NINGUÉM a repete; com
+		// NoRetry, um único 429 no meio da sequência de validação (busca,
+		// mercado e histórico saem quase juntas) deixava o card sem histórico
+		// e sem nada tentando de novo. É o mesmo tratamento que o card de
+		// detalhe da busca já dava a esta mesma consulta.
 		return h.client.GetPriceHistory(context.WithoutCancel(ctx), gnjoy.PriceHistoryParams{
 			ItemId: itemID,
 			SvrId:  svrID,
 			Limit:  limite,
-		}, gnjoy.NoRetry())
+		})
 	})
 	if err != nil {
 		return nil, err
