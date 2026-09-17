@@ -7,18 +7,30 @@ const {
   atrasarProximasRequisicoes,
 } = require("./helpers");
 
-// Primeira etapa da tela de Estoque: só o cadastro local. NADA aqui fala com
-// o site da GnJoy — validar, buscar preços e avisar sobre undercutting entram
-// nas etapas seguintes. Vários testes conferem isso com o contador de
-// requisições ao upstream, porque "zero requisição" é requisito, não acaso.
+// A tela é mestre-detalhe: a tabela da esquerda responde "qual item precisa de
+// mim?" e o painel da direita, "o que faço com este?". Só UM card existe por
+// vez — o do item aberto —, então todo teste que mexe num item precisa
+// abri-lo antes. É o que abrir() faz.
+//
+// Vários testes conferem o contador de requisições ao upstream, porque "zero
+// requisição" em boa parte desta tela é requisito, não acaso.
 
 const campo = (page) => page.locator("#estoque-item");
-const cards = (page) => page.locator(".estoque-card");
-const card = (page, nome) => page.locator(".estoque-card").filter({ hasText: nome });
+const linhas = (page) => page.locator(".estoque-linha");
+const linha = (page, nome) => page.locator(".estoque-linha").filter({ hasText: nome });
+const card = (page, nome) => page.locator("#estoque-detalhe .estoque-card").filter({ hasText: nome });
+
+async function abrir(page, nome) {
+  await linha(page, nome).click();
+  await expect(card(page, nome)).toBeVisible();
+}
 
 async function adicionar(page, nome) {
   await campo(page).fill(nome);
   await campo(page).press("Enter");
+  await expect(linha(page, nome)).toBeVisible();
+  // Cadastrar abre o item: o passo seguinte é sempre validá-lo, e o botão
+  // está no painel.
   await expect(card(page, nome)).toBeVisible();
 }
 
@@ -31,7 +43,7 @@ test.beforeEach(async ({ page, request }) => {
 test("a tela começa vazia e explica o que fazer", async ({ page }) => {
   await expect(page.locator("#estoque-empty")).toBeVisible();
   await expect(page.locator("#estoque-empty")).toContainText("Nenhum item no estoque");
-  await expect(cards(page)).toHaveCount(0);
+  await expect(linhas(page)).toHaveCount(0);
 });
 
 test("Enter adiciona o item como não validado, sem consultar o site", async ({ page, request }) => {
@@ -52,13 +64,13 @@ test("Enter adiciona o item como não validado, sem consultar o site", async ({ 
 test("nome em branco não adiciona nada", async ({ page }) => {
   await campo(page).fill("   ");
   await campo(page).press("Enter");
-  await expect(cards(page)).toHaveCount(0);
+  await expect(linhas(page)).toHaveCount(0);
 });
 
 test("o item sobrevive a recarregar a página", async ({ page }) => {
   await adicionar(page, "Elmo Ancestral");
   await page.reload();
-  await expect(card(page, "Elmo Ancestral")).toBeVisible();
+  await expect(linha(page, "Elmo Ancestral")).toBeVisible();
 });
 
 // O documento não recarrega ao trocar de aba, então o corpo que volta é DOM
@@ -79,14 +91,19 @@ test("o item sobrevive a ir para a Watchlist e voltar", async ({ page, request }
 test("excluir tira o item e traz de volta a mensagem de vazio", async ({ page }) => {
   await adicionar(page, "Elmo Ancestral");
   await adicionar(page, "Capa do Corvo");
-  await expect(cards(page)).toHaveCount(2);
+  await expect(linhas(page)).toHaveCount(2);
 
+  await abrir(page, "Elmo Ancestral");
   await card(page, "Elmo Ancestral").locator(".estoque-remover").click();
 
-  await expect(cards(page)).toHaveCount(1);
-  await expect(card(page, "Capa do Corvo")).toBeVisible();
+  await expect(linhas(page)).toHaveCount(1);
+  await expect(linha(page, "Capa do Corvo")).toBeVisible();
   await expect(page.locator("#estoque-empty")).toBeHidden();
+  // Remover o item ABERTO esvazia o painel: uma seleção apontando para o que
+  // já não existe deixaria a direita presa num vazio sem correspondência.
+  await expect(page.locator(".estoque-detalhe-vazio")).toBeVisible();
 
+  await abrir(page, "Capa do Corvo");
   await card(page, "Capa do Corvo").locator(".estoque-remover").click();
   await expect(page.locator("#estoque-empty")).toBeVisible();
 });
@@ -105,6 +122,7 @@ test("o preço de venda é editável clicando, e persiste", async ({ page, reque
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
 
   await page.reload();
+  await abrir(page, "Elmo Ancestral");
   await expect(card(page, "Elmo Ancestral").locator(".estoque-preco-venda")).toHaveText("Vendo por: 150.000 z");
 });
 
@@ -137,7 +155,7 @@ test("na loja e undercutting ligam e desligam", async ({ page }) => {
   await adicionar(page, "Elmo Ancestral");
   const c = card(page, "Elmo Ancestral");
   const loja = c.locator(".estoque-toggle-loja");
-  const undercut = c.locator(".estoque-toggle-undercut");
+  const undercut = c.locator(".estoque-sino");
 
   // O undercutting não faz sentido fora da loja: não há o que comparar com o
   // mercado se você não está vendendo.
@@ -150,12 +168,13 @@ test("na loja e undercutting ligam e desligam", async ({ page }) => {
   await expect(undercut).toBeEnabled();
 
   await undercut.click();
-  await expect(undercut).toHaveText("Undercutting ligado");
+  await expect(undercut).toHaveAttribute("aria-pressed", "true");
   await expect(undercut).toHaveAttribute("aria-pressed", "true");
 
   await page.reload();
+  await abrir(page, "Elmo Ancestral");
   await expect(card(page, "Elmo Ancestral").locator(".estoque-toggle-loja")).toHaveText("Na loja");
-  await expect(card(page, "Elmo Ancestral").locator(".estoque-toggle-undercut")).toHaveText("Undercutting ligado");
+  await expect(card(page, "Elmo Ancestral").locator(".estoque-sino")).toHaveAttribute("aria-pressed", "true");
 });
 
 // Deixar a flag ligada guardaria uma intenção que não vale para nada e que
@@ -164,13 +183,13 @@ test("sair da loja desliga o undercutting junto", async ({ page }) => {
   await adicionar(page, "Elmo Ancestral");
   const c = card(page, "Elmo Ancestral");
   await c.locator(".estoque-toggle-loja").click();
-  await c.locator(".estoque-toggle-undercut").click();
-  await expect(c.locator(".estoque-toggle-undercut")).toHaveText("Undercutting ligado");
+  await c.locator(".estoque-sino").click();
+  await expect(c.locator(".estoque-sino")).toHaveAttribute("aria-pressed", "true");
 
   await c.locator(".estoque-toggle-loja").click();
 
-  await expect(c.locator(".estoque-toggle-undercut")).toHaveText("Undercutting desligado");
-  await expect(c.locator(".estoque-toggle-undercut")).toBeDisabled();
+  await expect(c.locator(".estoque-sino")).toHaveAttribute("aria-pressed", "false");
+  await expect(c.locator(".estoque-sino")).toBeDisabled();
 });
 
 // Regressão de contraste: a regra de :hover dos toggles (0,3,0) vencia a do
@@ -193,14 +212,18 @@ test("a janela do histórico é por item e persiste", async ({ page }) => {
   await adicionar(page, "Elmo Ancestral");
   await adicionar(page, "Capa do Corvo");
 
+  await abrir(page, "Elmo Ancestral");
   await expect(card(page, "Elmo Ancestral").locator(".estoque-janela")).toHaveValue("7");
   await card(page, "Elmo Ancestral").locator(".estoque-janela").selectOption("30");
 
   // Trocar a janela de um item não mexe na do outro.
+  await abrir(page, "Capa do Corvo");
   await expect(card(page, "Capa do Corvo").locator(".estoque-janela")).toHaveValue("7");
 
   await page.reload();
+  await abrir(page, "Elmo Ancestral");
   await expect(card(page, "Elmo Ancestral").locator(".estoque-janela")).toHaveValue("30");
+  await abrir(page, "Capa do Corvo");
   await expect(card(page, "Capa do Corvo").locator(".estoque-janela")).toHaveValue("7");
 });
 
@@ -222,7 +245,7 @@ test("a ordem de cadastro é a ordem da tela", async ({ page }) => {
   await adicionar(page, "Segundo");
   await adicionar(page, "Terceiro");
 
-  await expect(cards(page).locator(".estoque-nome")).toHaveText(["Primeiro", "Segundo", "Terceiro"]);
+  await expect(linhas(page).locator(".estoque-linha-nome")).toHaveText(["Primeiro", "Segundo", "Terceiro"]);
 });
 
 
@@ -319,26 +342,10 @@ test("a lista de candidatos sobrevive à troca de aba", async ({ page, request }
   await page.getByRole("link", { name: "Watchlist" }).click();
   await expect(page.locator(".search-form")).toBeVisible();
   await page.getByRole("link", { name: "Estoque" }).click();
+  await abrir(page, "Rapidez");
 
   await expect(card(page, "Rapidez").locator(".estoque-candidatos-select option")).toHaveCount(2);
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
-});
-
-// O motivo de o dropdown existir: a lista antiga crescia o card em uma linha
-// por candidato, e como os cards dividem uma grade, um item ambíguo
-// desalinhava a linha inteira.
-test("o card com escolha não fica muito mais alto que os outros", async ({ page }) => {
-  await adicionar(page, "Rapidez");
-  await adicionar(page, "Bota do Andarilho");
-  const alturaSimples = (await card(page, "Bota do Andarilho").boundingBox()).height;
-
-  await botaoValidar(page, "Rapidez").click();
-  await expect(card(page, "Rapidez").locator(".estoque-candidatos-select")).toBeVisible();
-
-  const alturaComEscolha = (await card(page, "Rapidez").boundingBox()).height;
-  // Uma linha de título mais uma de seletor, independentemente de quantos
-  // candidatos houver — que é o ponto da mudança.
-  expect(alturaComEscolha - alturaSimples).toBeLessThan(80);
 });
 
 test("um item que nunca existiu fica inválido e explica o motivo", async ({ page }) => {
@@ -403,6 +410,7 @@ test("o estado de validação sobrevive a recarregar", async ({ page }) => {
   await expect(selo(page, "Bota do Andarilho")).toHaveText("Validado");
 
   await page.reload();
+  await abrir(page, "Bota do Andarilho");
 
   await expect(selo(page, "Bota do Andarilho")).toHaveText("Validado");
 });
@@ -517,6 +525,7 @@ test("os dados de mercado sobrevivem à troca de aba sem reconsultar", async ({ 
   await page.getByRole("link", { name: "Watchlist" }).click();
   await expect(page.locator(".search-form")).toBeVisible();
   await page.getByRole("link", { name: "Estoque" }).click();
+  await abrir(page, "Espada Primordial");
 
   await expect(mercado(page, "Espada Primordial")).toContainText("129.999.999 z");
   expect(await contarRequisicoesAoUpstream(request)).toBe(0);
@@ -583,6 +592,7 @@ test("o card mostra quantos dias existem além da janela atual", async ({ page }
 test("trocar a janela reconsulta só aquele item", async ({ page, request }) => {
   await validarItem(page, "Elixir do Mercador");
   await validarItem(page, "Espada Primordial");
+  await abrir(page, "Elixir do Mercador");
   await zerarContagemDoUpstream(request);
 
   await janela(page, "Elixir do Mercador").selectOption("30");
@@ -649,6 +659,7 @@ test("a janela escolhida e o histórico sobrevivem à troca de aba", async ({ pa
   await page.getByRole("link", { name: "Watchlist" }).click();
   await expect(page.locator(".search-form")).toBeVisible();
   await page.getByRole("link", { name: "Estoque" }).click();
+  await abrir(page, "Elixir do Mercador");
 
   await expect(janela(page, "Elixir do Mercador")).toHaveValue("30");
   await expect(card(page, "Elixir do Mercador").locator(".estoque-historico-dias summary")).toContainText(
@@ -899,6 +910,7 @@ test("um item com anúncio seu basta para não alarmar", async ({ page }) => {
   await porNaLoja(page, "Elixir do Mercador");
   await validarItem(page, "Espada Primordial");
   await porNaLoja(page, "Espada Primordial");
+  await abrir(page, "Elixir do Mercador");
 
   await expect(avisoDeLoja(page)).toBeHidden();
 });
@@ -965,4 +977,165 @@ test("sem concorrência suficiente a régua não aparece", async ({ page }) => {
   await validarItem(page, "Carta Poring Noel");
 
   await expect(regua(page, "Carta Poring Noel")).toHaveCount(0);
+});
+
+// ---------------------------------------------------------------------------
+// Tabela, bolinhas e seleção
+// ---------------------------------------------------------------------------
+//
+// A tabela existe para responder "qual item precisa de mim?" numa olhada. É a
+// bolinha e a frase da direita que carregam isso — os números crus não
+// carregavam.
+
+const bolinhaDe = (page, nome) => linha(page, nome).locator(".estoque-bolinha");
+const contraOMercado = (page, nome) => linha(page, nome).locator(".estoque-col-mercado");
+const pilulas = (page) => page.locator(".estoque-pilula");
+
+test("um item sem validar nasce com a bolinha oca", async ({ page }) => {
+  await adicionar(page, "Elmo Ancestral");
+
+  await expect(bolinhaDe(page, "Elmo Ancestral")).toHaveClass(/estoque-bolinha-sem-dados/);
+  await expect(contraOMercado(page, "Elmo Ancestral")).toHaveText("sem validar");
+});
+
+// Seu preço acima do mais barato por mais que a margem de empate.
+test("perder a venda pinta a bolinha de vermelho e diz de quem", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+  const c = card(page, "Elixir do Mercador");
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("2000");
+  await c.locator("input").press("Enter");
+
+  await expect(bolinhaDe(page, "Elixir do Mercador")).toHaveClass(/estoque-bolinha-perdendo/);
+  // A frase diz o que fazer; "menor preço: 1.200 z" não diria.
+  await expect(contraOMercado(page, "Elixir do Mercador")).toHaveText("2 anúncios a 1.200 z");
+});
+
+// Estar 2% acima do mais barato é a mesma disputa; estar 60% acima não é.
+test("uma diferença pequena conta como empate, não como derrota", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+  const c = card(page, "Elixir do Mercador");
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("1224");
+  await c.locator("input").press("Enter");
+
+  await expect(bolinhaDe(page, "Elixir do Mercador")).toHaveClass(/estoque-bolinha-empatado/);
+  await expect(contraOMercado(page, "Elixir do Mercador")).toContainText("2% acima do mais barato");
+});
+
+test("ser o mais barato pinta de verde e diz a folga", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+  const c = card(page, "Elixir do Mercador");
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("1000");
+  await c.locator("input").press("Enter");
+
+  await expect(bolinhaDe(page, "Elixir do Mercador")).toHaveClass(/estoque-bolinha-na-frente/);
+  await expect(contraOMercado(page, "Elixir do Mercador")).toContainText("mais barato");
+});
+
+// Sem anúncio nenhum não há posição a ocupar: é ausência de mercado, não um
+// estado dele — e ausência é bolinha oca.
+test("um item que ninguém anuncia fica cinza, não verde", async ({ page }) => {
+  await validarItem(page, "Bota do Andarilho");
+
+  await expect(bolinhaDe(page, "Bota do Andarilho")).toHaveClass(/estoque-bolinha-sem-dados/);
+  await expect(contraOMercado(page, "Bota do Andarilho")).toHaveText("sem anúncios");
+});
+
+// Verde por falta de concorrência é outra coisa: HÁ anúncio, e ele é seu.
+test("ser o único anunciante fica verde", async ({ page }) => {
+  await adicionarPersonagem(page, "Vendedor p-carta-noel");
+  await validarItem(page, "Carta Poring Noel");
+
+  await expect(bolinhaDe(page, "Carta Poring Noel")).toHaveClass(/estoque-bolinha-na-frente/);
+  await expect(contraOMercado(page, "Carta Poring Noel")).toHaveText("único anúncio no mercado");
+});
+
+// Validado mas sem preço definido não dá para comparar com nada — e a frase
+// diz o que falta.
+test("um item validado sem preço pede o preço", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+
+  await expect(bolinhaDe(page, "Elixir do Mercador")).toHaveClass(/estoque-bolinha-sem-dados/);
+  await expect(contraOMercado(page, "Elixir do Mercador")).toHaveText("defina o seu preço");
+});
+
+test("as pílulas contam os grupos e levam ao primeiro item de cada um", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+  const c = card(page, "Elixir do Mercador");
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator("input").fill("2000");
+  await c.locator("input").press("Enter");
+  await adicionar(page, "Elmo Ancestral");
+
+  await expect(pilulas(page).filter({ hasText: "1 perdendo" })).toBeVisible();
+  await expect(pilulas(page).filter({ hasText: "1 sem dados" })).toBeVisible();
+
+  // Clicar leva ao primeiro item do grupo — o gesto de quem viu "1 perdendo".
+  await pilulas(page).filter({ hasText: "1 perdendo" }).click();
+  await expect(linha(page, "Elixir do Mercador")).toHaveClass(/is-selecionada/);
+});
+
+test("só um item fica aberto por vez", async ({ page }) => {
+  await adicionar(page, "Elmo Ancestral");
+  await adicionar(page, "Capa do Corvo");
+
+  await abrir(page, "Elmo Ancestral");
+  await expect(linha(page, "Elmo Ancestral")).toHaveClass(/is-selecionada/);
+  await expect(linha(page, "Capa do Corvo")).not.toHaveClass(/is-selecionada/);
+  await expect(page.locator("#estoque-detalhe .estoque-card")).toHaveCount(1);
+});
+
+// O usuário trabalha um item de cada vez; perder a seleção a cada ida à
+// Watchlist seria hostil.
+test("a seleção sobrevive à troca de aba e ao recarregar", async ({ page }) => {
+  await adicionar(page, "Elmo Ancestral");
+  await adicionar(page, "Capa do Corvo");
+  await abrir(page, "Elmo Ancestral");
+
+  await page.getByRole("link", { name: "Watchlist" }).click();
+  await expect(page.locator(".search-form")).toBeVisible();
+  await page.getByRole("link", { name: "Estoque" }).click();
+  await expect(linha(page, "Elmo Ancestral")).toHaveClass(/is-selecionada/);
+
+  await page.reload();
+  await expect(linha(page, "Elmo Ancestral")).toHaveClass(/is-selecionada/);
+});
+
+test("sem seleção, o painel convida a escolher um item", async ({ page }) => {
+  await expect(page.locator(".estoque-detalhe-vazio")).toContainText("Cadastre um item");
+});
+
+// Validar tudo é o botão mais caro do programa: sete itens são até quatorze
+// idas ao site, a uma por segundo. O custo é dito antes, e nada sai sem
+// confirmação.
+test("validar tudo avisa o custo antes e respeita a recusa", async ({ page, request }) => {
+  await adicionar(page, "Elixir do Mercador");
+  await adicionar(page, "Bota do Andarilho");
+  await zerarContagemDoUpstream(request);
+
+  let texto = "";
+  page.once("dialog", (d) => {
+    texto = d.message();
+    d.dismiss();
+  });
+  await page.locator("#estoque-validar-tudo").click();
+
+  expect(texto).toContain("2 itens");
+  expect(texto).toContain("consultar o site");
+  expect(await contarRequisicoesAoUpstream(request)).toBe(0);
+});
+
+test("validar tudo valida os pendentes em série", async ({ page }) => {
+  await adicionar(page, "Elixir do Mercador");
+  await adicionar(page, "Bota do Andarilho");
+
+  page.once("dialog", (d) => d.accept());
+  await page.locator("#estoque-validar-tudo").click();
+
+  // Sem preço definido eles continuam com a bolinha oca — o que muda é a
+  // frase, que deixa de ser "sem validar".
+  await expect(contraOMercado(page, "Elixir do Mercador")).toHaveText("defina o seu preço", { timeout: 20000 });
+  await expect(contraOMercado(page, "Bota do Andarilho")).toHaveText("sem anúncios", { timeout: 20000 });
 });

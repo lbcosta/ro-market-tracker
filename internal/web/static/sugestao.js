@@ -180,6 +180,82 @@ function filaNaFrente(concorrencia, preco) {
   return somarUnidades(concorrencia.filter((a) => a.price < preco));
 }
 
+// Estados de um item do estoque, na ordem em que exigem ação do usuário.
+// São eles que pintam a bolinha da tabela e agrupam as pílulas do cabeçalho.
+const STATUS_PERDENDO = "perdendo";
+const STATUS_EMPATADO = "empatado";
+const STATUS_NA_FRENTE = "na-frente";
+const STATUS_NA_FILA = "na-fila";
+const STATUS_SEM_DADOS = "sem-dados";
+
+// Até esta diferença o item conta como empatado, e não como perdendo.
+//
+// Comparar por igualdade exata seria inútil: no mercado do jogo os preços são
+// escolhidos à mão e quase nunca coincidem no zeny. Estar 2% acima do mais
+// barato é, na prática, a mesma disputa — e é diferente de estar 25% acima,
+// que é estar fora dela.
+const LIMIAR_DE_EMPATE = 0.05;
+
+// classificarStatus resume, em uma bolinha e uma frase, a única pergunta que
+// interessa a quem abre a tela: este item está vendendo ou está parado?
+//
+// A frase não é o número cru. "14 anúncios a 4.500 z" diz o que fazer; "menor
+// preço: 4.500" não diz. Cada estado tem a sua.
+function classificarStatus(item, opcoes = {}) {
+  if (opcoes.naFila) {
+    return { status: STATUS_NA_FILA, texto: "na fila para validação" };
+  }
+  if (item.validacao !== VALIDACAO_OK) {
+    return { status: STATUS_SEM_DADOS, texto: "sem validar" };
+  }
+  if (!item.lastResult) {
+    return { status: STATUS_SEM_DADOS, texto: "sem dados do mercado" };
+  }
+  if (!item.lastResult.found) {
+    return { status: STATUS_SEM_DADOS, texto: "sem anúncios" };
+  }
+
+  const { outros } = separarAnuncios(item.lastResult);
+  if (outros.length === 0) {
+    // Ninguém mais anuncia: você não tem concorrência, o que é o melhor lugar
+    // possível — mas também significa que não há referência de preço.
+    return { status: STATUS_NA_FRENTE, texto: "único anúncio no mercado" };
+  }
+  if (item.precoVenda == null) {
+    return { status: STATUS_SEM_DADOS, texto: "defina o seu preço" };
+  }
+
+  const maisBarato = outros[0].price;
+  const diferenca = (item.precoVenda - maisBarato) / maisBarato;
+
+  if (diferenca <= 0) {
+    const proximo = outros[0].price;
+    const folga = Math.round(((proximo - item.precoVenda) / item.precoVenda) * 100);
+    return {
+      status: STATUS_NA_FRENTE,
+      texto: folga > 0 ? "mais barato · " + folga + "% abaixo" : "mais barato do mercado",
+    };
+  }
+
+  if (diferenca <= LIMIAR_DE_EMPATE) {
+    const empatados = outros.filter(
+      (a) => Math.abs((a.price - item.precoVenda) / item.precoVenda) <= LIMIAR_DE_EMPATE,
+    ).length;
+    const pct = Math.round(diferenca * 100);
+    return {
+      status: STATUS_EMPATADO,
+      texto: pct === 0 ? "empatado com " + empatados + " anúncio(s)" : pct + "% acima do mais barato",
+    };
+  }
+
+  const naFrenteDeVoce = outros.filter((a) => a.price < item.precoVenda).length;
+  return {
+    status: STATUS_PERDENDO,
+    texto:
+      naFrenteDeVoce + (naFrenteDeVoce === 1 ? " anúncio a " : " anúncios a ") + formatMoney(maisBarato),
+  };
+}
+
 // posicaoNaFila é a sua colocação entre os anúncios, contando do mais barato.
 //
 // Diferente de tudo o mais neste arquivo, ISTO É UM FATO, não uma estimativa:

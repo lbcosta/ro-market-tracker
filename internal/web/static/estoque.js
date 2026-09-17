@@ -22,6 +22,15 @@ const PERSONAGENS_KEY = "ro-market-tracker:meus-personagens";
 
 const ESTOQUE_SERVIDOR_PADRAO = "NIDHOGG";
 
+// Qual item está aberto no painel de detalhe. Persistido para a seleção
+// sobreviver à troca de aba e ao recarregar — o usuário costuma trabalhar um
+// item de cada vez, e perder a seleção a cada ida à Watchlist seria hostil.
+const ESTOQUE_SELECAO_KEY = "ro-market-tracker:estoque-selecionado";
+
+// Itens cuja validação está em voo. Em memória, não persistido: uma fila que
+// sobrevivesse ao recarregar descreveria requisições que já não existem.
+const filaDeValidacao = new Set();
+
 // Estados da validação. O item nasce NAO_VALIDADO; "Validar" o leva a
 // VALIDADO (achado no mercado ou no histórico) ou a INVALIDO — e este último
 // só é alcançado quando as DUAS consultas responderam que o item não existe.
@@ -214,21 +223,62 @@ function adicionarAoEstoque(nomeDigitado) {
   saveEstoque(list);
 
   const container = document.getElementById("estoque-list");
-  if (container) container.appendChild(buildEstoqueCard(item));
+  if (container) container.appendChild(buildLinhaDoEstoque(item));
   atualizarEstoqueVazio();
+  renderResumoDoTopo();
+  // Abre o item recém-cadastrado: o passo seguinte é sempre validá-lo, e o
+  // botão para isso está no painel.
+  selecionarItem(item.id);
   return item;
 }
 
 function removerDoEstoque(id) {
   saveEstoque(loadEstoque().filter((e) => e.id !== id));
-  const card = findEstoqueCard(id);
-  if (card) card.remove();
+  if (itemSelecionado() === id) gravarSelecao(null);
+  const linha = findEstoqueLinha(id);
+  if (linha) linha.remove();
   atualizarEstoqueVazio();
+  renderResumoDoTopo();
+  renderDetalhe();
   renderAvisoDeLoja();
 }
 
+// findEstoqueCard acha o card do item no painel de detalhe — que só existe
+// quando ele é o item selecionado. Todo chamador já trata null, e isso é o que
+// permite uma consulta terminar com o painel mostrando outro item sem nada
+// quebrar: o dado é gravado do mesmo jeito, só não há o que pintar.
 function findEstoqueCard(id) {
   return document.querySelector('.estoque-card[data-id="' + cssEscape(id) + '"]');
+}
+
+function findEstoqueLinha(id) {
+  return document.querySelector('.estoque-linha[data-id="' + cssEscape(id) + '"]');
+}
+
+function itemSelecionado() {
+  try {
+    return localStorage.getItem(ESTOQUE_SELECAO_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function gravarSelecao(id) {
+  try {
+    if (id == null) localStorage.removeItem(ESTOQUE_SELECAO_KEY);
+    else localStorage.setItem(ESTOQUE_SELECAO_KEY, id);
+  } catch {
+    // Ver saveEstoque.
+  }
+}
+
+function selecionarItem(id) {
+  gravarSelecao(id);
+  for (const linha of document.querySelectorAll(".estoque-linha")) {
+    linha.classList.toggle("is-selecionada", linha.dataset.id === id);
+    linha.setAttribute("aria-selected", String(linha.dataset.id === id));
+  }
+  renderDetalhe();
 }
 
 function atualizarEstoqueVazio() {
@@ -395,14 +445,22 @@ function escolherCandidato(id, candidato) {
 // repintarCard troca o card inteiro pelo estado novo. Reconstruir é mais
 // simples (e menos sujeito a esquecer um pedaço) do que remendar campo a
 // campo, e é barato: o card não guarda estado nenhum fora do localStorage.
+// repintarCard atualiza tudo que depende de um item: a linha na tabela, o
+// card no painel (quando ele é o selecionado) e o resumo do topo.
+//
+// O resumo e o aviso de loja são sobre o CONJUNTO, não sobre um item: quem
+// acabou de mudar pode ter sido o último que ainda tinha anúncio seu, ou o
+// que acabou de sair do grupo "perdendo".
 function repintarCard(item) {
   if (!item) return;
-  const antigo = findEstoqueCard(item.id);
-  if (!antigo) return;
-  antigo.replaceWith(buildEstoqueCard(item));
-  // O aviso de loja é sobre o conjunto, não sobre um card: qualquer card que
-  // muda pode ter sido o último que ainda tinha anúncio seu (ou o primeiro a
-  // voltar a ter).
+
+  const linha = findEstoqueLinha(item.id);
+  if (linha) linha.replaceWith(buildLinhaDoEstoque(item));
+
+  const card = findEstoqueCard(item.id);
+  if (card) card.replaceWith(buildEstoqueCard(item));
+
+  renderResumoDoTopo();
   renderAvisoDeLoja();
 }
 
@@ -953,6 +1011,32 @@ function pintarStatus(el, validacao) {
 // pintarToggle deixa botão e rótulo de acordo com o estado. aria-pressed, e
 // não uma classe só: é um botão de alternância, e é assim que o leitor de
 // tela anuncia "ligado"/"desligado".
+function buildSinoIcon() {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const corpo = document.createElementNS(NS, "path");
+  corpo.setAttribute("d", "M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9");
+  const badalo = document.createElementNS(NS, "path");
+  badalo.setAttribute("d", "M13.7 21a2 2 0 0 1-3.4 0");
+  svg.appendChild(corpo);
+  svg.appendChild(badalo);
+  return svg;
+}
+
+function pintarSino(botao, ligado) {
+  botao.setAttribute("aria-pressed", String(ligado));
+  botao.classList.toggle("is-on", ligado);
+  botao.setAttribute(
+    "aria-label",
+    ligado ? "Desligar o aviso de quando alguém vender mais barato" : "Avisar quando alguém vender mais barato",
+  );
+}
+
 function pintarToggle(botao, ligado, rotuloLigado, rotuloDesligado) {
   botao.setAttribute("aria-pressed", String(ligado));
   botao.classList.toggle("is-on", ligado);
@@ -963,7 +1047,7 @@ function pintarToggle(botao, ligado, rotuloLigado, rotuloDesligado) {
 // comparar com o mercado se você não está vendendo. Desabilitar (em vez de
 // esconder) mantém o card estável e mostra que a opção existe.
 function aplicarDisponibilidadeDoUndercut(card, item) {
-  const botao = card.querySelector(".estoque-toggle-undercut");
+  const botao = card.querySelector(".estoque-sino");
   if (!botao) return;
   botao.disabled = !item.naLoja;
   botao.title = item.naLoja
@@ -1019,10 +1103,15 @@ function buildEstoqueCard(item) {
   pintarToggle(loja, item.naLoja, "Na loja", "Fora da loja");
   flags.appendChild(loja);
 
+  // Sininho, e não um rótulo escrito: com a tabela mostrando o estado de cada
+  // item numa bolinha, este interruptor deixou de ser sobre exibição e passou
+  // a significar uma coisa só — "me avise mesmo quando eu não estiver na
+  // tela". Isso é notificação, e notificação é um sino.
   const undercut = document.createElement("button");
   undercut.type = "button";
-  undercut.className = "estoque-toggle estoque-toggle-undercut";
-  pintarToggle(undercut, item.undercut, "Undercutting ligado", "Undercutting desligado");
+  undercut.className = "estoque-toggle estoque-sino";
+  undercut.appendChild(buildSinoIcon());
+  pintarSino(undercut, item.undercut);
   flags.appendChild(undercut);
 
   li.appendChild(flags);
@@ -1256,15 +1345,181 @@ function renderAvisoDeLoja() {
 
 // renderEstoque reconstrói a lista a partir do localStorage. Não dispara
 // nenhuma requisição: cada card nasce do que já estava guardado.
+// buildLinhaDoEstoque desenha uma linha da tabela: bolinha de status, nome,
+// seu preço e a frase que resume a sua posição contra o mercado.
+//
+// A frase não é o número cru de propósito. "14 anúncios a 4.500 z" diz o que
+// fazer; "menor preço: 4.500 z" não diz (ver classificarStatus).
+function buildLinhaDoEstoque(item) {
+  const tr = document.createElement("tr");
+  tr.className = "estoque-linha";
+  tr.dataset.id = item.id;
+  tr.tabIndex = 0;
+  tr.setAttribute("role", "option");
+
+  const { status, texto } = classificarStatus(item, { naFila: filaDeValidacao.has(item.id) });
+  tr.dataset.status = status;
+
+  const tdItem = document.createElement("td");
+  tdItem.className = "estoque-col-item";
+
+  const bolinha = document.createElement("span");
+  bolinha.className = "estoque-bolinha estoque-bolinha-" + status;
+  bolinha.setAttribute("aria-hidden", "true");
+  tdItem.appendChild(bolinha);
+
+  const nome = document.createElement("span");
+  nome.className = "estoque-linha-nome";
+  nome.textContent = nomeVisivel(item);
+  tdItem.appendChild(nome);
+  tr.appendChild(tdItem);
+
+  const tdPreco = document.createElement("td");
+  tdPreco.className = "estoque-col-preco";
+  tdPreco.textContent = item.precoVenda != null ? formatMoney(item.precoVenda) : "—";
+  tr.appendChild(tdPreco);
+
+  const tdMercado = document.createElement("td");
+  tdMercado.className = "estoque-col-mercado estoque-mercado-" + status;
+  tdMercado.textContent = texto;
+  tr.appendChild(tdMercado);
+
+  if (item.id === itemSelecionado()) {
+    tr.classList.add("is-selecionada");
+    tr.setAttribute("aria-selected", "true");
+  }
+  return tr;
+}
+
+// GRUPOS é a ordem em que os estados aparecem nas pílulas: do que exige ação
+// para o que não exige.
+const GRUPOS = [
+  { status: STATUS_PERDENDO, rotulo: "perdendo" },
+  { status: STATUS_EMPATADO, rotulo: "empatado" },
+  { status: STATUS_NA_FRENTE, rotulo: "na frente" },
+  { status: STATUS_NA_FILA, rotulo: "na fila" },
+  { status: STATUS_SEM_DADOS, rotulo: "sem dados" },
+];
+
+function renderResumoDoTopo() {
+  const contagem = document.getElementById("estoque-contagem");
+  const pilulas = document.getElementById("estoque-pilulas");
+  if (!contagem || !pilulas) return;
+
+  const lista = loadEstoque();
+  contagem.textContent = lista.length === 1 ? "1 item" : lista.length + " itens";
+
+  const porStatus = {};
+  for (const item of lista) {
+    const { status } = classificarStatus(item, { naFila: filaDeValidacao.has(item.id) });
+    porStatus[status] = (porStatus[status] || 0) + 1;
+  }
+
+  pilulas.innerHTML = "";
+  for (const grupo of GRUPOS) {
+    const quantos = porStatus[grupo.status];
+    if (!quantos) continue;
+    // Botão, e não enfeite: clicar leva ao primeiro item do grupo, que é o
+    // gesto natural de quem viu "2 perdendo" e quer resolver.
+    const pilula = document.createElement("button");
+    pilula.type = "button";
+    pilula.className = "estoque-pilula estoque-pilula-" + grupo.status;
+    pilula.dataset.status = grupo.status;
+    const ponto = document.createElement("span");
+    ponto.className = "estoque-bolinha estoque-bolinha-" + grupo.status;
+    ponto.setAttribute("aria-hidden", "true");
+    pilula.appendChild(ponto);
+    pilula.appendChild(document.createTextNode(quantos + " " + grupo.rotulo));
+    pilulas.appendChild(pilula);
+  }
+}
+
+// renderDetalhe pinta o painel da direita com o item selecionado.
+//
+// Nesta etapa ele mostra o card que a tela inteira usava antes; a próxima
+// reestrutura o miolo dele em tarja de status e abas. Manter o card aqui é o
+// que permite a tabela entrar sem desligar nada do que já funcionava.
+function renderDetalhe() {
+  const painel = document.getElementById("estoque-detalhe");
+  if (!painel) return;
+
+  const id = itemSelecionado();
+  const item = id ? loadEstoque().find((e) => e.id === id) : null;
+
+  painel.innerHTML = "";
+  if (!item) {
+    const vazio = document.createElement("p");
+    vazio.className = "estoque-detalhe-vazio";
+    vazio.textContent = loadEstoque().length === 0
+      ? "Cadastre um item para começar."
+      : "Selecione um item à esquerda para ver mercado, histórico e estratégias.";
+    painel.appendChild(vazio);
+    return;
+  }
+  painel.appendChild(buildEstoqueCard(item));
+}
+
+// renderEstoque reconstrói a tabela a partir do localStorage. Não dispara
+// nenhuma requisição: cada linha nasce do que já estava guardado.
 function renderEstoque() {
   const container = document.getElementById("estoque-list");
   if (!container) return;
   container.innerHTML = "";
-  for (const item of loadEstoque()) {
-    container.appendChild(buildEstoqueCard(item));
+
+  const lista = loadEstoque();
+  // Uma seleção que aponta para um item já removido tem que ser esquecida,
+  // senão o painel fica preso num vazio que não corresponde a nada.
+  if (itemSelecionado() && !lista.some((e) => e.id === itemSelecionado())) {
+    gravarSelecao(null);
+  }
+  for (const item of lista) {
+    container.appendChild(buildLinhaDoEstoque(item));
   }
   atualizarEstoqueVazio();
+  renderResumoDoTopo();
+  renderDetalhe();
   renderAvisoDeLoja();
+}
+
+// validarTudo enfileira a validação de todos os itens que ainda não têm dado
+// de mercado.
+//
+// Em SÉRIE, um await de cada vez, e não em rajada: cada validação são uma ou
+// duas requisições, e o programa inteiro se segura em uma por segundo. Sete
+// itens já são até quatorze idas ao site — por isso o custo é dito antes, e
+// por isso a bolinha muda para "na fila" enquanto a vez não chega.
+async function validarTudo() {
+  const pendentes = loadEstoque().filter(
+    (item) => item.validacao !== VALIDACAO_OK || !item.lastResult,
+  );
+  if (pendentes.length === 0) {
+    showToast("Todos os itens já estão validados.");
+    return;
+  }
+
+  const minimo = pendentes.length * 2;
+  const confirmado = window.confirm(
+    "Validar " + pendentes.length + (pendentes.length === 1 ? " item" : " itens") +
+      " vai consultar o site cerca de " + minimo + " vezes, uma por segundo — " +
+      "aproximadamente " + minimo + " segundos.\n\n" +
+      "O site limita consultas, e pedir demais de uma vez bloqueia todas por alguns minutos. Continuar?",
+  );
+  if (!confirmado) return;
+
+  for (const item of pendentes) filaDeValidacao.add(item.id);
+  renderEstoque();
+
+  for (const item of pendentes) {
+    // Só valida o que ainda existe: o usuário pode remover um item enquanto a
+    // fila anda.
+    if (!loadEstoque().some((e) => e.id === item.id)) {
+      filaDeValidacao.delete(item.id);
+      continue;
+    }
+    await validarItem(item.id);
+    filaDeValidacao.delete(item.id);
+    renderEstoque();
+  }
 }
 
 // montarPainelDoEstoque liga a tela que acabou de entrar no DOM. Chamada no
@@ -1322,9 +1577,44 @@ function montarPainelDoEstoque() {
     });
   }
 
-  // Delegação no container: os cards nascem e morrem o tempo todo, e um
-  // ouvinte por botão morreria junto com o card que o hospedava.
+  // Selecionar um item: clique ou teclado na linha da tabela.
   container.addEventListener("click", (ev) => {
+    const linha = ev.target.closest(".estoque-linha");
+    if (linha) selecionarItem(linha.dataset.id);
+  });
+  container.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" && ev.key !== " ") return;
+    const linha = ev.target.closest(".estoque-linha");
+    if (!linha) return;
+    ev.preventDefault();
+    selecionarItem(linha.dataset.id);
+  });
+
+  const pilulas = document.getElementById("estoque-pilulas");
+  if (pilulas) {
+    pilulas.addEventListener("click", (ev) => {
+      const pilula = ev.target.closest(".estoque-pilula");
+      if (!pilula) return;
+      // Leva ao primeiro item do grupo: é o gesto de quem viu "2 perdendo" e
+      // quer resolver.
+      const alvo = loadEstoque().find(
+        (item) =>
+          classificarStatus(item, { naFila: filaDeValidacao.has(item.id) }).status ===
+          pilula.dataset.status,
+      );
+      if (alvo) selecionarItem(alvo.id);
+    });
+  }
+
+  const validarTudoBtn = document.getElementById("estoque-validar-tudo");
+  if (validarTudoBtn) validarTudoBtn.addEventListener("click", validarTudo);
+
+  // Delegação no painel: o card nasce e morre o tempo todo, e um ouvinte por
+  // botão morreria junto com o card que o hospedava.
+  const painel = document.getElementById("estoque-detalhe");
+  if (!painel) return;
+
+  painel.addEventListener("click", (ev) => {
     const card = ev.target.closest(".estoque-card");
     if (!card) return;
     const id = card.dataset.id;
@@ -1372,29 +1662,27 @@ function montarPainelDoEstoque() {
       const atualizado = updateEstoqueItem(id, mudancas);
       if (!atualizado) return;
       pintarToggle(botaoLoja, atualizado.naLoja, "Na loja", "Fora da loja");
-      const botaoUndercut = card.querySelector(".estoque-toggle-undercut");
-      if (botaoUndercut) {
-        pintarToggle(botaoUndercut, atualizado.undercut, "Undercutting ligado", "Undercutting desligado");
-      }
+      const botaoUndercut = card.querySelector(".estoque-sino");
+      if (botaoUndercut) pintarSino(botaoUndercut, atualizado.undercut);
       aplicarDisponibilidadeDoUndercut(card, atualizado);
       renderAvisoDeLoja();
       return;
     }
 
-    const botaoUndercut = ev.target.closest(".estoque-toggle-undercut");
+    const botaoUndercut = ev.target.closest(".estoque-sino");
     if (botaoUndercut) {
       const atual = loadEstoque().find((e) => e.id === id);
       if (!atual || !atual.naLoja) return;
       const atualizado = updateEstoqueItem(id, { undercut: !atual.undercut, notified: false });
       if (!atualizado) return;
-      pintarToggle(botaoUndercut, atualizado.undercut, "Undercutting ligado", "Undercutting desligado");
+      pintarSino(botaoUndercut, atualizado.undercut);
     }
   });
 
   // Teclado: o preço de venda é um <span> clicável, então ele precisa
   // responder a Enter para quem navega com Tab — a watchlist faz igual com o
   // alvo e o refino.
-  container.addEventListener("keydown", (ev) => {
+  painel.addEventListener("keydown", (ev) => {
     if (ev.key !== "Enter") return;
     const span = ev.target.closest(".estoque-preco-venda");
     if (!span) return;
@@ -1404,7 +1692,7 @@ function montarPainelDoEstoque() {
     startEditingPrecoVenda(span, card.dataset.id);
   });
 
-  container.addEventListener("change", (ev) => {
+  painel.addEventListener("change", (ev) => {
     const seletorJanela = ev.target.closest(".estoque-janela");
     if (!seletorJanela) return;
     const card = seletorJanela.closest(".estoque-card");

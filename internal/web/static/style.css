@@ -448,27 +448,200 @@ h1 {
   display: none;
 }
 
-/* Uma grade, e não uma coluna: o card do estoque é largo (preço de venda,
-   mercado, histórico) e a aba não tem painel lateral disputando espaço, então
-   cabem dois ou três por linha em tela grande. */
-.estoque-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 0.75rem;
-  align-items: start;
+/* Mestre-detalhe. A tabela responde "qual item precisa de mim?" numa olhada;
+   o painel responde "o que faço com este?". A grade de cards que existia antes
+   obrigava a ler item por item e crescia de altura de um jeito que
+   desalinhava a linha inteira. */
+.estoque-quadro {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  overflow: hidden;
 }
 
+.estoque-quadro-topo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.estoque-titulo { margin: 0; font-size: 1rem; }
+.estoque-contagem { font-size: 0.8rem; color: var(--muted); }
+
+.estoque-pilulas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+
+/* Botões, e não enfeites: clicar leva ao primeiro item do grupo, que é o
+   gesto de quem viu "2 perdendo" e quer resolver. */
+.estoque-pilula {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--muted);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.estoque-pilula:hover { border-color: var(--accent); color: var(--text); }
+
+.estoque-validar-tudo {
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.estoque-validar-tudo:hover { border-color: var(--accent); color: var(--accent); }
+
+.estoque-mestre-detalhe {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.estoque-lista-coluna {
+  border-right: 1px solid var(--border);
+  min-width: 0;
+}
+
+.estoque-tabela {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.estoque-tabela th {
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  text-align: left;
+}
+
+.estoque-tabela th.estoque-col-preco { text-align: right; }
+
+.estoque-linha { cursor: pointer; }
+.estoque-linha:hover { background: var(--bg-row); }
+
+/* A barra à esquerda, e não só o fundo: com cinco cores de bolinha em jogo,
+   um fundo levemente diferente não bastava para achar a linha aberta. */
+.estoque-linha.is-selecionada {
+  background: var(--bg-row);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.estoque-linha td {
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.estoque-col-item {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.estoque-linha-nome {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.estoque-col-preco {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.estoque-col-mercado { font-size: 0.8rem; color: var(--muted); }
+
+/* A cor da frase acompanha a da bolinha: é a mesma informação, e lê-las
+   juntas é o que faz a tabela ser escaneável de cima a baixo. */
+.estoque-mercado-perdendo { color: var(--danger); }
+.estoque-mercado-empatado { color: var(--warning); }
+.estoque-mercado-na-frente { color: var(--success); }
+.estoque-mercado-na-fila,
+.estoque-mercado-sem-dados { color: var(--muted); font-style: italic; }
+
+.estoque-bolinha {
+  flex-shrink: 0;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.estoque-bolinha-perdendo { background: var(--danger); }
+.estoque-bolinha-empatado { background: var(--warning); }
+.estoque-bolinha-na-frente { background: var(--success); }
+
+/* Sem dados e na fila são ocos: não são um estado do mercado, são a ausência
+   de um. */
+.estoque-bolinha-sem-dados,
+.estoque-bolinha-na-fila {
+  background: none;
+  border: 1px dashed var(--muted);
+}
+
+.estoque-bolinha-na-fila {
+  border-style: solid;
+  animation: estoque-pulso 1.4s ease-in-out infinite;
+}
+
+@keyframes estoque-pulso {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .estoque-bolinha-na-fila { animation: none; }
+}
+
+.estoque-detalhe {
+  min-width: 0;
+  padding: 0.75rem;
+}
+
+.estoque-detalhe-vazio {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+/* Abaixo desta largura não cabem duas colunas: a lista ocupa a tela toda e o
+   painel entra embaixo. */
+@media (max-width: 720px) {
+  .estoque-mestre-detalhe { grid-template-columns: 1fr; }
+  .estoque-lista-coluna {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+/* O card perdeu a borda e o fundo: ele agora é o conteúdo do painel de
+   detalhe, não um objeto solto numa grade. */
 .estoque-card {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  padding: 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-card);
 }
 
 .estoque-card-topo {
@@ -895,6 +1068,24 @@ h1 {
 .estoque-toggle:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* O sininho: o interruptor deixou de ser sobre exibição (a bolinha da tabela
+   já mostra o estado) e passou a significar "me avise mesmo quando eu não
+   estiver na tela". Isso é notificação, e notificação é um sino. */
+.estoque-sino {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  padding: 0.15rem;
+}
+
+.estoque-sino svg {
+  width: 0.85rem;
+  height: 0.85rem;
+  stroke: currentColor;
+  fill: none;
 }
 
 .estoque-acoes {

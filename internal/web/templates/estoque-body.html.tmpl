@@ -1,5 +1,10 @@
 {{/* O corpo da aba Estoque — mesmo papel duplo do watchlist-body: vale como
-     documento completo e como fragmento da troca de aba. */}}
+     documento completo e como fragmento da troca de aba.
+
+     O desenho é mestre-detalhe: a tabela da esquerda responde "qual item
+     precisa de mim?" numa olhada, e o painel da direita responde "o que faço
+     com este?". A grade de cards que existia antes obrigava a ler item por
+     item, e crescia de altura de um jeito que desalinhava a linha inteira. */}}
 {{define "estoque-body"}}
 <div class="page-body page-body--estoque">
   {{/* Um <form> de verdade, e não um input solto: é o que faz o Enter
@@ -43,11 +48,36 @@
        sem cortar o que estiver lendo — é um aviso, não uma emergência. */}}
   <p id="estoque-loja-aviso" class="estoque-loja-aviso" role="status" hidden></p>
 
-  <section class="estoque-column" aria-label="Estoque">
-    <ul id="estoque-list" class="estoque-list"></ul>
-    <p id="estoque-empty" class="empty">
-      Nenhum item no estoque. Digite o nome de um item que você vende e aperte Enter.
-    </p>
+  <section class="estoque-quadro" aria-label="Estoque">
+    <div class="estoque-quadro-topo">
+      <h2 class="estoque-titulo">Estoque</h2>
+      <span id="estoque-contagem" class="estoque-contagem"></span>
+      {{/* As pílulas são o resumo que não exige seleção nenhuma: quantos itens
+           estão em cada estado. Clicar em uma seleciona o primeiro item
+           daquele grupo. */}}
+      <div id="estoque-pilulas" class="estoque-pilulas"></div>
+      <button type="button" id="estoque-validar-tudo" class="estoque-validar-tudo">↻ Validar tudo</button>
+    </div>
+
+    <div class="estoque-mestre-detalhe">
+      <div class="estoque-lista-coluna">
+        <table class="estoque-tabela">
+          <thead>
+            <tr>
+              <th scope="col" class="estoque-col-item">Item</th>
+              <th scope="col" class="estoque-col-preco">Seu preço</th>
+              <th scope="col" class="estoque-col-mercado">Contra o mercado</th>
+            </tr>
+          </thead>
+          <tbody id="estoque-list"></tbody>
+        </table>
+        <p id="estoque-empty" class="empty">
+          Nenhum item no estoque. Digite o nome de um item que você vende e aperte Enter.
+        </p>
+      </div>
+
+      <div id="estoque-detalhe" class="estoque-detalhe"></div>
+    </div>
   </section>
 </div>
 {{/* Só no fragmento: no documento completo o menu já está no cabeçalho, e
