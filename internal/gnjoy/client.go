@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strconv"
 	"strings"
@@ -53,7 +54,12 @@ const (
 	// detecta a falha sozinho e redescobre o hash atual automaticamente
 	// (veja discover.go) — não é necessário atualizar esta constante nem
 	// reiniciar o processo.
-	DefaultActionID = "402088d0ac5af21ae9748c4ac647cf464aa8d9578d"
+	//
+	// Atualizado em 17/09/2026: o valor anterior
+	// ("402088d0ac5af21ae9748c4ac647cf464aa8d9578d") deixou de ser aceito
+	// depois de um deploy do site, que passou a responder a página inteira
+	// em HTML no lugar do envelope da action.
+	DefaultActionID = "4007fc6d83865908f9dc6f5b829ccced4aabbbb4ea"
 
 	// DefaultRateLimitRPS e DefaultRateLimitBurst controlam o ritmo padrão
 	// de requisições enviadas ao GnJoy Americas. O site tem um rate limiter
@@ -245,6 +251,16 @@ func NoRetry() CallOption {
 // New cria um Client pronto para uso com os valores padrão, aplicando as
 // opções informadas.
 func New(opts ...Option) *Client {
+	// O jar existe por causa do Cloudflare na frente do site: ele devolve um
+	// cookie de sessão (_cfuvid) na primeira resposta e espera vê-lo de volta
+	// nas seguintes. Sem guardá-lo, cada requisição chega como se fosse um
+	// visitante novo — e uma rajada de visitantes novos é exatamente o padrão
+	// que faz o Cloudflare responder o desafio "Just a moment..." (403) no
+	// lugar da página, derrubando até a redescoberta do action id.
+	//
+	// cookiejar.New só devolve erro para Options inválidas, e nil é válido.
+	jar, _ := cookiejar.New(nil)
+
 	c := &Client{
 		baseURL:  DefaultBaseURL,
 		locale:   DefaultLocale,
@@ -252,7 +268,7 @@ func New(opts ...Option) *Client {
 		userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
 			"(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
 		cooldownDeDesafio: DefaultCooldownDeDesafio,
-		httpClient:        &http.Client{Timeout: 15 * time.Second},
+		httpClient:        &http.Client{Timeout: 15 * time.Second, Jar: jar},
 		limiter:           rate.NewLimiter(rate.Limit(DefaultRateLimitRPS), DefaultRateLimitBurst),
 		activity:          NewActivityLog(activityLogCapacity),
 		suspension:        newSuspensionState(),
@@ -805,9 +821,39 @@ type actionRequest struct {
 	Params any    `json:"params"`
 }
 
+// actionEnvelope é o resultado de uma Server Action. Data é OPCIONAL: quando
+// a action não tem o que devolver, o site responde só {"success":false}.
 type actionEnvelope struct {
 	Success bool            `json:"success"`
 	Data    json.RawMessage `json:"data"`
+}
+
+// parseActionEnvelope acha o envelope da Server Action no payload Flight.
+//
+// A ausência de "data" é uma resposta LEGÍTIMA, e não um formato
+// irreconhecível: é o que o site manda quando a action não encontra nada — a
+// loja que fechou, ou os parâmetros vazios que pingUpstream usa de propósito
+// para descobrir se o site está no ar. Exigir as duas chaves fazia essa
+// resposta virar ErrFieldsNotFound, que isStaleActionIDErr interpreta como
+// action id desatualizado: cada abertura da página inicial (WarmupActionID) e
+// cada sonda de suspensão (ProbeUpstream) pagavam uma varredura completa dos
+// chunks JS do site sem nada estar errado — e é essa rajada que acaba atraindo
+// o bloqueio do Cloudflare.
+//
+// A busca estrita vem primeiro de propósito. Com uma chave só o casamento de
+// parseFlightObject fica bem mais frouxo (serve qualquer objeto com um
+// "success" em qualquer nível), e a resposta de uma action traz junto a página
+// re-renderizada inteira; procurar o par completo antes mantém a precisão de
+// sempre no caso comum, em que "data" está lá.
+func parseActionEnvelope(body []byte) (map[string]any, error) {
+	obj, err := parseFlightObject(body, "data", "success")
+	if err == nil {
+		return obj, nil
+	}
+	if !errors.Is(err, ErrFieldsNotFound) {
+		return nil, err
+	}
+	return parseFlightObject(body, "success")
 }
 
 // callAction invoca a Server Action interna do Next.js usada pelas rotas de
@@ -861,7 +907,7 @@ func (c *Client) callActionWithID(ctx context.Context, actionType string, params
 		return err
 	}
 
-	obj, err := parseFlightObject(body, "data", "success")
+	obj, err := parseActionEnvelope(body)
 	if err != nil {
 		return fmt.Errorf("gnjoy: interpretando resposta da action %q: %w", actionType, err)
 	}
@@ -881,6 +927,13 @@ func (c *Client) callActionWithID(ctx context.Context, actionType string, params
 	}
 	if out == nil {
 		return nil
+	}
+	if len(env.Data) == 0 {
+		// Sucesso declarado e nenhum dado junto. Não é o envelope de "não
+		// encontrei" (esse vem com success:false), e não há o que decodificar.
+		// Erro próprio, e não ErrFieldsNotFound, justamente para não ser lido
+		// como action id desatualizado (ver parseActionEnvelope).
+		return fmt.Errorf("gnjoy: action %q respondeu sucesso sem o campo \"data\"", actionType)
 	}
 	if err := json.Unmarshal(env.Data, out); err != nil {
 		return fmt.Errorf("gnjoy: decodificando dados da action %q: %w", actionType, err)

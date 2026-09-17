@@ -889,3 +889,44 @@ casamento por trecho: envia o maior pedaço só com caracteres aceitos e filtra
 a resposta pelo termo inteiro. O mock (`internal/gnjoytest`) reproduz a
 recusa, para que um retrocesso no contorno apareça nos testes em vez de na mão
 do usuário.
+
+## Envelope da action sem resultado (capturado em 17/09/2026)
+
+As três Server Actions de detalhe (`store`, `item`, `price`) respondem um
+envelope `{data, success}` na linha `1:` do payload Flight — é o que está
+capturado nas seções acima, todas com `success: true`.
+
+Quando a action **não encontra nada**, porém, a chave `data` simplesmente não
+vem:
+
+````
+1:{"success":false}
+````
+
+Capturado contra o site real pedindo a action `store` com
+`{"svrId":0,"mapId":0,"ssi":""}` — os parâmetros vazios que
+`gnjoy.pingUpstream` usa de propósito para saber se o site está no ar.
+
+Isso derrubou a aplicação: o client exigia as duas chaves, então essa resposta
+legítima virava `ErrFieldsNotFound`, que `isStaleActionIDErr` lê como action id
+desatualizado. Cada abertura da página inicial (`WarmupActionID`) e cada sonda
+de suspensão (`ProbeUpstream`) passaram a disparar uma varredura completa dos
+chunks JS do site. Corrigido em `gnjoy.parseActionEnvelope`, que trata `data`
+como opcional; o mock agora omite a chave do mesmo jeito, para que o retrocesso
+apareça nos testes.
+
+Duas outras coisas medidas na mesma investigação:
+
+- **Action id desatualizado não dá erro.** Um POST com um `next-action` que o
+  deploy atual não conhece responde **200** com `Content-Type: text/html` e a
+  página inteira (~266 KB) no lugar do envelope. O hash em vigor naquele dia
+  passou a ser `4007fc6d83865908f9dc6f5b829ccced4aabbbb4ea`.
+- **A rota HTML atrai o Cloudflare.** Depois de algumas varreduras de chunks
+  seguidas, o GET de `/{locale}/intro/shop-search/trading` com
+  `accept: text/html` — o primeiro passo da descoberta do action id — passa a
+  responder **403** com o desafio "Just a moment...", enquanto as mesmas rotas
+  pedidas como RSC (`rsc: 1`) continuam respondendo 200 normalmente. Mandar o
+  conjunto completo de cabeçalhos de um navegador (`sec-fetch-*`,
+  `accept-language`, `upgrade-insecure-requests`) **não** muda o 403: o
+  bloqueio é da sessão/IP, não do formato do pedido. O melhor remédio é não
+  varrer sem necessidade — que é o que a correção acima garante.

@@ -622,8 +622,23 @@ func paginarHistorico(history PriceHistory, limit, page int) PriceHistory {
 
 // writeFlightAction escreve o envelope de resposta de uma Server Action, no
 // mesmo formato de duas linhas que o site usa.
+//
+// Sem dado nenhum a devolver (a loja que não existe mais, uma action
+// desconhecida), o envelope sai só com "success" e SEM a chave "data" — foi o
+// que o site real respondeu quando conferido em 17/09/2026:
+//
+//	1:{"success":false}
+//
+// Escrever "data":null aqui parecia inofensivo e escondia um bug de verdade: o
+// client exigia as duas chaves e lia a ausência de "data" como action id
+// desatualizado, disparando uma varredura completa dos chunks do site a cada
+// aquecimento (ver parseActionEnvelope em internal/gnjoy/client.go).
 func writeFlightAction(w http.ResponseWriter, data any, success bool) {
-	payload, err := json.Marshal(map[string]any{"data": data, "success": success})
+	envelope := map[string]any{"success": success}
+	if data != nil {
+		envelope["data"] = data
+	}
+	payload, err := json.Marshal(envelope)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

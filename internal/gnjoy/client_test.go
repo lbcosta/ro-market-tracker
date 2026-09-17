@@ -3,7 +3,9 @@ package gnjoy_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
@@ -539,6 +541,73 @@ func TestGetStoreDetailActionSemSucesso(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "reportou falha") {
 		t.Errorf("erro = %v, quero uma menção a falha reportada pela action", err)
+	}
+}
+
+// TestActionSemDataNaoDisparaRedescoberta trava o bug que derrubou a aplicação
+// em 17/09/2026: quando a action não encontra nada, o site responde SÓ
+// {"success":false}, e o client exigia também um campo "data". A resposta
+// legítima virava ErrFieldsNotFound, que isStaleActionIDErr lê como action id
+// desatualizado — então cada aquecimento da página inicial e cada sonda de
+// suspensão pagavam uma varredura completa dos chunks JS do site, e era essa
+// rajada que acabava atraindo o bloqueio do Cloudflare.
+//
+// Quem prende o bug é a contagem de requisições: a mensagem de erro certa,
+// sozinha, não distingue "reportou falha" de "reportou falha depois de varrer
+// o site inteiro atrás de um id que nunca esteve errado".
+func TestActionSemDataNaoDisparaRedescoberta(t *testing.T) {
+	client, srv := newTestClient(t, gnjoytest.DemoConfig())
+
+	_, err := client.GetStoreDetail(context.Background(), gnjoy.StoreLocation{
+		SvrId: 303, MapId: 835, SSI: "loja-que-nao-existe",
+	})
+	if !errors.Is(err, gnjoy.ErrActionFailed) {
+		t.Fatalf("erro = %v, quero ErrActionFailed", err)
+	}
+	if got := srv.RequestCount(); got != 1 {
+		t.Errorf("requisições ao upstream = %d, quero 1 (a resposta sem \"data\" não é um id desatualizado)", got)
+	}
+}
+
+// TestCookieDaSessaoVoltaNaRequisicaoSeguinte cobre o cookie jar embutido no
+// Client: o Cloudflare que fica na frente do site entrega um cookie de sessão
+// (_cfuvid) na primeira resposta e espera vê-lo de volta nas seguintes. Sem
+// guardá-lo, toda requisição chega como um visitante novo — e é esse padrão
+// que faz o desafio "Just a moment..." (403) aparecer no lugar da página.
+func TestCookieDaSessaoVoltaNaRequisicaoSeguinte(t *testing.T) {
+	var mu sync.Mutex
+	var enviados []string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		enviados = append(enviados, r.Header.Get("cookie"))
+		mu.Unlock()
+
+		http.SetCookie(w, &http.Cookie{Name: "_cfuvid", Value: "sessao-do-cloudflare", Path: "/"})
+		w.Header().Set("content-type", "text/x-component")
+		fmt.Fprint(w, "1:{\"list\":[],\"totalCount\":0}\n")
+	}))
+	defer srv.Close()
+
+	client := gnjoy.New(gnjoy.WithBaseURL(srv.URL), gnjoy.WithRateLimit(1000, 1000))
+	for i := 1; i <= 2; i++ {
+		if _, err := client.SearchShops(context.Background(), gnjoy.SearchShopsParams{
+			ServerType: "NIDHOGG", SearchWord: "Espada",
+		}); err != nil {
+			t.Fatalf("busca %d: %v", i, err)
+		}
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(enviados) != 2 {
+		t.Fatalf("requisições recebidas = %d, quero 2", len(enviados))
+	}
+	if enviados[0] != "" {
+		t.Errorf("primeira requisição mandou cookie %q, quero nenhum", enviados[0])
+	}
+	if !strings.Contains(enviados[1], "_cfuvid=sessao-do-cloudflare") {
+		t.Errorf("segunda requisição mandou cookie %q, quero de volta o _cfuvid da primeira", enviados[1])
 	}
 }
 
