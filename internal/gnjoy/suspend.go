@@ -29,16 +29,30 @@ var ErrSuspended = errors.New("gnjoy: o site limitou as consultas (429) e elas e
 // Suspension é o estado publicado aos assinantes. Vai sempre completo, nunca
 // como diferença: um assinante que perdesse o evento de liberação ficaria
 // preso no estado anterior para sempre.
+// Motivos pelos quais as consultas podem estar suspensas. Eles existem
+// separados porque a saída é diferente: um 429 passa sozinho com o tempo, e
+// um desafio de navegador não — nenhuma espera resolve, porque o site parou
+// de atender a clientes que não são navegador.
+const (
+	SuspensaoPor429     = "429"
+	SuspensaoPorDesafio = "desafio"
+)
+
 type Suspension struct {
 	Suspended bool
 	Since     time.Time
+
+	// Reason é SuspensaoPor429 ou SuspensaoPorDesafio. Vazio quando não há
+	// suspensão.
+	Reason string
 }
 
 // SuspensionState guarda se as consultas estão suspensas e avisa quem
 // acompanha. É seguro para uso concorrente.
 type SuspensionState struct {
-	mu    sync.Mutex
-	since time.Time
+	mu     sync.Mutex
+	since  time.Time
+	reason string
 
 	// gen conta as suspensões: cada nova incrementa. É o que impede uma
 	// resposta que já estava em voo de desfazer uma suspensão mais nova que
@@ -61,7 +75,7 @@ func (s *SuspensionState) Current() Suspension {
 }
 
 func (s *SuspensionState) snapshotLocked() Suspension {
-	return Suspension{Suspended: !s.since.IsZero(), Since: s.since}
+	return Suspension{Suspended: !s.since.IsZero(), Since: s.since, Reason: s.reason}
 }
 
 // Subscribe devolve um canal com as mudanças de estado e a função que cancela
@@ -120,13 +134,21 @@ func (s *SuspensionState) admit(bypass bool) (uint64, error) {
 
 // suspend fecha a porta. Repetir enquanto já suspenso não republica nada: o
 // estado (inclusive o "desde quando") continua o da primeira vez.
-func (s *SuspensionState) suspend(now time.Time) {
+func (s *SuspensionState) suspend(now time.Time, reason string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.since.IsZero() {
+		// Já suspenso. Um desafio que chega durante uma suspensão por 429
+		// ainda assim promove o motivo: o 429 passaria sozinho, o desafio
+		// não, e é o segundo que o usuário precisa saber.
+		if reason == SuspensaoPorDesafio && s.reason != SuspensaoPorDesafio {
+			s.reason = reason
+			s.publishLocked()
+		}
 		return
 	}
 	s.since = now
+	s.reason = reason
 	s.gen++
 	s.publishLocked()
 }
@@ -145,6 +167,7 @@ func (s *SuspensionState) release(observedGen uint64) {
 		return
 	}
 	s.since = time.Time{}
+	s.reason = ""
 	s.publishLocked()
 }
 

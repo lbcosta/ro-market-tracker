@@ -1034,6 +1034,51 @@ Dois detalhes da implementação que não são opcionais (ver
   dois minutos dispararia assim que ela acabasse, mesmo já suspensa — que é
   exatamente o tráfego represado que a suspensão existe para impedir.
 
+### Desafio de navegador: o bloqueio que não passa sozinho
+
+Além do `429`, o site pode responder um **desafio antibot** do Cloudflare — uma
+página HTML de verificação, com status `403` ou `503`, no lugar do conteúdo. É
+uma situação diferente do `429` em tudo que importa, e por isso tem tratamento
+próprio (`gnjoy.ErrDesafioDeNavegador`).
+
+**Por que ela precisou de um ramo só dela.** O `do` tratava qualquer status
+que não fosse `429` como "o site está atendendo" — o que é razoável para `404`
+ou `500`, e exatamente ao contrário para um desafio. Sem o ramo, um desafio:
+
+1. **liberava** uma suspensão legítima, reabrindo a porta que um `429` tinha
+   fechado;
+2. não registrava calmaria nenhuma, então a requisição seguinte saía um segundo
+   depois e levava outro desafio;
+3. chegava à tela como "não foi possível consultar agora", que sugere tropeço
+   passageiro.
+
+Ou seja, o programa martelava o bloqueio no ritmo do rate limiter — que é
+justamente o comportamento que o mantém ligado.
+
+**O reconhecimento olha o conteúdo, não só o status.** `403` e `503` aparecem em
+situações comuns, e suspender o programa inteiro por um `403` qualquer seria
+pior que o problema. O que identifica o desafio são marcas estruturais da
+página (`challenges.cloudflare.com`, `__cf_chl_`, `cf-browser-verification`) —
+há teste afirmando que um `403` sem elas **não** suspende.
+
+**A saída é diferente, e a tela diz isso.** Um `429` passa sozinho com o tempo;
+um desafio não passa — o site decidiu não atender a clientes que não são
+navegador, e nenhuma espera resolve. O motivo da suspensão viaja até o
+navegador (`reason` no evento SSE) e o banner muda de texto: dizer "volta assim
+que o site liberar" num desafio seria um conselho falso. Um desafio que chega
+durante uma suspensão por `429` **promove** o motivo, porque é o mais grave dos
+dois que o usuário precisa saber.
+
+A sonda da suspensão continua sendo quem descobre a liberação, se ela vier.
+
+**Nota de campo.** Em setembro de 2026 o site passou a bloquear clientes
+automatizados por impressão digital de TLS: nenhum ajuste de cabeçalho, cookie
+ou versão de HTTP atravessa, e um navegador automatizado também é barrado —
+enquanto um navegador de verdade passa sem ver desafio nenhum. Não há cookie
+`cf_clearance` a reaproveitar, porque ninguém chega a resolver um desafio. Este
+tratamento não faz o programa voltar a funcionar nesse cenário; ele faz o
+programa se comportar e dizer a verdade enquanto isso.
+
 ## Endpoints da API REST
 
 Todas as respostas são JSON. Erros seguem o formato `{"error": "mensagem"}`.

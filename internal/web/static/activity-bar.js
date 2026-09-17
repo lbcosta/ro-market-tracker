@@ -199,9 +199,25 @@ function applySuspension(state) {
   const detail = document.getElementById("suspension-detail");
   if (detail && suspended && state.since) {
     const desde = new Date(state.since).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    // Os dois bloqueios pedem coisas diferentes de quem está lendo. Um 429
+    // passa sozinho: esperar É a ação certa. Um desafio de navegador não
+    // passa — o site deixou de atender a quem não é navegador, e dizer
+    // "volta assim que o site liberar" ali seria um conselho falso.
     detail.textContent =
-      "As buscas e a watchlist estão pausadas desde " + desde +
-      ". O programa verifica sozinho de tempos em tempos e volta ao normal assim que o site liberar.";
+      state.reason === "desafio"
+        ? "Desde " + desde + ", o site está exigindo verificação de navegador e recusando o programa. " +
+          "Isso não passa sozinho com o tempo. O programa segue checando de longe em longe, para não " +
+          "insistir contra o bloqueio."
+        : "As buscas e a watchlist estão pausadas desde " + desde +
+          ". O programa verifica sozinho de tempos em tempos e volta ao normal assim que o site liberar.";
+  }
+
+  const titulo = document.getElementById("suspension-title");
+  if (titulo) {
+    titulo.textContent =
+      suspended && state.reason === "desafio"
+        ? "O site está pedindo verificação de navegador."
+        : "O site limitou as consultas.";
   }
 
   document.querySelectorAll(".search-form input, .search-form select, .search-form button")

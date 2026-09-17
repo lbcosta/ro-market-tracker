@@ -44,12 +44,19 @@ func toActivityEventView(ev gnjoy.ActivityEvent) activityEventView {
 type suspensionView struct {
 	Suspended bool  `json:"suspended"`
 	Since     int64 `json:"since,omitempty"`
+
+	// Reason separa os dois bloqueios porque a saída é diferente: um 429
+	// passa sozinho com o tempo, e um desafio de navegador não — o site parou
+	// de atender a quem não é navegador, e esperar não resolve. Dizer "volta
+	// assim que o site liberar" no segundo caso seria um conselho falso.
+	Reason string `json:"reason,omitempty"`
 }
 
 func toSuspensionView(s gnjoy.Suspension) suspensionView {
 	view := suspensionView{Suspended: s.Suspended}
 	if s.Suspended {
 		view.Since = s.Since.UnixMilli()
+		view.Reason = s.Reason
 	}
 	return view
 }

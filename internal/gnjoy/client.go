@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -87,10 +88,15 @@ const (
 // mudar de formato, exigir novos cabeçalhos ou parar de funcionar sem aviso
 // a qualquer momento.
 type Client struct {
-	baseURL    string
-	locale     string
-	userAgent  string
-	httpClient *http.Client
+	baseURL   string
+	locale    string
+	userAgent string
+
+	// cooldownDeDesafio é configurável só para os testes conseguirem exercitar
+	// a recuperação sem esperar um minuto de relógio — o mesmo motivo pelo
+	// qual o rate limit e o intervalo da sonda também são.
+	cooldownDeDesafio time.Duration
+	httpClient        *http.Client
 
 	// limiter regula o ritmo de TODAS as requisições enviadas ao upstream
 	// (busca, actions de detalhe e a descoberta de action id), formando
@@ -146,6 +152,12 @@ func WithLocale(locale string) Option {
 // Veja DefaultActionID.
 func WithActionID(actionID string) Option {
 	return func(c *Client) { c.actionID = actionID }
+}
+
+// WithCooldownDeDesafio troca quanto tempo o client espera depois de levar um
+// desafio de navegador. Ver DefaultCooldownDeDesafio.
+func WithCooldownDeDesafio(d time.Duration) Option {
+	return func(c *Client) { c.cooldownDeDesafio = d }
 }
 
 func WithUserAgent(userAgent string) Option {
@@ -239,10 +251,11 @@ func New(opts ...Option) *Client {
 		actionID: DefaultActionID,
 		userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
 			"(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36",
-		httpClient: &http.Client{Timeout: 15 * time.Second},
-		limiter:    rate.NewLimiter(rate.Limit(DefaultRateLimitRPS), DefaultRateLimitBurst),
-		activity:   NewActivityLog(activityLogCapacity),
-		suspension: newSuspensionState(),
+		cooldownDeDesafio: DefaultCooldownDeDesafio,
+		httpClient:        &http.Client{Timeout: 15 * time.Second},
+		limiter:           rate.NewLimiter(rate.Limit(DefaultRateLimitRPS), DefaultRateLimitBurst),
+		activity:          NewActivityLog(activityLogCapacity),
+		suspension:        newSuspensionState(),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -362,7 +375,7 @@ func (c *Client) do(req *http.Request, labels activityLabels, cfg callConfig) ([
 				// Além da calmaria: o 429 pode ser a cota do dia acabando, e
 				// aí o site não diz quando volta. Fecha a porta e deixa a
 				// sonda descobrir (ver suspend.go).
-				c.suspension.suspend(time.Now())
+				c.suspension.suspend(time.Now(), SuspensaoPor429)
 			}
 			if attempt == cfg.maxRetries {
 				break
@@ -375,10 +388,32 @@ func (c *Client) do(req *http.Request, labels activityLabels, cfg callConfig) ([
 			continue
 		}
 
-		// O site respondeu algo que não é 429 — 200, 404, 500, tanto faz. Ele
-		// está atendendo, e é isso que a suspensão espera para reabrir. A
-		// guarda de geração impede que uma resposta admitida ANTES do 429, e
-		// que só chegou agora, desfaça uma suspensão mais nova que ela.
+		// Um desafio de navegador (Cloudflare) NÃO é o site atendendo — é o
+		// oposto. Sem este ramo ele cairia no release logo abaixo: reabriria
+		// uma suspensão legítima, não registraria calmaria nenhuma, e a
+		// próxima requisição sairia um segundo depois para levar outro
+		// desafio. O programa martelaria o bloqueio indefinidamente, que é
+		// justamente o que o mantém ligado.
+		if ehDesafioDeNavegador(resp.StatusCode, body) {
+			httpErr := &HTTPError{StatusCode: resp.StatusCode, Body: truncateBody(body)}
+			c.extendCooldown(time.Now().Add(c.cooldownDeDesafio))
+			if c.suspendOn429 {
+				c.suspension.suspend(time.Now(), SuspensaoPorDesafio)
+			}
+			slog.Warn("gnjoy: upstream respondeu com desafio de navegador; consultas suspensas",
+				"path", req.URL.Path, "status", resp.StatusCode)
+			// Não adianta tentar de novo: nenhuma espera curta resolve um
+			// desafio, e quem descobre a liberação é a sonda da suspensão.
+			wrapped := fmt.Errorf("%w: %w", ErrDesafioDeNavegador, httpErr)
+			handle.fail(wrapped)
+			return nil, wrapped
+		}
+
+		// O site respondeu algo que não é 429 nem desafio — 200, 404, 500,
+		// tanto faz. Ele está atendendo, e é isso que a suspensão espera para
+		// reabrir. A guarda de geração impede que uma resposta admitida ANTES
+		// do 429, e que só chegou agora, desfaça uma suspensão mais nova que
+		// ela.
 		c.suspension.release(gen)
 
 		if resp.StatusCode != http.StatusOK {
@@ -462,6 +497,48 @@ func (c *Client) extendCooldown(until time.Time) {
 		c.cooldownUntil = until
 	}
 	c.cooldownMu.Unlock()
+}
+
+// DefaultCooldownDeDesafio é quanto o client espera antes de tentar de novo
+// depois de levar um desafio.
+//
+// Um desafio não traz Retry-After — o site não diz quando volta, porque do
+// ponto de vista dele não há o que voltar: ele decidiu não atender a este
+// cliente. Então o número é escolhido por nós, e é conservador de propósito.
+// Quem de fato segura as consultas é a suspensão; isto aqui só evita uma
+// rajada na janela entre o desafio e ela fechar a porta.
+const DefaultCooldownDeDesafio = time.Minute
+
+// ErrDesafioDeNavegador é devolvido quando o site responde um desafio antibot
+// em vez do conteúdo. É um erro distinto porque a saída também é: um 429 passa
+// sozinho com o tempo, e isto não passa — o site parou de atender a clientes
+// que não são navegador, e nenhuma espera resolve.
+var ErrDesafioDeNavegador = errors.New("gnjoy: o site respondeu um desafio de navegador")
+
+// marcasDeDesafio são trechos que aparecem na página de desafio do Cloudflare.
+// Vários, e não um só: o título muda de idioma, e os outros são estruturais
+// (o script do widget e os parâmetros do desafio).
+var marcasDeDesafio = []string{
+	"challenges.cloudflare.com",
+	"cf-browser-verification",
+	"__cf_chl_",
+	"Just a moment",
+}
+
+// ehDesafioDeNavegador reconhece a página de desafio pelo CONTEÚDO, e não só
+// pelo status: 403 e 503 também aparecem em situações comuns, e suspender o
+// programa inteiro por um 403 qualquer seria pior que o problema.
+func ehDesafioDeNavegador(status int, body []byte) bool {
+	if status != http.StatusForbidden && status != http.StatusServiceUnavailable {
+		return false
+	}
+	texto := string(body)
+	for _, marca := range marcasDeDesafio {
+		if strings.Contains(texto, marca) {
+			return true
+		}
+	}
+	return false
 }
 
 func truncateBody(body []byte) string {
