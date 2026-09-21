@@ -7,9 +7,9 @@
 // edição (preço, ligar/desligar, remover) fala com o servidor. Ver
 // static/watchlist.js.
 //
-// Duas coisas falam com o servidor nesta etapa, e só sob clique do usuário:
-// o botão "Validar" e a escolha de um candidato. Buscar preços de mercado,
-// montar o histórico e avisar sobre undercutting entram depois.
+// Falam com o servidor: os cliques do usuário (Validar, ↻, trocar a janela do
+// histórico) e o rodízio compartilhado (ver monitor.js), que reconsulta o
+// mercado dos itens NA LOJA para avisar quando alguém corta o seu preço.
 
 const ESTOQUE_KEY = "ro-market-tracker:estoque";
 const ESTOQUE_SERVIDOR_KEY = "ro-market-tracker:estoque-servidor";
@@ -56,6 +56,26 @@ const JANELAS = [
   { valor: "ALL", rotulo: "Todo o histórico" },
 ];
 const JANELA_PADRAO = "7";
+
+// O estoque entra no rodízio compartilhado como uma fonte, com os itens que
+// estão NA LOJA. É deles que importa saber se alguém cortou o preço, e é por
+// eles que a tela percebe a loja offline (ver avaliarPresencaNaLoja). Um item
+// fora da loja fica no último dado conhecido, e atualizá-lo é o ↻ do card.
+//
+// Registro no topo do arquivo pelo mesmo motivo da watchlist: o monitor monta
+// a lista de fontes no DOMContentLoaded.
+registrarFonte({
+  nome: "estoque",
+  listar: () => loadEstoque().filter(estaNoRodizio),
+  consultar: (entrada, fresh) => consultarMercado(entrada.id, fresh, { deFundo: true }),
+});
+
+// Só os validados entram. Sem itemId não há o que perguntar ao site, e o
+// monitor escolhe sempre a entrada mais antiga: uma que nunca consegue
+// consultar continuaria a mais antiga para sempre e travaria a fila.
+function estaNoRodizio(item) {
+  return Boolean(item.naLoja) && item.validacao === VALIDACAO_OK && item.itemId != null;
+}
 
 // ---------------------------------------------------------------------------
 // Estado
@@ -182,6 +202,18 @@ function janelaDoItem(item) {
   return item.janela || JANELA_PADRAO;
 }
 
+// quandoDoMercado diz de quando é o lastResult, o dado que a tela mostra.
+//
+// Não é o lastCheckedAt. Esse marca a vez no rodízio e avança também quando a
+// consulta falha, senão um item com erro seria escolhido a todo tick. Usá-lo
+// como idade do dado faria uma falha parecer um dado novo, e o aviso de loja
+// offline tomaria como fresca uma evidência de meia hora atrás. Itens gravados
+// antes do mercadoEm só tinham o lastCheckedAt, e nele só se gravava sucesso.
+function quandoDoMercado(item) {
+  if (!item.lastResult) return null;
+  return item.mercadoEm != null ? item.mercadoEm : item.lastCheckedAt;
+}
+
 // ---------------------------------------------------------------------------
 // Ações
 // ---------------------------------------------------------------------------
@@ -214,6 +246,7 @@ function adicionarAoEstoque(nomeDigitado) {
     janela: JANELA_PADRAO,
     lastCheckedAt: null,
     lastResult: null,
+    mercadoEm: null,
     historico: null,
     notified: false,
   };
@@ -322,9 +355,11 @@ function startEditingPrecoVenda(span, id) {
       const parsed = Math.round(Number(cru));
       if (Number.isFinite(parsed) && parsed >= 0) precoVenda = parsed;
     }
-    // notified volta a false: o preço que se compara com o mercado mudou,
-    // então o aviso de undercutting precisa poder disparar de novo.
-    const atualizado = updateEstoqueItem(id, { precoVenda, notified: false }) || item;
+    // O preço que se compara com o mercado mudou, então o aviso de
+    // undercutting se rearma, a partir do que o card mostra agora (ver
+    // comAvisoArmado).
+    const atual = loadEstoque().find((e) => e.id === id) || item;
+    const atualizado = updateEstoqueItem(id, comAvisoArmado(atual, { precoVenda })) || item;
     span.textContent = precoVendaLabel(atualizado.precoVenda);
     // Repintar o card inteiro, e não só este texto: o preço é insumo da fila,
     // do tempo até vender e dos cenários (ver calcularSugestao). Sem isto, o
@@ -332,17 +367,28 @@ function startEditingPrecoVenda(span, id) {
     repintarCard(atualizado);
   };
 
+  // Desistir da edição devolve o texto e, se o rodízio trouxe dado novo
+  // enquanto o campo estava aberto, faz a repintura que ficou esperando (ver
+  // repintarCard).
+  const desistir = () => {
+    span.textContent = precoVendaLabel(item.precoVenda);
+    const card = span.closest(".estoque-card");
+    if (card && card.dataset.repintarDepois) {
+      repintarCard(loadEstoque().find((e) => e.id === id));
+    }
+  };
+
   input.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") {
       confirmar();
     } else if (ev.key === "Escape") {
       confirmado = true;
-      span.textContent = precoVendaLabel(item.precoVenda);
+      desistir();
     }
   });
 
   input.addEventListener("blur", () => {
-    if (!confirmado) span.textContent = precoVendaLabel(item.precoVenda);
+    if (!confirmado) desistir();
   });
 }
 
@@ -429,9 +475,11 @@ function escolherCandidato(id, candidato) {
   // histórico), e perguntar de novo gastaria uma requisição para receber a
   // resposta que acabamos de obter. O resultado é semeado à mão.
   if (candidato.inMarket === false) {
+    const agora = Date.now();
     repintarCard(updateEstoqueItem(id, {
       lastResult: { found: false, listings: [] },
-      lastCheckedAt: Date.now(),
+      lastCheckedAt: agora,
+      mercadoEm: agora,
     }));
   } else {
     consultarMercado(id);
@@ -457,8 +505,16 @@ function repintarCard(item) {
   const linha = findEstoqueLinha(item.id);
   if (linha) linha.replaceWith(buildLinhaDoEstoque(item));
 
+  // Um preço sendo digitado não pode sumir no meio da digitação. O rodízio
+  // repinta o card sozinho a cada consulta, e trocá-lo agora levaria o campo
+  // junto. A repintura fica para quando a edição terminar (ver
+  // startEditingPrecoVenda), e a linha da tabela já sai atualizada.
   const card = findEstoqueCard(item.id);
-  if (card) card.replaceWith(buildEstoqueCard(item));
+  if (card && card.querySelector(".estoque-preco-input")) {
+    card.dataset.repintarDepois = "1";
+  } else if (card) {
+    card.replaceWith(buildEstoqueCard(item));
+  }
 
   renderResumoDoTopo();
   renderAvisoDeLoja();
@@ -548,14 +604,15 @@ function buildEscolhaDeCandidato(item) {
 // Mercado
 // ---------------------------------------------------------------------------
 
-// consultarMercado busca os anúncios do item agora. Só é chamada sob clique:
-// ao escolher o item na validação e no botão "↻" do card. O rodízio
-// automático entra na etapa do undercutting.
+// consultarMercado busca os anúncios do item agora. Sai ao escolher o item na
+// validação, no botão "↻" do card e, para os itens na loja, pelo rodízio
+// (deFundo). De fundo, um erro não vira toast: ninguém pediu aquela consulta,
+// e a suspensão por limite do site já tem o seu próprio aviso.
 //
 // Grava o resultado SEMPRE, inclusive quando o card não está na tela — pelo
 // mesmo motivo que fetchLivePrice (ver monitor.js): o que é vigiado não pode
 // depender de qual aba está aberta.
-async function consultarMercado(id, fresh = false) {
+async function consultarMercado(id, fresh = false, { deFundo = false } = {}) {
   const item = loadEstoque().find((e) => e.id === id);
   if (!item || item.itemId == null) return;
 
@@ -577,18 +634,97 @@ async function consultarMercado(id, fresh = false) {
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
 
-    const mudancas = { lastResult: data, lastCheckedAt: Date.now(), notified: false };
+    const agora = Date.now();
+    const mudancas = { lastResult: data, lastCheckedAt: agora, mercadoEm: agora };
     // Um item validado pelo histórico não sabia o sufixo de slots; a primeira
     // consulta de mercado corrige o nome sem custar requisição nenhuma.
     if (data.displayName && data.displayName !== item.itemName) {
       mudancas.itemName = data.displayName;
     }
-    repintarCard(updateEstoqueItem(id, mudancas));
+    const atualizado = updateEstoqueItem(id, mudancas);
+    repintarCard(atualizado);
+    avaliarUndercut(atualizado);
   } catch (err) {
-    showToast(String(err.message || err).trim() || "Não foi possível consultar o mercado agora.");
+    // A vez no rodízio avança mesmo com erro, como exige o monitor, senão este
+    // item seria o escolhido de novo a cada tick. O dado anterior continua
+    // sendo o mostrado, com a idade que ele tem de verdade.
+    const atual = loadEstoque().find((e) => e.id === id);
+    if (atual) updateEstoqueItem(id, { lastCheckedAt: Date.now(), mercadoEm: quandoDoMercado(atual) });
+    if (!deFundo) {
+      showToast(String(err.message || err).trim() || "Não foi possível consultar o mercado agora.");
+    }
     const depois = botao();
     if (depois) depois.disabled = false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Undercutting
+// ---------------------------------------------------------------------------
+
+// estaSendoCortado diz se alguém vende este item mais barato que você, pelo
+// último retrato do mercado.
+//
+// Estritamente mais barato: empatar no menor preço não é ser cortado (a
+// tabela já mostra isso como "empatado"). Os seus anúncios ficam de fora. Sem
+// isso, o seu anúncio antigo, mais barato que um preço novo, dispararia um
+// aviso contra você mesmo.
+function estaSendoCortado(item) {
+  if (!item.naLoja || item.precoVenda == null) return false;
+  if (!item.lastResult || !item.lastResult.found) return false;
+  const { outros } = separarAnuncios(item.lastResult);
+  return outros.length > 0 && outros[0].price < item.precoVenda;
+}
+
+// O sino avisa de um CRUZAMENTO: você não estava sendo cortado e agora está.
+// O "notified" da entrada guarda se o corte atual já é sabido, com a mesma
+// mecânica de avaliarHit na watchlist. Ele segura o aviso enquanto o corte
+// continuar, e se rearma quando o corte acaba: um aviso por cruzamento, e não
+// um a cada volta do rodízio.
+//
+// comAvisoArmado completa uma decisão do usuário (preço, sino, loja) com o
+// "notified" do estado que resulta dela. Quem decide está olhando para o
+// card: se ele já diz que há alguém mais barato, isso é sabido, e repetir
+// pelo Telegram um minuto depois seria avisar do que a pessoa acabou de ler.
+// É também o que deixa a estratégia de segurar funcionar, porque anunciar
+// acima do mercado de propósito não pode render um aviso a cada edição.
+function comAvisoArmado(atual, mudancas) {
+  return { ...mudancas, notified: estaSendoCortado({ ...atual, ...mudancas }) };
+}
+
+// avaliarUndercut roda a cada retrato novo do mercado, com ou sem o card na
+// tela: o sino existe justamente para avisar quem não está olhando.
+//
+// O "notified" acompanha o corte mesmo com o sino desligado. Um corte que
+// começou em silêncio já está no card quando o sino for ligado, e não é
+// novidade para ninguém.
+function avaliarUndercut(item) {
+  if (!item) return;
+  const cortado = estaSendoCortado(item);
+  if (cortado && !item.notified) {
+    updateEstoqueItem(item.id, { notified: true });
+    if (item.undercut) avisarUndercut(item);
+  } else if (!cortado && item.notified) {
+    updateEstoqueItem(item.id, { notified: false });
+  }
+}
+
+// avisarUndercut sai pelos mesmos canais da watchlist (ver avisar em
+// watchlist.js). A loja do concorrente vai só no Telegram: ele é lido longe
+// da tela, e o toast é lido com o card ao lado.
+function avisarUndercut(item) {
+  const maisBarato = separarAnuncios(item.lastResult).outros[0];
+  const nome = nomeVisivel(item);
+  const valores =
+    formatMoney(maisBarato.price) + ", abaixo dos seus " + formatMoney(item.precoVenda);
+
+  let telegram =
+    "<b>" + escapeTelegramHtml(nome) + "</b>: alguém está vendendo por <b>" +
+    formatMoney(maisBarato.price) + "</b>, abaixo dos seus " + formatMoney(item.precoVenda);
+  if (maisBarato.storeName) {
+    telegram += "\n\nLoja: <b>" + escapeTelegramHtml(maisBarato.storeName) + "</b>";
+  }
+  avisar(nome + ": alguém está vendendo por " + valores, telegram);
 }
 
 // buildBlocoDeMercado desenha o que se sabe do mercado agora. São três
@@ -1225,7 +1361,7 @@ function buildEstoqueCard(item) {
 
     const quando = document.createElement("span");
     quando.className = "estoque-atualizado-em";
-    paintUpdatedAt(quando, item.lastCheckedAt);
+    paintUpdatedAt(quando, quandoDoMercado(item));
     topo.appendChild(quando);
   }
 
@@ -1303,7 +1439,9 @@ function buildEstoqueCard(item) {
 function aplicarNovoPreco(id, preco, botao) {
   if (!Number.isFinite(preco) || preco <= 0) return;
 
-  const atualizado = updateEstoqueItem(id, { precoVenda: preco, notified: false });
+  const atual = loadEstoque().find((e) => e.id === id);
+  if (!atual) return;
+  const atualizado = updateEstoqueItem(id, comAvisoArmado(atual, { precoVenda: preco }));
   if (!atualizado) return;
   repintarCard(atualizado);
 
@@ -1456,8 +1594,13 @@ function renderPersonagens() {
 // todos os cards é o ponto: quais anúncios são seus muda para TODO item de
 // uma vez, e como a separação é feita no navegador (ver separarAnuncios),
 // isso não custa requisição nenhuma.
+//
+// O aviso de undercutting se rearma junto, pelo mesmo motivo do preço (ver
+// comAvisoArmado): tirar um nome da lista pode transformar um anúncio seu em
+// concorrência mais barata, e isso a tela já mostra na hora.
 function mudarPersonagens(lista) {
   salvarPersonagens(lista);
+  saveEstoque(loadEstoque().map((item) => ({ ...item, ...comAvisoArmado(item, {}) })));
   renderPersonagens();
   renderEstoque();
 }
@@ -1505,9 +1648,8 @@ function avaliarPresencaNaLoja() {
     (item) =>
       item.naLoja &&
       item.validacao === VALIDACAO_OK &&
-      item.lastResult &&
-      item.lastCheckedAt != null &&
-      item.lastCheckedAt >= limite,
+      quandoDoMercado(item) != null &&
+      quandoDoMercado(item) >= limite,
   );
   if (checados.length === 0) return null;
 
@@ -1516,8 +1658,8 @@ function avaliarPresencaNaLoja() {
   let maisRecente = 0;
   for (const item of checados) {
     if (separarAnuncios(item.lastResult).meus.length > 0) comAnuncioSeu++;
-    maisAntiga = Math.min(maisAntiga, item.lastCheckedAt);
-    maisRecente = Math.max(maisRecente, item.lastCheckedAt);
+    maisAntiga = Math.min(maisAntiga, quandoDoMercado(item));
+    maisRecente = Math.max(maisRecente, quandoDoMercado(item));
   }
 
   return { itens: checados.length, comAnuncioSeu, maisAntiga, maisRecente };
@@ -1899,12 +2041,23 @@ function montarPainelDoEstoque() {
     if (botaoLoja) {
       const atual = loadEstoque().find((e) => e.id === id);
       if (!atual) return;
+      const naLoja = !atual.naLoja;
+      // Pôr na loja é entrar no rodízio, e o teto do rodízio é conjunto com a
+      // watchlist (ver MONITOR_MAX_ITENS em monitor.js). A checagem vale até
+      // para um item ainda não validado: ele entra no rodízio sozinho assim
+      // que validar. Tirar da loja nunca é barrado.
+      if (naLoja && !podeMonitorarMais()) {
+        showToast(
+          "Já são " + MONITOR_MAX_ITENS + " itens sendo vigiados entre a watchlist e o estoque. " +
+            "Desligue algum para pôr este na loja.",
+        );
+        return;
+      }
       // Sair da loja desliga o undercutting junto: deixá-lo ligado guardaria
       // uma intenção que não vale para nada e que voltaria a valer sozinha na
       // próxima vez que o item entrasse na loja, sem o usuário pedir.
-      const naLoja = !atual.naLoja;
-      const mudancas = naLoja ? { naLoja, notified: false } : { naLoja, undercut: false, notified: false };
-      const atualizado = updateEstoqueItem(id, mudancas);
+      const mudancas = naLoja ? { naLoja } : { naLoja, undercut: false };
+      const atualizado = updateEstoqueItem(id, comAvisoArmado(atual, mudancas));
       if (!atualizado) return;
       pintarToggle(botaoLoja, atualizado.naLoja, "Na loja", "Fora da loja");
       const botaoUndercut = card.querySelector(".estoque-sino");
@@ -1918,7 +2071,7 @@ function montarPainelDoEstoque() {
     if (botaoUndercut) {
       const atual = loadEstoque().find((e) => e.id === id);
       if (!atual || !atual.naLoja) return;
-      const atualizado = updateEstoqueItem(id, { undercut: !atual.undercut, notified: false });
+      const atualizado = updateEstoqueItem(id, comAvisoArmado(atual, { undercut: !atual.undercut }));
       if (!atualizado) return;
       pintarSino(botaoUndercut, atualizado.undercut);
     }

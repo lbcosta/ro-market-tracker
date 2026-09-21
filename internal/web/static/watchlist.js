@@ -262,6 +262,13 @@ function addToWatchlist(button) {
     return;
   }
 
+  // Adicionar também é ligar, então o teto conjunto do rodízio vale aqui (ver
+  // MONITOR_MAX_ITENS em monitor.js). Com o estoque vigiando itens na loja, o
+  // teto da própria watchlist já não basta para segurá-lo. O item entra
+  // desligado em vez de ser recusado: guardar não custa consulta, e o que
+  // o teto protege é só o intervalo do revezamento.
+  const cabeNoRodizio = podeMonitorarMais();
+
   const entry = {
     id,
     server,
@@ -272,11 +279,18 @@ function addToWatchlist(button) {
     targetPrice: null,
     refineFilter,
     bonusFilters,
-    monitoring: true,
+    monitoring: cabeNoRodizio,
     notified: false,
   };
   list.push(entry);
   saveWatchlist(list);
+
+  if (!cabeNoRodizio) {
+    showToast(
+      "Adicionado desligado: já são " + MONITOR_MAX_ITENS +
+        " itens sendo vigiados entre a watchlist e o estoque. Desligue algum para vigiar este.",
+    );
+  }
 
   const container = document.getElementById("watchlist-list");
   if (!container) return;
@@ -1415,20 +1429,28 @@ function buildTelegramText(entry, minPrice, naviCommand, storeName) {
   return text;
 }
 
-// notifyHit sempre mostra o toast, toca o alerta sonoro e tenta notificar o
-// Telegram (funcionam sem nenhuma permissão) e, se o navegador suportar e
-// permitir, também dispara uma notificação nativa do sistema operacional. A
-// permissão só é pedida na hora em que ela de fato faz falta (primeiro
-// aviso), não no carregamento da página.
-async function notifyHit(entry, minPrice, naviCommand, storeName) {
+function notifyHit(entry, minPrice, naviCommand, storeName) {
   const message = isAvailabilityWatch(entry)
     ? entry.itemName + " foi encontrado no mercado por " + formatMoney(minPrice)
     : entry.itemName + " atingiu o alvo: " + formatMoney(minPrice) +
       " (alvo: " + formatMoney(entry.targetPrice) + ")";
+  avisar(message, buildTelegramText(entry, minPrice, naviCommand, storeName));
+}
+
+// avisar sempre mostra o toast, toca o alerta sonoro e tenta notificar o
+// Telegram (funcionam sem nenhuma permissão) e, se o navegador suportar e
+// permitir, também dispara uma notificação nativa do sistema operacional. A
+// permissão só é pedida na hora em que ela de fato faz falta (primeiro
+// aviso), não no carregamento da página.
+//
+// Não é só da watchlist: o estoque avisa por aqui quando cortam o seu preço
+// (ver avaliarUndercut em estoque.js). Os canais são os mesmos de propósito —
+// quem configurou o Telegram para um aviso espera recebê-lo para os dois.
+async function avisar(message, telegramText) {
   showToast(message);
   playHitSound();
 
-  notifyTelegram(buildTelegramText(entry, minPrice, naviCommand, storeName));
+  notifyTelegram(telegramText);
 
   if (!("Notification" in window)) return;
   let permission = Notification.permission;

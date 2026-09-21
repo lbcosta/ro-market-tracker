@@ -202,10 +202,11 @@ Cada card mostra:
   usuário). Ver "Validar um item" abaixo.
 - **Vendo por:**, o preço que o usuário está pedindo, editável clicando — mesmo
   gesto e mesma receita do "Alvo:" da watchlist.
-- **Na loja / Fora da loja** e **Undercutting**, ligados pelo usuário. O
-  undercutting fica desabilitado enquanto o item está fora da loja: não há o que
-  comparar com o mercado se você não está vendendo. Sair da loja desliga a flag
-  junto, para ela não voltar a valer sozinha na próxima vez que o item entrar.
+- **Na loja / Fora da loja** e o **sino** do undercutting, ligados pelo
+  usuário. O sino fica desabilitado enquanto o item está fora da loja: não há o
+  que comparar com o mercado se você não está vendendo. Sair da loja desliga o
+  sino junto, para ele não voltar a valer sozinho na próxima vez que o item
+  entrar. Ver "Undercutting ativo" abaixo.
 - A **janela do histórico** (último dia / 7 dias / 30 dias / todo o histórico),
   **por item**. Ela é por item, e não da tela, porque trocá-la custa uma consulta
   ao site: um seletor global cobraria isso de todos os itens de uma vez e
@@ -214,9 +215,9 @@ Cada card mostra:
 Adicionar, editar o preço, ligar as flags, trocar a janela e excluir são só
 `localStorage` + DOM, **sem nenhuma requisição ao GnJoy** — o que os testes
 conferem com o contador de requisições ao upstream, porque "zero requisição"
-aqui é requisito, não acaso. As únicas ações que falam com o site são o botão
-"Validar" e, indiretamente, a escolha de um candidato. Buscar preços de mercado,
-montar o histórico e avisar sobre undercutting entram nas etapas seguintes.
+aqui é requisito, não acaso. Falam com o site só os cliques em "Validar", "↻"
+e na janela do histórico, e o rodízio, que reconsulta o mercado dos itens na
+loja (ver "Undercutting ativo").
 
 #### Validar um item
 
@@ -470,10 +471,43 @@ O item achado só no histórico não paga a terceira: a validação já provou q
 ninguém está anunciando, então o resultado de mercado é semeado à mão em vez
 de ser perguntado de novo.
 
-Depois disso, o card só volta a consultar quando o usuário aperta "↻" (o
-mercado) ou troca a janela (o histórico). **O estoque ainda não participa do
-rodízio automático** — isso entra junto com o aviso de undercutting, na etapa
-seguinte.
+Depois disso, um item fora da loja só volta a consultar quando o usuário aperta
+"↻" (o mercado) ou troca a janela (o histórico). Um item **na loja** entra no
+rodízio automático, descrito a seguir.
+
+#### Undercutting ativo
+
+Os itens validados e **na loja** entram no rodízio compartilhado da watchlist
+(ver "Monitoramento e alertas"). É o mesmo relógio, com uma consulta por
+minuto no total, e não uma a mais. Cada volta consulta só o mercado do item:
+o histórico diário muda no máximo uma vez por dia, e consultá-lo a cada volta
+dobraria o custo.
+
+Com o **sino** ligado, o usuário é avisado pelos mesmos quatro canais da
+watchlist (toast, som, Telegram e notificação nativa) quando alguém **passa a**
+vender abaixo do preço dele:
+
+- **Estritamente abaixo.** Empatar no menor preço não é ser cortado. A tabela
+  já mostra isso como "empatado".
+- **Os seus anúncios não contam.** O seu anúncio antigo, mais barato que um
+  preço novo, não dispara aviso contra você mesmo.
+- **Um aviso por cruzamento.** Enquanto o corte continuar, o rodízio não repete
+  o aviso a cada volta. Quando o corte acaba e volta, sai um aviso novo.
+- **O que a tela já mostra não é novidade.** Mudar o preço, ligar o sino, pôr
+  na loja ou mexer na lista de personagens conta o estado daquele momento como
+  sabido. Quem decide está olhando para o card. É isso que deixa a estratégia
+  de segurar funcionar: anunciar acima do mercado de propósito não rende um
+  aviso a cada edição.
+
+Pôr um item na loja respeita o teto conjunto de 50 itens vigiados, e a
+watchlist passa a respeitá-lo também ao adicionar. Um item novo na watchlist
+entra desligado quando o teto está ocupado, em vez de estourá-lo.
+
+Uma consulta de fundo que falha não vira toast, porque ninguém a pediu. A vez
+do item avança mesmo assim, senão ele seria o escolhido a todo tick. A idade
+do dado mostrado vem de `mercadoEm`, e não do `lastCheckedAt`, para uma falha
+não fazer um dado velho parecer novo, inclusive como evidência do aviso de
+loja fora do ar.
 
 ### Busca
 

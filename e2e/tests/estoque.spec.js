@@ -1,10 +1,13 @@
 const { test, expect } = require("@playwright/test");
 const {
   resetPage,
+  buscar,
+  clicarWatchlistDoItem,
   contarRequisicoesAoUpstream,
   zerarContagemDoUpstream,
   falharProximasRequisicoes,
   atrasarProximasRequisicoes,
+  anunciarNoMercado,
 } = require("./helpers");
 
 // A tela é mestre-detalhe: a tabela da esquerda responde "qual item precisa de
@@ -513,8 +516,8 @@ test("quando todos os anúncios são seus, você está sozinho no mercado", asyn
   await expect(tarja(page, "Espada Primordial")).toContainText("único anunciando");
 });
 
-// O aviso que interessa a quem vende. (O alerta ativo — toast, som, Telegram
-// — é a etapa seguinte; aqui é só o que o card mostra.)
+// O aviso que interessa a quem vende, no que o card mostra. O alerta ativo
+// (toast, som, Telegram) está na seção "Undercutting ativo".
 test("o card avisa quando alguém está vendendo mais barato que você", async ({ page }) => {
   await validarItem(page, "Espada Primordial");
   const c = card(page, "Espada Primordial");
@@ -1297,4 +1300,259 @@ test("um item sem validar mostra a tarja pedindo validação", async ({ page }) 
   await expect(card(page, "Elmo Ancestral").locator(".estoque-tarja")).toHaveCount(0);
   await expect(card(page, "Elmo Ancestral").locator(".estoque-abas")).toHaveCount(0);
   await expect(card(page, "Elmo Ancestral").locator(".estoque-validar")).toBeVisible();
+});
+
+// ---------------------------------------------------------------------------
+// Undercutting ativo
+// ---------------------------------------------------------------------------
+//
+// Os itens NA LOJA entram no rodízio compartilhado (ver monitor.js), e o sino
+// avisa pelos canais da watchlist quando alguém PASSA a vender abaixo de você.
+// Os testes chamam rodarTick(true) em vez de esperar o minuto do relógio: o
+// que está em teste é o que uma volta do rodízio faz, não o relógio.
+//
+// O Elixir do Mercador tem dois anúncios nas fixtures: 1.200 z (Vendedor
+// elixir-a) e 1.500 z (Vendedor elixir-b). anunciarNoMercado troca os dois
+// por um anúncio só, do "Vendedor novo", na "Loja que acabou de abrir".
+
+const ELIXIR = { itemName: "Elixir do Mercador", itemId: 700001 };
+
+// ouvirTelegram junta o texto de cada aviso mandado ao Telegram. É o canal
+// que prova o aviso sem depender de o toast ainda estar na tela.
+function ouvirTelegram(page) {
+  const mensagens = [];
+  page.on("request", (req) => {
+    if (req.url().includes("/web/watchlist/notify-telegram")) mensagens.push(req.postDataJSON().text);
+  });
+  return mensagens;
+}
+
+async function definirPreco(page, nome, preco) {
+  const c = card(page, nome);
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator(".estoque-preco-input").fill(String(preco));
+  await c.locator(".estoque-preco-input").press("Enter");
+  await expect(c.locator(".estoque-preco-input")).toHaveCount(0);
+}
+
+async function ligarSino(page, nome) {
+  await card(page, nome).locator(".estoque-sino").click();
+  await expect(card(page, nome).locator(".estoque-sino")).toHaveAttribute("aria-pressed", "true");
+}
+
+function lerEstoque(page) {
+  return page.evaluate(() => JSON.parse(localStorage.getItem("ro-market-tracker:estoque") || "[]"));
+}
+
+// rodarUmTick roda uma volta do rodízio e espera a vez de algum item avançar.
+// Esperar pelo relógio do item, e não pelo fim do evaluate, é o que protege
+// contra um tick automático em voo: nesse caso rodarTick volta sem fazer nada.
+async function rodarUmTick(page) {
+  const vez = async () => Math.max(0, ...(await lerEstoque(page)).map((e) => e.lastCheckedAt || 0));
+  const antes = await vez();
+  await page.evaluate(() => rodarTick(true));
+  await expect.poll(vez).toBeGreaterThan(antes);
+}
+
+// Preço abaixo dos 1.200 z do concorrente, na loja, sino ligado: você está na
+// frente, e é daqui que um corte é novidade.
+async function venderNaFrente(page) {
+  await validarItem(page, "Elixir do Mercador");
+  await definirPreco(page, "Elixir do Mercador", 1100);
+  await porNaLoja(page, "Elixir do Mercador");
+  await ligarSino(page, "Elixir do Mercador");
+}
+
+// O ponto do sino: avisar quem não está olhando. Por isso o tick roda com a
+// outra aba aberta.
+test("o sino avisa quando alguém passa a vender mais barato, mesmo com a Watchlist aberta", async ({ page, request }) => {
+  const telegram = ouvirTelegram(page);
+  await venderNaFrente(page);
+
+  await anunciarNoMercado(request, { ...ELIXIR, price: 1000 });
+  await page.getByRole("link", { name: "Watchlist" }).click();
+  await expect(page.locator(".search-form")).toBeVisible();
+  await rodarUmTick(page);
+
+  const toast = page.locator(".toast").first();
+  await expect(toast).toContainText("Elixir do Mercador");
+  await expect(toast).toContainText("1.000 z");
+  await expect(toast).toContainText("1.100 z");
+
+  await expect.poll(() => telegram.length).toBe(1);
+  expect(telegram[0]).toContain("<b>Elixir do Mercador</b>");
+  expect(telegram[0]).toContain("Loja que acabou de abrir");
+});
+
+test("o aviso sai uma vez por corte, não a cada volta do rodízio", async ({ page, request }) => {
+  const telegram = ouvirTelegram(page);
+  await venderNaFrente(page);
+
+  await anunciarNoMercado(request, { ...ELIXIR, price: 1000 });
+  await rodarUmTick(page);
+  await expect.poll(() => telegram.length).toBe(1);
+
+  // O corte continua: nada de novo a dizer.
+  await rodarUmTick(page);
+  expect(telegram).toHaveLength(1);
+
+  // O corte acaba (o concorrente subiu o preço) e volta: é outro cruzamento.
+  await anunciarNoMercado(request, { ...ELIXIR, price: 1500 });
+  await rodarUmTick(page);
+  expect(telegram).toHaveLength(1);
+  await anunciarNoMercado(request, { ...ELIXIR, price: 900 });
+  await rodarUmTick(page);
+  await expect.poll(() => telegram.length).toBe(2);
+  expect(telegram[1]).toContain("900 z");
+});
+
+test("um anúncio seu mais barato não é corte", async ({ page, request }) => {
+  const telegram = ouvirTelegram(page);
+  await adicionarPersonagem(page, "Vendedor novo");
+  await venderNaFrente(page);
+
+  await anunciarNoMercado(request, { ...ELIXIR, price: 1000 });
+  await rodarUmTick(page);
+
+  expect(telegram).toHaveLength(0);
+  await expect(page.locator(".toast")).toHaveCount(0);
+});
+
+// Ligar o sino com o card já dizendo "estão vendendo mais barato" não é
+// novidade para ninguém: quem ligou acabou de ler.
+test("sem o sino, nenhum aviso; ligá-lo depois não avisa do corte já visto", async ({ page, request }) => {
+  const telegram = ouvirTelegram(page);
+  await validarItem(page, "Elixir do Mercador");
+  await definirPreco(page, "Elixir do Mercador", 1100);
+  await porNaLoja(page, "Elixir do Mercador");
+
+  await anunciarNoMercado(request, { ...ELIXIR, price: 1000 });
+  await rodarUmTick(page);
+  expect(telegram).toHaveLength(0);
+  await expect(tarja(page, "Elixir do Mercador")).toContainText("Estão vendendo mais barato");
+
+  await ligarSino(page, "Elixir do Mercador");
+  await rodarUmTick(page);
+
+  expect(telegram).toHaveLength(0);
+  await expect(page.locator(".toast")).toHaveCount(0);
+});
+
+// A estratégia de segurar anuncia acima do mercado de propósito. Um aviso a
+// cada edição tornaria o sino inútil justamente para ela.
+test("anunciar acima do mercado de propósito não gera aviso", async ({ page }) => {
+  const telegram = ouvirTelegram(page);
+  await validarItem(page, "Elixir do Mercador");
+  await definirPreco(page, "Elixir do Mercador", 1300);
+  await porNaLoja(page, "Elixir do Mercador");
+  await ligarSino(page, "Elixir do Mercador");
+
+  await rodarUmTick(page);
+
+  expect(telegram).toHaveLength(0);
+});
+
+test("só os itens na loja entram no rodízio", async ({ page, request }) => {
+  await validarItem(page, "Elixir do Mercador");
+  await zerarContagemDoUpstream(request);
+
+  await page.evaluate(() => rodarTick(true));
+
+  expect(await contarRequisicoesAoUpstream(request)).toBe(0);
+});
+
+// Uma consulta de fundo que falha não foi pedida por ninguém: nada de toast.
+// E a vez do item avança mesmo assim, senão ele seria o escolhido a todo tick.
+test("um erro no rodízio não vira toast, não trava a fila e não rejuvenesce o dado", async ({ page, request }) => {
+  await validarItem(page, "Elixir do Mercador");
+  await porNaLoja(page, "Elixir do Mercador");
+  const [antes] = await lerEstoque(page);
+
+  await falharProximasRequisicoes(request, { status: 500, times: 1 });
+  await rodarUmTick(page);
+
+  const [depois] = await lerEstoque(page);
+  expect(depois.mercadoEm).toBe(antes.mercadoEm);
+  await expect(page.locator(".toast")).toHaveCount(0);
+  await expect(tileMaisBarato(page, "Elixir do Mercador")).toContainText("1.200 z");
+});
+
+// O rodízio repinta o card a cada consulta. Sem o adiamento, o campo do preço
+// sumiria no meio da digitação.
+test("o rodízio não derruba um preço sendo digitado", async ({ page, request }) => {
+  await validarItem(page, "Elixir do Mercador");
+  await porNaLoja(page, "Elixir do Mercador");
+  const c = card(page, "Elixir do Mercador");
+  await c.locator(".estoque-preco-venda").click();
+  await c.locator(".estoque-preco-input").fill("1234");
+
+  await anunciarNoMercado(request, { ...ELIXIR, price: 1000 });
+  await rodarUmTick(page);
+
+  await expect(c.locator(".estoque-preco-input")).toHaveValue("1234");
+  await c.locator(".estoque-preco-input").press("Enter");
+  await expect(c.locator(".estoque-preco-venda")).toHaveText("Vendo por: 1.234 z");
+  // A repintura que ficou esperando saiu junto com a confirmação.
+  await expect(tileMaisBarato(page, "Elixir do Mercador")).toContainText("1.000 z");
+});
+
+// semearWatchlistVigiada grava N entradas ligadas direto no localStorage. A
+// fonte da watchlist lê de lá (ver registrarFonte em watchlist.js), então o
+// teto conjunto as enxerga mesmo com a aba Estoque aberta.
+async function semearWatchlistVigiada(page, quantidade) {
+  await page.evaluate((n) => {
+    const entradas = Array.from({ length: n }, (_, i) => ({
+      id: "NIDHOGG:" + (900000 + i),
+      server: "NIDHOGG",
+      itemId: 900000 + i,
+      itemName: "Item ficticio " + i,
+      searchName: "Item ficticio " + i,
+      mode: "price",
+      targetPrice: null,
+      refineFilter: null,
+      bonusFilters: ["", ""],
+      monitoring: true,
+      notified: false,
+      lastCheckedAt: Date.now(),
+    }));
+    localStorage.setItem("ro-market-tracker:watchlist", JSON.stringify(entradas));
+  }, quantidade);
+}
+
+test("pôr na loja respeita o teto conjunto com a watchlist", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+  await semearWatchlistVigiada(page, 50);
+
+  await card(page, "Elixir do Mercador").locator(".estoque-toggle-loja").click();
+
+  await expect(page.locator(".toast")).toContainText("50 itens sendo vigiados");
+  await expect(card(page, "Elixir do Mercador").locator(".estoque-toggle-loja")).toHaveText("Fora da loja");
+});
+
+test("com o teto ocupado pelo estoque, a watchlist adiciona desligado", async ({ page }) => {
+  await page.evaluate(() => {
+    const itens = Array.from({ length: 50 }, (_, i) => ({
+      id: "e-semeado-" + i,
+      server: "NIDHOGG",
+      nomeDigitado: "Item ficticio " + i,
+      itemName: "Item ficticio " + i,
+      searchName: "Item ficticio " + i,
+      itemId: 900000 + i,
+      svrId: 303,
+      validacao: "validado",
+      naLoja: true,
+      undercut: false,
+      lastCheckedAt: Date.now(),
+    }));
+    localStorage.setItem("ro-market-tracker:estoque", JSON.stringify(itens));
+  });
+  await page.getByRole("link", { name: "Watchlist" }).click();
+
+  await buscar(page, "Espada Primordial");
+  await clicarWatchlistDoItem(page, "Espada Primordial");
+
+  const linhaDaWatchlist = page.locator(".watchlist-row").filter({ hasText: "Espada Primordial" });
+  await expect(linhaDaWatchlist).toBeVisible();
+  await expect(linhaDaWatchlist.locator(".status-toggle")).toHaveAttribute("aria-label", "Ativar monitoramento");
+  await expect(page.locator(".toast")).toContainText("Adicionado desligado");
 });
