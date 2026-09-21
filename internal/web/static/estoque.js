@@ -305,7 +305,12 @@ function gravarSelecao(id) {
   }
 }
 
+// selecionarItem(null) volta ao resumo do estoque.
 function selecionarItem(id) {
+  // Abrir um item encerra a lista de reprecificação em lote: ela é uma sessão
+  // de trabalho sobre o resumo, e voltar a ela depois de mexer num item
+  // mostraria uma conferência feita sobre dados que o usuário acabou de mudar.
+  if (id != null) loteDeReprecificacao = null;
   gravarSelecao(id);
   for (const linha of document.querySelectorAll(".estoque-linha")) {
     linha.classList.toggle("is-selecionada", linha.dataset.id === id);
@@ -514,7 +519,12 @@ function repintarCard(item) {
     card.dataset.repintarDepois = "1";
   } else if (card) {
     card.replaceWith(buildEstoqueCard(item));
+    travarSeSuspenso();
   }
+
+  // Sem item aberto, o painel é o resumo do estoque, e a mudança deste item
+  // pode ter trocado ele de grupo.
+  if (!itemSelecionado()) renderDetalhe();
 
   renderResumoDoTopo();
   renderAvisoDeLoja();
@@ -653,8 +663,10 @@ async function consultarMercado(id, fresh = false, { deFundo = false } = {}) {
     if (!deFundo) {
       showToast(String(err.message || err).trim() || "Não foi possível consultar o mercado agora.");
     }
+    // A falha pode ter sido justamente o 429 que suspendeu o site: aí o botão
+    // fica travado como os outros (ver travarControlesDoEstoque).
     const depois = botao();
-    if (depois) depois.disabled = false;
+    if (depois) depois.disabled = siteSuspenso();
   }
 }
 
@@ -817,7 +829,7 @@ async function consultarHistorico(id, fresh = false) {
     showToast(String(err.message || err).trim() || "Não foi possível consultar o histórico agora.");
     const depois = findEstoqueCard(id);
     const seletorDepois = depois ? depois.querySelector(".estoque-janela") : null;
-    if (seletorDepois) seletorDepois.disabled = false;
+    if (seletorDepois) seletorDepois.disabled = siteSuspenso();
   }
 }
 
@@ -1318,6 +1330,17 @@ function buildEstoqueCard(item) {
   li.className = "estoque-card";
   li.dataset.id = item.id;
 
+  // A volta ao resumo precisa de um botão à vista: cadastrar um item já o
+  // abre, e sem este caminho o resumo do estoque sumiria depois do primeiro
+  // cadastro e não voltaria mais. Numa linha própria, e não no cabeçalho:
+  // lá ele tiraria espaço do nome do item, que já disputa a linha com o
+  // seletor de janela e os botões.
+  const voltar = document.createElement("button");
+  voltar.type = "button";
+  voltar.className = "estoque-voltar-resumo";
+  voltar.textContent = "← Resumo do estoque";
+  li.appendChild(voltar);
+
   // --- cabeçalho ---
   const topo = document.createElement("div");
   topo.className = "estoque-painel-topo";
@@ -1807,29 +1830,342 @@ function renderResumoDoTopo() {
   }
 }
 
-// renderDetalhe pinta o painel da direita com o item selecionado.
+function statusDoItem(item) {
+  return classificarStatus(item, { naFila: filaDeValidacao.has(item.id) }).status;
+}
+
+// abrirPrimeiroDoGrupo é o gesto de quem viu "2 perdendo" e quer resolver: as
+// pílulas do topo e as linhas do resumo levam ao primeiro item do grupo.
+function abrirPrimeiroDoGrupo(status) {
+  const alvo = loadEstoque().find((item) => statusDoItem(item) === status);
+  if (alvo) selecionarItem(alvo.id);
+}
+
+// ---------------------------------------------------------------------------
+// Resumo do estoque (nenhum item aberto)
+// ---------------------------------------------------------------------------
 //
-// Nesta etapa ele mostra o card que a tela inteira usava antes; a próxima
-// reestrutura o miolo dele em tarja de status e abas. Manter o card aqui é o
-// que permite a tabela entrar sem desligar nada do que já funcionava.
+// Com nenhum item aberto, o painel responde pelo estoque inteiro: quantos
+// itens estão em cada situação, e o que dá para fazer em lote. Tudo sai do
+// que já está guardado, sem requisição nenhuma.
+
+// Por que um item está sem dados, na forma curta do resumo. A ordem dos testes
+// é a de classificarStatus: sem validar não há mercado, e sem mercado o preço
+// não tem com o que ser comparado.
+function motivoSemDados(item) {
+  if (item.validacao === VALIDACAO_INVALIDO) return "inválido";
+  if (item.validacao !== VALIDACAO_OK) return "sem validar";
+  if (!item.lastResult) return "sem consulta ao mercado";
+  if (!item.lastResult.found) return "sem anúncios";
+  return "sem preço";
+}
+
+// O "Validar agora" do resumo só pega o que validar resolve. Um item sem preço
+// ou sem anúncios continuaria igual depois de consultar o site. Um inválido
+// já teve as duas consultas respondendo que ele não existe: repeti-las custa
+// duas requisições para ouvir o mesmo, e o que ele pede é o nome corrigido.
+function validarResolve(item) {
+  if (item.validacao === VALIDACAO_INVALIDO) return false;
+  return item.validacao !== VALIDACAO_OK || !item.lastResult;
+}
+
+// detalharSemDados junta os motivos do grupo. Quando todos têm o mesmo, a
+// contagem sairia repetida ("3 sem dados — 3 sem validar"), então vai só o
+// motivo.
+function detalharSemDados(itens) {
+  const contagem = new Map();
+  for (const item of itens) {
+    const motivo = motivoSemDados(item);
+    contagem.set(motivo, (contagem.get(motivo) || 0) + 1);
+  }
+  if (contagem.size === 1) return [...contagem.keys()][0];
+  return [...contagem].map(([motivo, n]) => n + " " + motivo).join(" · ");
+}
+
+// As frases do resumo, por grupo. "Quem anunciou antes vende primeiro" ficou
+// de fora do empate de propósito: é uma afirmação sobre a mecânica do jogo que
+// nada nos dados permite verificar.
+function textoDoGrupo(status, itens) {
+  const n = itens.length;
+  switch (status) {
+    case STATUS_PERDENDO:
+      return { texto: n + " perdendo a venda", detalhe: "" };
+    case STATUS_EMPATADO:
+      return { texto: n + (n === 1 ? " empatado" : " empatados") + " com o mais barato", detalhe: "" };
+    case STATUS_NA_FRENTE:
+      return { texto: n + " na frente", detalhe: "nada a fazer agora" };
+    case STATUS_NA_FILA:
+      return { texto: n + " na fila para validação", detalhe: "" };
+    default:
+      return { texto: n + " sem dados", detalhe: detalharSemDados(itens) };
+  }
+}
+
+function buildLinhaDoResumo(status, itens) {
+  const li = document.createElement("li");
+  li.className = "estoque-resumo-grupo estoque-resumo-grupo-" + status;
+
+  // A linha é um botão, e a ação do grupo é outro ao lado dele: um botão
+  // dentro de outro não é HTML válido, e o leitor de tela não saberia qual dos
+  // dois está sendo acionado.
+  const abrir = document.createElement("button");
+  abrir.type = "button";
+  abrir.className = "estoque-resumo-abrir";
+  abrir.dataset.status = status;
+  abrir.title = "Abrir o primeiro item do grupo";
+
+  const bolinha = document.createElement("span");
+  bolinha.className = "estoque-bolinha estoque-bolinha-" + status;
+  bolinha.setAttribute("aria-hidden", "true");
+  abrir.appendChild(bolinha);
+
+  const { texto, detalhe } = textoDoGrupo(status, itens);
+  const textoEl = document.createElement("span");
+  textoEl.className = "estoque-resumo-texto";
+  textoEl.textContent = texto;
+  abrir.appendChild(textoEl);
+  if (detalhe) {
+    const detalheEl = document.createElement("span");
+    detalheEl.className = "estoque-resumo-detalhe";
+    detalheEl.textContent = " — " + detalhe;
+    abrir.appendChild(detalheEl);
+  }
+  li.appendChild(abrir);
+
+  if (status === STATUS_PERDENDO) {
+    const botao = document.createElement("button");
+    botao.type = "button";
+    botao.className = "estoque-acao estoque-resumo-reprecificar";
+    botao.textContent = itens.length === 1 ? "Reprecificar" : "Reprecificar os " + itens.length;
+    li.appendChild(botao);
+  }
+
+  if (status === STATUS_SEM_DADOS && itens.some(validarResolve)) {
+    const botao = document.createElement("button");
+    botao.type = "button";
+    botao.className = "estoque-validar estoque-resumo-validar";
+    botao.textContent = "Validar agora";
+    li.appendChild(botao);
+  }
+  return li;
+}
+
+function buildResumoDoEstoque(lista) {
+  const bloco = document.createElement("div");
+  bloco.className = "estoque-resumo";
+
+  const topo = document.createElement("div");
+  topo.className = "estoque-painel-topo";
+  const titulo = document.createElement("h3");
+  titulo.className = "estoque-painel-nome";
+  titulo.textContent = "Nenhum item selecionado";
+  topo.appendChild(titulo);
+  const contagem = document.createElement("span");
+  contagem.className = "estoque-resumo-contagem";
+  contagem.textContent = lista.length === 1 ? "1 item" : lista.length + " itens";
+  topo.appendChild(contagem);
+  bloco.appendChild(topo);
+
+  if (loteDeReprecificacao) {
+    bloco.appendChild(buildLoteDeReprecificacao(lista));
+    return bloco;
+  }
+
+  const secao = document.createElement("h4");
+  secao.className = "estoque-resumo-titulo";
+  secao.textContent = "Resumo do estoque";
+  bloco.appendChild(secao);
+
+  const porStatus = new Map();
+  for (const item of lista) {
+    const status = statusDoItem(item);
+    if (!porStatus.has(status)) porStatus.set(status, []);
+    porStatus.get(status).push(item);
+  }
+
+  const grupos = document.createElement("ul");
+  grupos.className = "estoque-resumo-grupos";
+  for (const grupo of GRUPOS) {
+    const itens = porStatus.get(grupo.status);
+    if (itens) grupos.appendChild(buildLinhaDoResumo(grupo.status, itens));
+  }
+  bloco.appendChild(grupos);
+
+  const dica = document.createElement("p");
+  dica.className = "estoque-detalhe-vazio";
+  dica.textContent = "Selecione um item à esquerda para ver mercado, histórico, estratégias e ressalvas.";
+  bloco.appendChild(dica);
+  return bloco;
+}
+
+// ---------------------------------------------------------------------------
+// Reprecificar em lote
+// ---------------------------------------------------------------------------
+
+// O "Reprecificar os N" em andamento. O Reprecificar de um item grava o preço
+// e o copia para a área de transferência, porque quem aplica o preço na loja
+// é você, dentro do jogo. A área de transferência guarda um valor só, então N
+// preços não cabem num clique. Gravar os N de uma vez faria o programa
+// acreditar em N preços que você ainda não colou em lugar nenhum.
+//
+// Por isso o lote é uma lista de conferência: um clique por item, cada um
+// copiando o seu preço, e a linha marcada quando é feita. Em memória, e não
+// no localStorage: uma lista pela metade que voltasse depois de recarregar
+// descreveria uma sessão de trabalho que já acabou. Reabrir é de graça, e os
+// itens já reprecificados nem entram, porque deixaram de estar perdendo.
+let loteDeReprecificacao = null;
+
+function abrirLoteDeReprecificacao() {
+  const ids = loadEstoque().filter((item) => statusDoItem(item) === STATUS_PERDENDO).map((item) => item.id);
+  if (ids.length === 0) return;
+  loteDeReprecificacao = { ids, feitos: new Map() };
+  renderDetalhe();
+}
+
+function fecharLoteDeReprecificacao() {
+  loteDeReprecificacao = null;
+  renderDetalhe();
+}
+
+// O preço de cada linha é o da tarja do item (ver montarTarja), calculado na
+// hora de desenhar e não congelado ao abrir a lista: o rodízio continua
+// consultando, e um concorrente pode ter baixado o preço de novo nesse meio
+// tempo.
+function acaoDoItem(item) {
+  const statusInfo = classificarStatus(item, { naFila: filaDeValidacao.has(item.id) });
+  return montarTarja(item, calcularSugestao(item), statusInfo).acao;
+}
+
+function buildLoteDeReprecificacao(lista) {
+  const bloco = document.createElement("div");
+  bloco.className = "estoque-lote";
+
+  const itens = loteDeReprecificacao.ids
+    .map((id) => lista.find((e) => e.id === id))
+    .filter(Boolean);
+  const feitos = itens.filter((item) => loteDeReprecificacao.feitos.has(item.id)).length;
+
+  const titulo = document.createElement("h4");
+  titulo.className = "estoque-resumo-titulo";
+  titulo.textContent = "Reprecificar " + (itens.length === 1 ? "1 item" : itens.length + " itens") +
+    " · " + feitos + " de " + itens.length + (itens.length === 1 ? " feito" : " feitos");
+  bloco.appendChild(titulo);
+
+  const ajuda = document.createElement("p");
+  ajuda.className = "estoque-lote-ajuda";
+  ajuda.textContent =
+    "Cada clique grava o preço novo e o copia para você colar na sua loja dentro do jogo. " +
+    "Um item de cada vez: o jogo não recebe os preços daqui.";
+  bloco.appendChild(ajuda);
+
+  const ul = document.createElement("ul");
+  ul.className = "estoque-lote-lista";
+  for (const item of itens) {
+    const li = document.createElement("li");
+    li.className = "estoque-lote-linha";
+    li.dataset.id = item.id;
+
+    const nome = document.createElement("span");
+    nome.className = "estoque-lote-nome";
+    nome.textContent = nomeVisivel(item);
+    li.appendChild(nome);
+
+    const precos = document.createElement("span");
+    precos.className = "estoque-lote-precos";
+    li.appendChild(precos);
+
+    const feito = loteDeReprecificacao.feitos.get(item.id);
+    const acao = feito == null ? acaoDoItem(item) : null;
+    if (feito != null) {
+      li.classList.add("is-feita");
+      precos.textContent = "✓ " + formatMoney(feito);
+    } else if (acao && acao.preco != null) {
+      precos.textContent = formatMoney(item.precoVenda) + " → " + formatMoney(acao.preco);
+      const botao = document.createElement("button");
+      botao.type = "button";
+      botao.className = "estoque-acao estoque-lote-aplicar";
+      botao.dataset.preco = String(acao.preco);
+      botao.textContent = "Reprecificar";
+      li.appendChild(botao);
+    } else {
+      // O mercado mudou desde que a lista abriu: o concorrente que passou na
+      // sua frente saiu, ou subiu o preço.
+      precos.textContent = "já não precisa";
+    }
+    ul.appendChild(li);
+  }
+  bloco.appendChild(ul);
+
+  const rodape = document.createElement("div");
+  rodape.className = "estoque-lote-rodape";
+  const fechar = document.createElement("button");
+  fechar.type = "button";
+  fechar.className = "estoque-lote-fechar";
+  fechar.textContent = "Voltar ao resumo";
+  rodape.appendChild(fechar);
+  bloco.appendChild(rodape);
+  return bloco;
+}
+
+// ---------------------------------------------------------------------------
+// Suspensão
+// ---------------------------------------------------------------------------
+
+// Os controles do estoque que consultam o site. Adicionar, editar o preço,
+// pôr na loja, o sino e reprecificar são locais, e continuam livres enquanto
+// o site limita as consultas.
+const CONTROLES_QUE_CONSULTAM = [
+  "#estoque-validar-tudo",
+  "#estoque-detalhe .estoque-validar",
+  "#estoque-detalhe .estoque-atualizar",
+  "#estoque-detalhe .estoque-janela",
+  "#estoque-detalhe .estoque-escolha-ok",
+].join(", ");
+
+// travarControlesDoEstoque é chamada pelo applySuspension (activity-bar.js)
+// quando o estado muda. O painel, porém, é redesenhado o tempo todo, e cada
+// redesenho traz os botões de volta habilitados. Por isso o render também
+// passa por travarSeSuspenso, que lê o estado que o applySuspension deixou no
+// <html>.
+function travarControlesDoEstoque(suspenso) {
+  for (const el of document.querySelectorAll(CONTROLES_QUE_CONSULTAM)) el.disabled = suspenso;
+}
+
+function siteSuspenso() {
+  return document.documentElement.dataset.suspended === "1";
+}
+
+function travarSeSuspenso() {
+  if (siteSuspenso()) travarControlesDoEstoque(true);
+}
+
+// renderDetalhe pinta o painel da direita: o item selecionado ou, sem
+// seleção, o resumo do estoque inteiro.
 function renderDetalhe() {
   const painel = document.getElementById("estoque-detalhe");
   if (!painel) return;
 
+  const lista = loadEstoque();
   const id = itemSelecionado();
-  const item = id ? loadEstoque().find((e) => e.id === id) : null;
+  const item = id ? lista.find((e) => e.id === id) : null;
+
+  // Sem seleção, as pílulas do topo repetiriam o resumo que o painel já
+  // mostra, uma ao lado da outra.
+  const quadro = painel.closest(".estoque-quadro");
+  if (quadro) quadro.classList.toggle("sem-selecao", !item);
 
   painel.innerHTML = "";
-  if (!item) {
+  if (item) {
+    painel.appendChild(buildEstoqueCard(item));
+  } else if (lista.length === 0) {
     const vazio = document.createElement("p");
     vazio.className = "estoque-detalhe-vazio";
-    vazio.textContent = loadEstoque().length === 0
-      ? "Cadastre um item para começar."
-      : "Selecione um item à esquerda para ver mercado, histórico e estratégias.";
+    vazio.textContent = "Cadastre um item para começar.";
     painel.appendChild(vazio);
-    return;
+  } else {
+    painel.appendChild(buildResumoDoEstoque(lista));
   }
-  painel.appendChild(buildEstoqueCard(item));
+  travarSeSuspenso();
 }
 
 // renderEstoque reconstrói a tabela a partir do localStorage. Não dispara
@@ -1869,6 +2205,13 @@ async function validarTudo() {
     showToast("Todos os itens já estão validados.");
     return;
   }
+  await validarEmLote(pendentes);
+}
+
+// validarEmLote é o miolo do "Validar tudo" e do "Validar agora" do resumo:
+// o custo dito antes, a fila visível nas bolinhas, uma validação de cada vez.
+async function validarEmLote(pendentes) {
+  if (pendentes.length === 0) return;
 
   const minimo = pendentes.length * 2;
   const confirmado = window.confirm(
@@ -1968,14 +2311,7 @@ function montarPainelDoEstoque() {
     pilulas.addEventListener("click", (ev) => {
       const pilula = ev.target.closest(".estoque-pilula");
       if (!pilula) return;
-      // Leva ao primeiro item do grupo: é o gesto de quem viu "2 perdendo" e
-      // quer resolver.
-      const alvo = loadEstoque().find(
-        (item) =>
-          classificarStatus(item, { naFila: filaDeValidacao.has(item.id) }).status ===
-          pilula.dataset.status,
-      );
-      if (alvo) selecionarItem(alvo.id);
+      abrirPrimeiroDoGrupo(pilula.dataset.status);
     });
   }
 
@@ -1988,9 +2324,47 @@ function montarPainelDoEstoque() {
   if (!painel) return;
 
   painel.addEventListener("click", (ev) => {
+    // --- resumo do estoque (nenhum item aberto) ---
+    if (ev.target.closest(".estoque-resumo-reprecificar")) {
+      abrirLoteDeReprecificacao();
+      return;
+    }
+    if (ev.target.closest(".estoque-resumo-validar")) {
+      validarEmLote(
+        loadEstoque().filter((item) => statusDoItem(item) === STATUS_SEM_DADOS && validarResolve(item)),
+      );
+      return;
+    }
+    const aplicar = ev.target.closest(".estoque-lote-aplicar");
+    if (aplicar) {
+      const id = aplicar.closest(".estoque-lote-linha").dataset.id;
+      const preco = Number(aplicar.dataset.preco);
+      // Marca antes de aplicar: aplicarNovoPreco repinta o painel, e a linha
+      // precisa já nascer marcada nessa repintura.
+      loteDeReprecificacao.feitos.set(id, preco);
+      aplicarNovoPreco(id, preco, aplicar);
+      renderDetalhe();
+      return;
+    }
+    if (ev.target.closest(".estoque-lote-fechar")) {
+      fecharLoteDeReprecificacao();
+      return;
+    }
+    const grupo = ev.target.closest(".estoque-resumo-abrir");
+    if (grupo) {
+      abrirPrimeiroDoGrupo(grupo.dataset.status);
+      return;
+    }
+
+    // --- item aberto ---
     const card = ev.target.closest(".estoque-card");
     if (!card) return;
     const id = card.dataset.id;
+
+    if (ev.target.closest(".estoque-voltar-resumo")) {
+      selecionarItem(null);
+      return;
+    }
 
     if (ev.target.closest(".estoque-remover")) {
       removerDoEstoque(id);

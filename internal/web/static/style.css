@@ -708,6 +708,130 @@ h1 {
 
 .estoque-acao:hover { filter: brightness(1.08); }
 
+/* --- Resumo do estoque (nenhum item aberto) --- */
+
+/* Sem seleção, o painel já mostra os grupos; as pílulas do topo repetiriam o
+   mesmo resumo ao lado dele. O "Validar tudo" herda a margem que as pílulas
+   usavam para ficar à direita. */
+.estoque-quadro.sem-selecao .estoque-pilulas { display: none; }
+.estoque-quadro.sem-selecao .estoque-validar-tudo { margin-left: auto; }
+
+.estoque-resumo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.estoque-resumo-contagem { font-size: 0.8rem; color: var(--muted); }
+
+.estoque-resumo-titulo {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.estoque-resumo-grupos,
+.estoque-lote-lista {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-row);
+}
+
+.estoque-resumo-grupo,
+.estoque-lote-linha {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.estoque-resumo-grupo:last-child,
+.estoque-lote-linha:last-child { border-bottom: none; }
+
+.estoque-resumo-abrir {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding: 0.15rem 0;
+  border: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.estoque-resumo-abrir:hover .estoque-resumo-texto { text-decoration: underline; }
+.estoque-resumo-detalhe { color: var(--muted); }
+
+.estoque-lote-ajuda {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.estoque-lote-nome {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.estoque-lote-precos {
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.estoque-lote-linha.is-feita .estoque-lote-precos { color: var(--success); }
+
+.estoque-lote-rodape {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.estoque-lote-fechar {
+  padding: 0.25rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.estoque-lote-fechar:hover { border-color: var(--accent); color: var(--accent); }
+
+.estoque-lote {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.estoque-voltar-resumo {
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.estoque-voltar-resumo:hover { color: var(--accent); }
+
 /* --- Abas --- */
 
 .estoque-abas {

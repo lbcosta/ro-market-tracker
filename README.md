@@ -459,6 +459,40 @@ até 15 minutos — um item consultado há quarenta minutos não diz nada sobre
 agora. Um único item com anúncio seu já basta para não alarmar. Custo: zero
 requisição, a evidência já está no `lastResult` de cada card.
 
+#### Resumo do estoque
+
+Com nenhum item aberto, o painel da direita responde pelo estoque inteiro:
+uma linha por situação (perdendo, empatado, na frente, na fila, sem dados),
+só com as que têm itens. Clicar numa linha abre o primeiro item dela. As
+pílulas do topo somem nesse estado, porque repetiriam o resumo ao lado dele.
+O botão **← Resumo do estoque** do card volta para cá: cadastrar um item já o
+abre, e sem esse caminho o resumo sumiria depois do primeiro cadastro.
+
+Duas ações em lote:
+
+- **Reprecificar os N**, na linha de quem está perdendo. O Reprecificar de um
+  item grava o preço e o copia para a área de transferência, porque quem
+  aplica o preço na loja é você, dentro do jogo. A área de transferência
+  guarda um valor só, então o lote é uma **lista de conferência**: um clique
+  por item, cada um gravando e copiando o seu preço, e a linha marcada quando
+  é feita. Gravar os N de uma vez faria o programa acreditar em preços que
+  ninguém colou em lugar nenhum. O preço de cada linha é o da tarja do item,
+  calculado na hora, e não congelado ao abrir a lista. A lista vive em
+  memória: abrir um item a encerra, e reabri-la é de graça.
+- **Validar agora**, na linha de quem está sem dados. Ele passa pelo mesmo
+  aviso de custo e pela mesma fila do "Validar tudo", mas só para os itens que
+  validar resolve. Um item sem preço ou sem anúncios continuaria igual, e um
+  inválido já ouviu das duas consultas que não existe.
+
+Desenhar o resumo não custa requisição nenhuma, e ele acompanha o rodízio: um
+item que muda de situação muda de linha sem ninguém clicar.
+
+Durante uma suspensão, os controles do estoque que consultam o site (Validar,
+↻, a janela do histórico, a escolha de candidato e o Validar tudo) ficam
+travados. O painel é redesenhado a toda hora, então a trava é reaplicada a
+cada redesenho. Editar o preço, pôr na loja, o sino e reprecificar são locais
+e continuam livres.
+
 #### Custo de validar um item, ponta a ponta
 
 | Situação | Requisições |

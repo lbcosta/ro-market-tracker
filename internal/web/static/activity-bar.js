@@ -228,9 +228,13 @@ function applySuspension(state) {
   document.querySelectorAll("#watchlist-list button")
     .forEach((el) => { el.disabled = suspended; });
 
-  // Mesma coisa para o estoque: validar e atualizar falam com o site.
-  document.querySelectorAll("#estoque-list button, .estoque-form button, .estoque-form input")
+  // Mesma coisa para o estoque. Quais controles do painel falam com o site é
+  // o estoque.js quem sabe (ver travarControlesDoEstoque): o painel é
+  // redesenhado a toda hora, e ele precisa reaplicar a trava sozinho a cada
+  // redesenho.
+  document.querySelectorAll(".estoque-form button, .estoque-form input")
     .forEach((el) => { el.disabled = suspended; });
+  if (typeof travarControlesDoEstoque === "function") travarControlesDoEstoque(suspended);
 
   // O rodízio inteiro para, não só o da watchlist: o limite é do site, e vale
   // para toda tela que consulta (ver monitor.js).

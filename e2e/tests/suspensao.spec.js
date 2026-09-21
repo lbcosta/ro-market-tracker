@@ -110,3 +110,40 @@ test("o aviso some sozinho quando o site volta a responder", async ({ page, requ
   await buscar(page, "Espada Primordial");
   await expect(page.locator(".item-group-row")).toHaveCount(1);
 });
+
+// O painel do estoque é redesenhado a toda hora, e cada redesenho trazia os
+// botões de volta habilitados. A trava precisa valer também para o painel que
+// nasce durante a suspensão, e não só para o que existia quando ela começou.
+test("durante a suspensão, o painel do estoque trava o que consulta o site", async ({ page, request }) => {
+  await page.getByRole("link", { name: "Estoque" }).click();
+  await page.fill("#estoque-item", "Elixir do Mercador");
+  await page.press("#estoque-item", "Enter");
+  const painel = page.locator("#estoque-detalhe .estoque-card");
+  await painel.locator(".estoque-validar").click();
+  await expect(painel.locator(".estoque-status")).toHaveText("Validado");
+  // Esperar o histórico, senão a falha configurada abaixo seria consumida pela
+  // consulta dele, ainda em voo, e não pelo clique.
+  await expect
+    .poll(() => page.evaluate(() => Boolean(JSON.parse(localStorage.getItem("ro-market-tracker:estoque"))[0].historico)))
+    .toBe(true);
+
+  // Mais de uma falha, pelo mesmo motivo do teste do cronômetro: com uma só a
+  // sonda liberaria rápido demais para o teste observar a trava.
+  await falharProximasRequisicoes(request, { status: 429, times: 4, retryAfter: 0 });
+  await painel.locator(".estoque-atualizar").click();
+  await expect(page.locator(banner)).toBeVisible();
+
+  await expect(painel.locator(".estoque-atualizar")).toBeDisabled();
+  await expect(painel.locator(".estoque-validar")).toBeDisabled();
+  await expect(painel.locator(".estoque-janela")).toBeDisabled();
+  await expect(page.locator("#estoque-validar-tudo")).toBeDisabled();
+
+  // Trocar a aba do painel redesenha o card inteiro.
+  await painel.locator(".estoque-aba").filter({ hasText: "Histórico" }).click();
+  await expect(painel.locator(".estoque-atualizar")).toBeDisabled();
+  // O que é local continua livre.
+  await expect(painel.locator(".estoque-toggle-loja")).toBeEnabled();
+
+  await expect(page.locator(banner)).toBeHidden({ timeout: 15_000 });
+  await expect(painel.locator(".estoque-atualizar")).toBeEnabled();
+});

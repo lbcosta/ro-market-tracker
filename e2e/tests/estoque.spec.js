@@ -1556,3 +1556,142 @@ test("com o teto ocupado pelo estoque, a watchlist adiciona desligado", async ({
   await expect(linhaDaWatchlist.locator(".status-toggle")).toHaveAttribute("aria-label", "Ativar monitoramento");
   await expect(page.locator(".toast")).toContainText("Adicionado desligado");
 });
+
+// ---------------------------------------------------------------------------
+// Resumo do estoque (nenhum item aberto)
+// ---------------------------------------------------------------------------
+//
+// Com nenhum item aberto, o painel responde pelo estoque inteiro. Os testes
+// chegam nele pelo "← Resumo": cadastrar um item já o abre.
+
+const resumo = (page) => page.locator("#estoque-detalhe .estoque-resumo");
+const grupoDoResumo = (page, texto) => page.locator(".estoque-resumo-grupo").filter({ hasText: texto });
+
+async function voltarAoResumo(page) {
+  await page.locator(".estoque-voltar-resumo").click();
+  await expect(resumo(page)).toBeVisible();
+}
+
+// Elixir a 2.000 z contra 1.200 z da concorrência: perdendo.
+async function elixirPerdendo(page) {
+  await validarItem(page, "Elixir do Mercador");
+  await definirPreco(page, "Elixir do Mercador", 2000);
+}
+
+test("sem item aberto, o painel resume o estoque por grupo, sem consultar o site", async ({ page, request }) => {
+  await elixirPerdendo(page);
+  await adicionar(page, "Elmo Ancestral");
+  await zerarContagemDoUpstream(request);
+
+  await voltarAoResumo(page);
+
+  await expect(resumo(page)).toContainText("Nenhum item selecionado");
+  await expect(resumo(page).locator(".estoque-resumo-contagem")).toHaveText("2 itens");
+  await expect(grupoDoResumo(page, "1 perdendo a venda")).toBeVisible();
+  await expect(grupoDoResumo(page, "1 sem dados")).toContainText("sem validar");
+  // As pílulas repetiriam o resumo ao lado dele.
+  await expect(pilulas(page).first()).toBeHidden();
+  await expect(page.locator(".estoque-linha.is-selecionada")).toHaveCount(0);
+
+  expect(await contarRequisicoesAoUpstream(request)).toBe(0);
+});
+
+test("clicar num grupo do resumo abre o primeiro item dele", async ({ page }) => {
+  await elixirPerdendo(page);
+  await adicionar(page, "Elmo Ancestral");
+  await voltarAoResumo(page);
+
+  await grupoDoResumo(page, "perdendo").locator(".estoque-resumo-abrir").click();
+
+  await expect(card(page, "Elixir do Mercador")).toBeVisible();
+  await expect(linha(page, "Elixir do Mercador")).toHaveClass(/is-selecionada/);
+  await expect(pilulas(page).first()).toBeVisible();
+});
+
+// O "sem dados" mistura motivos que validar resolve e que não resolve. O
+// botão pega só os primeiros: um item sem preço continuaria igual, e um
+// inválido já ouviu duas vezes que não existe.
+test("o Validar agora do resumo valida só o que validar resolve", async ({ page }) => {
+  await validarItem(page, "Elixir do Mercador");
+  await adicionar(page, "Item Que Nao Existe");
+  await botaoValidar(page, "Item Que Nao Existe").click();
+  await expect(selo(page, "Item Que Nao Existe")).toHaveText("Inválido");
+  await adicionar(page, "Bota do Andarilho");
+  await voltarAoResumo(page);
+
+  const semDados = grupoDoResumo(page, "3 sem dados");
+  await expect(semDados).toContainText("1 sem preço");
+  await expect(semDados).toContainText("1 inválido");
+  await expect(semDados).toContainText("1 sem validar");
+
+  let texto = "";
+  page.once("dialog", (d) => {
+    texto = d.message();
+    d.accept();
+  });
+  await semDados.locator(".estoque-resumo-validar").click();
+
+  expect(texto).toContain("Validar 1 item");
+  await expect(contraOMercado(page, "Bota do Andarilho")).toHaveText("sem anúncios", { timeout: 20000 });
+  await expect(contraOMercado(page, "Item Que Nao Existe")).toHaveText("sem validar");
+});
+
+// A área de transferência guarda um valor só. Por isso o lote é uma lista de
+// conferência: um clique por item, cada um gravando e copiando o seu preço.
+test("reprecificar em lote é uma lista, e só grava o que foi clicado", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await elixirPerdendo(page);
+  await validarItem(page, "Espada Primordial");
+  await definirPreco(page, "Espada Primordial", 200000000);
+  await voltarAoResumo(page);
+
+  await grupoDoResumo(page, "2 perdendo a venda").locator(".estoque-resumo-reprecificar").click();
+
+  const linhaDoLote = (nome) => page.locator(".estoque-lote-linha").filter({ hasText: nome });
+  await expect(page.locator(".estoque-lote-linha")).toHaveCount(2);
+  await expect(linhaDoLote("Elixir do Mercador")).toContainText("2.000 z → 1.199 z");
+  await expect(linhaDoLote("Espada Primordial")).toContainText("200.000.000 z → 129.999.998 z");
+  // Abrir a lista não grava nada.
+  await expect(linha(page, "Elixir do Mercador").locator(".estoque-col-preco")).toHaveText("2.000 z");
+
+  await linhaDoLote("Elixir do Mercador").locator(".estoque-lote-aplicar").click();
+
+  await expect(linhaDoLote("Elixir do Mercador")).toHaveClass(/is-feita/);
+  await expect(linhaDoLote("Elixir do Mercador")).toContainText("✓ 1.199 z");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("1199");
+  await expect(linha(page, "Elixir do Mercador").locator(".estoque-col-preco")).toHaveText("1.199 z");
+  await expect(page.locator(".estoque-lote .estoque-resumo-titulo")).toContainText("1 de 2 feitos");
+  // O outro continua como estava, esperando o clique dele.
+  await expect(linha(page, "Espada Primordial").locator(".estoque-col-preco")).toHaveText("200.000.000 z");
+
+  await page.locator(".estoque-lote-fechar").click();
+  await expect(grupoDoResumo(page, "1 perdendo a venda")).toBeVisible();
+});
+
+test("abrir um item encerra a lista de reprecificação", async ({ page }) => {
+  await elixirPerdendo(page);
+  await voltarAoResumo(page);
+  await grupoDoResumo(page, "perdendo").locator(".estoque-resumo-reprecificar").click();
+  await expect(page.locator(".estoque-lote")).toBeVisible();
+
+  await abrir(page, "Elixir do Mercador");
+  await voltarAoResumo(page);
+
+  await expect(page.locator(".estoque-lote")).toHaveCount(0);
+  await expect(grupoDoResumo(page, "1 perdendo a venda")).toBeVisible();
+});
+
+// O rodízio continua consultando com o resumo aberto, e um item que muda de
+// situação precisa mudar de grupo sem ninguém clicar em nada.
+test("o resumo acompanha o rodízio", async ({ page, request }) => {
+  await validarItem(page, "Elixir do Mercador");
+  await definirPreco(page, "Elixir do Mercador", 1100);
+  await porNaLoja(page, "Elixir do Mercador");
+  await voltarAoResumo(page);
+  await expect(grupoDoResumo(page, "1 na frente")).toBeVisible();
+
+  await anunciarNoMercado(request, { ...ELIXIR, price: 1000 });
+  await rodarUmTick(page);
+
+  await expect(grupoDoResumo(page, "1 perdendo a venda")).toBeVisible();
+});
